@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import re
 
-
 _DOWNLOAD_RE = re.compile(
     r"""
     \{download\}                   # role marker

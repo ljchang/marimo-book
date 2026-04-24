@@ -8,7 +8,6 @@ from marimo_book.transforms.link_rewrites import (
     rewrite_parent_image_paths,
 )
 
-
 # --- rewrite_ipynb_links -----------------------------------------------------
 
 

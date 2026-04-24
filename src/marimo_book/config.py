@@ -18,7 +18,7 @@ The discriminator inspects which key is present (``file``, ``url``, or
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
@@ -129,7 +129,7 @@ class SectionEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     section: str
-    children: list["TocEntry"] = Field(default_factory=list)
+    children: list[TocEntry] = Field(default_factory=list)
 
 
 def _entry_discriminator(v: Any) -> str | None:
@@ -153,11 +153,9 @@ def _entry_discriminator(v: Any) -> str | None:
 
 
 TocEntry = Annotated[
-    Union[
-        Annotated[FileEntry, Tag("file")],
-        Annotated[UrlEntry, Tag("url")],
-        Annotated[SectionEntry, Tag("section")],
-    ],
+    Annotated[FileEntry, Tag("file")]
+    | Annotated[UrlEntry, Tag("url")]
+    | Annotated[SectionEntry, Tag("section")],
     Discriminator(_entry_discriminator),
 ]
 
@@ -201,6 +199,12 @@ class Book(BaseModel):
 
     # analytics
     analytics: Analytics = Field(default_factory=Analytics)
+
+    # Opt-in external-link checker. When true, the generated mkdocs.yml adds
+    # the ``htmlproofer`` plugin, which HEAD-checks every <a href> and
+    # <img src> at build time against the live web. Slow; keep off in CI
+    # unless you have a reason. Requires: ``pip install marimo-book[linkcheck]``.
+    check_external_links: bool = False
 
     # render defaults
     defaults: Defaults = Field(default_factory=Defaults)

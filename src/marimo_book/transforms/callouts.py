@@ -55,11 +55,7 @@ def render_callout_html(raw_html: str) -> str | None:
     # Material's search indexer and renders identically under the slate
     # theme. The block-level form is more robust than the inline ``!!!``
     # form when the body contains HTML or multiple paragraphs.
-    return (
-        f'<div class="admonition {admon_type} marimo-book-callout">\n'
-        f"{body_inner}\n"
-        "</div>"
-    )
+    return f'<div class="admonition {admon_type} marimo-book-callout">\n{body_inner}\n</div>'
 
 
 # --- helpers -----------------------------------------------------------------

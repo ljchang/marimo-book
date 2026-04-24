@@ -7,14 +7,13 @@ generator land.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import typer
 from pydantic import ValidationError
-
-import shutil
-import subprocess
-import sys
 
 from marimo_book import __version__
 from marimo_book.config import load_book
@@ -78,8 +77,7 @@ def new_book(
     scaffold_src = Path(__file__).parent / "assets" / "scaffold"
     if not scaffold_src.is_dir():
         typer.echo(
-            f"error: scaffold assets missing at {scaffold_src}. "
-            f"This is a packaging bug.",
+            f"error: scaffold assets missing at {scaffold_src}. This is a packaging bug.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -287,9 +285,7 @@ def check(
 ) -> None:
     """Validate ``book.yml`` and linked content without building."""
     book = _load_or_exit(book_file)
-    typer.echo(
-        f"OK: loaded '{book.title}' with {_count_toc(book.toc)} TOC entries"
-    )
+    typer.echo(f"OK: loaded '{book.title}' with {_count_toc(book.toc)} TOC entries")
     if strict:
         typer.echo("[stub] --strict content checks not yet implemented")
 
@@ -313,9 +309,7 @@ def clean(
 ) -> None:
     """Remove build artifacts (``_site/``, ``_site_src/``, cache)."""
     book_dir = book_file.resolve().parent
-    site_dir = (
-        output.resolve() if output.is_absolute() else (book_dir / output).resolve()
-    )
+    site_dir = output.resolve() if output.is_absolute() else (book_dir / output).resolve()
     targets = [
         site_dir,
         book_dir / "_site_src",

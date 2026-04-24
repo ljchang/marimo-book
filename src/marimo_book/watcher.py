@@ -21,15 +21,15 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import yaml
 from pydantic import ValidationError
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from .config import Book, load_book
+from .config import load_book
 from .preprocessor import BuildReport, Preprocessor
 
 # File extensions that, when changed under ``content/``, trigger a rebuild.
@@ -125,16 +125,13 @@ class RebuildHandler(FileSystemEventHandler):
             return
 
         try:
-            report = Preprocessor(book, book_dir=self.book_dir).build(
-                out_dir=self.site_src
-            )
+            report = Preprocessor(book, book_dir=self.book_dir).build(out_dir=self.site_src)
         except Exception as exc:  # noqa: BLE001 — keep the watcher alive
             self._emit_error(f"preprocessor crashed: {exc.__class__.__name__}: {exc}")
             return
 
         if self.on_report is not None:
             self.on_report(report)
-
 
     def _emit_error(self, message: str) -> None:
         if self.on_report is None:

@@ -87,9 +87,7 @@ def _raw_url(book: Book, source_posix: str) -> str | None:
     if owner_repo is None:
         return None
     owner, repo = owner_repo
-    return (
-        f"https://raw.githubusercontent.com/{owner}/{repo}/{book.branch}/{source_posix}"
-    )
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{book.branch}/{source_posix}"
 
 
 def _owner_repo(repo_url: str | None) -> tuple[str, str] | None:

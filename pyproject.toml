@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "marimo-book"
-version = "0.1.0.dev0"
+version = "0.1.0a1"
 description = "Build clean, searchable static books from marimo notebooks and markdown"
 readme = "README.md"
 license = "MIT"
@@ -48,6 +48,11 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.4",
 ]
+# Opt-in external link checking during `marimo-book build`. Enable via
+# `check_external_links: true` in book.yml and install this extra.
+linkcheck = [
+    "mkdocs-htmlproofer-plugin>=1.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/ljchang/marimo-book"
@@ -60,8 +65,9 @@ marimo-book = "marimo_book.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/marimo_book"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/marimo_book/assets" = "marimo_book/assets"
+# Non-Python files under the package (stylesheets, JS shim, scaffold
+# templates with dot-prefixed entries like .github/ and .gitignore) are
+# included by hatch's default package inclusion. No force-include needed.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -70,7 +76,21 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Scaffold templates (seed files for `marimo-book new`) and marimo fixtures
+# intentionally contain patterns that aren't valid in normal Python code —
+# bare expressions as cell outputs, for example. Skip them so ruff doesn't
+# second-guess them.
+extend-exclude = [
+    "src/marimo_book/assets/scaffold/**/*.py",
+    "tests/fixtures/**/*.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N"]
-ignore = ["E501"]  # long lines — ruff format handles most
+ignore = [
+    "E501",  # long lines — ruff format handles most
+    # Typer requires `typer.Option(...)` / `typer.Argument(...)` in argument
+    # defaults. This is documented and idiomatic; B008's concern about
+    # "functions called in defaults" doesn't apply to typer sentinels.
+    "B008",
+]

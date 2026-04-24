@@ -73,9 +73,7 @@ def export_notebook(py_path: Path, *, include_outputs: bool = True) -> ExportedN
         # because the preprocessor then emits the error cell visibly.
         stderr = (result.stderr or "").strip()
         if result.returncode != 0 and not tmp_out.exists():
-            raise RuntimeError(
-                f"marimo export ipynb failed for {py_path}:\n{stderr[-400:]}"
-            )
+            raise RuntimeError(f"marimo export ipynb failed for {py_path}:\n{stderr[-400:]}")
         nb = json.loads(tmp_out.read_text(encoding="utf-8"))
     finally:
         if tmp_out.exists():
@@ -150,9 +148,7 @@ def _render_markdown_cell(cell: dict, *, strip_duplicate_title: bool) -> str:
     # markdown cell because book.yml already renders authors in the page
     # header. Apply to every markdown cell; the pattern is narrow enough.
     lines = [
-        line
-        for line in src.split("\n")
-        if not re.match(r"^\s*\*Written [Bb]y\s+.+\*\s*$", line)
+        line for line in src.split("\n") if not re.match(r"^\s*\*Written [Bb]y\s+.+\*\s*$", line)
     ]
     return "\n".join(lines).strip("\n")
 
@@ -165,12 +161,7 @@ def _render_code_cell(cell: dict, *, widget_defaults: dict | None = None) -> str
         widget_defaults=widget_defaults,
     )
 
-    hide_code = (
-        cell.get("metadata", {})
-        .get("marimo", {})
-        .get("config", {})
-        .get(_HIDE_CODE, False)
-    )
+    hide_code = cell.get("metadata", {}).get("marimo", {}).get("config", {}).get(_HIDE_CODE, False)
     # Cells with hide_code=True AND no meaningful output are noise (typical
     # of the generated import cell). Drop them entirely.
     if hide_code and not outputs_md.strip():
@@ -192,9 +183,7 @@ def _render_outputs(
 ) -> str:
     rendered: list[str] = []
     for out in outputs:
-        text = _render_single_output(
-            out, cell_source=cell_source, widget_defaults=widget_defaults
-        )
+        text = _render_single_output(out, cell_source=cell_source, widget_defaults=widget_defaults)
         if text:
             rendered.append(text)
     return "\n\n".join(rendered)
@@ -223,9 +212,7 @@ def _render_single_output(
 
     if ot in {"display_data", "execute_result"}:
         data = out.get("data", {}) or {}
-        return _render_mime_bundle(
-            data, cell_source=cell_source, widget_defaults=widget_defaults
-        )
+        return _render_mime_bundle(data, cell_source=cell_source, widget_defaults=widget_defaults)
 
     return ""
 
@@ -297,11 +284,7 @@ def _render_image(payload: str, mime: str) -> str:
     # through as raw bytes string.
     if not _looks_like_base64(payload):
         payload = base64.b64encode(payload.encode("utf-8")).decode("ascii")
-    return (
-        f'<div class="marimo-book-output">'
-        f'<img src="data:{mime};base64,{payload}" />'
-        f"</div>"
-    )
+    return f'<div class="marimo-book-output"><img src="data:{mime};base64,{payload}" /></div>'
 
 
 def _html_pre(text: str, *, extra_class: str = "") -> str:

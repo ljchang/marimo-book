@@ -73,9 +73,7 @@ def test_new_force_overrides_non_empty_dir(runner: CliRunner, tmp_path: Path) ->
 
 def _make_dummy_book(tmp_path: Path) -> Path:
     """Write a minimal book.yml and fake build artifacts."""
-    (tmp_path / "book.yml").write_text(
-        "title: T\ntoc:\n  - file: content/x.md\n"
-    )
+    (tmp_path / "book.yml").write_text("title: T\ntoc:\n  - file: content/x.md\n")
     (tmp_path / "content").mkdir()
     (tmp_path / "content" / "x.md").write_text("# x")
     # Fake build artifacts
@@ -98,9 +96,7 @@ def test_clean_removes_all_build_dirs(runner: CliRunner, tmp_path: Path) -> None
 
 
 def test_clean_with_nothing_to_remove(runner: CliRunner, tmp_path: Path) -> None:
-    (tmp_path / "book.yml").write_text(
-        "title: T\ntoc:\n  - file: content/x.md\n"
-    )
+    (tmp_path / "book.yml").write_text("title: T\ntoc:\n  - file: content/x.md\n")
     (tmp_path / "content").mkdir()
     (tmp_path / "content" / "x.md").write_text("")
     result = runner.invoke(app, ["clean", "-b", str(tmp_path / "book.yml")])

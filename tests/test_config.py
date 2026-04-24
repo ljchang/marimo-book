@@ -13,9 +13,7 @@ from marimo_book.config import Book, FileEntry, SectionEntry, UrlEntry, load_boo
 
 def test_minimal_book_validates(tmp_path: Path) -> None:
     book_yml = tmp_path / "book.yml"
-    book_yml.write_text(
-        yaml.safe_dump({"title": "Minimal", "toc": [{"file": "intro.md"}]})
-    )
+    book_yml.write_text(yaml.safe_dump({"title": "Minimal", "toc": [{"file": "intro.md"}]}))
     book = load_book(book_yml)
     assert book.title == "Minimal"
     assert len(book.toc) == 1
@@ -50,9 +48,7 @@ def test_nested_toc_discriminates_entries(tmp_path: Path) -> None:
 
 def test_unknown_top_level_key_rejected(tmp_path: Path) -> None:
     book_yml = tmp_path / "book.yml"
-    book_yml.write_text(
-        yaml.safe_dump({"title": "X", "toc": [{"file": "a.md"}], "ooga": 1})
-    )
+    book_yml.write_text(yaml.safe_dump({"title": "X", "toc": [{"file": "a.md"}], "ooga": 1}))
     with pytest.raises(ValidationError):
         load_book(book_yml)
 
@@ -87,13 +83,9 @@ def test_defaults_mode_static_only_in_v01() -> None:
     assert b.defaults.mode == "static"
 
     with pytest.raises(ValidationError):
-        Book.model_validate(
-            {"title": "T", "toc": [{"file": "a.md"}], "defaults": {"mode": "wasm"}}
-        )
+        Book.model_validate({"title": "T", "toc": [{"file": "a.md"}], "defaults": {"mode": "wasm"}})
 
 
 def test_toc_entry_must_pick_one_shape() -> None:
     with pytest.raises(ValidationError):
-        Book.model_validate(
-            {"title": "T", "toc": [{"unknown_kind": "oops"}]}
-        )
+        Book.model_validate({"title": "T", "toc": [{"unknown_kind": "oops"}]})

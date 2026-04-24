@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import re
 
-
 # ``[text](target)`` where target is an in-tree ``.ipynb`` reference (not an
 # absolute URL and not a fragment-only link). Captures the text, path, and
 # trailing fragment/query so we can stitch the replacement back together.
@@ -85,9 +84,7 @@ def rewrite_parent_image_paths(markdown: str) -> str:
     HTML attributes ``src="../images/foo.png"`` / ``href="../images/..."``.
     """
     markdown = _PARENT_IMAGE_MD_RE.sub(lambda m: m.group("prefix") + "images/", markdown)
-    markdown = _PARENT_IMAGE_HTML_RE.sub(
-        lambda m: m.group("prefix") + "images/", markdown
-    )
+    markdown = _PARENT_IMAGE_HTML_RE.sub(lambda m: m.group("prefix") + "images/", markdown)
     return markdown
 
 

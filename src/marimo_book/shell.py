@@ -78,6 +78,22 @@ def _build_config(
 
     cfg["markdown_extensions"] = _markdown_extensions()
 
+    # Plugins: mkdocs's default is just `search`. Add `htmlproofer` when the
+    # book opts into external-link checking. `htmlproofer` requires the
+    # optional ``marimo-book[linkcheck]`` extra; mkdocs will fail fast with a
+    # clear error if the user enables the flag without installing it.
+    plugins: list = ["search"]
+    if book.check_external_links:
+        plugins.append(
+            {
+                "htmlproofer": {
+                    "raise_error": True,
+                    "validate_external_urls": True,
+                }
+            }
+        )
+    cfg["plugins"] = plugins
+
     # Analytics
     if book.analytics.provider != "none" and book.analytics.property:
         cfg.setdefault("extra", {})

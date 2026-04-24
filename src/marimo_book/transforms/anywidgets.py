@@ -63,9 +63,7 @@ def rewrite_anywidget_html(
         return raw_html
 
     soup = BeautifulSoup(raw_html, "lxml")
-    classes_used, literal_state = (
-        _extract_widget_state(cell_source) if cell_source else ([], {})
-    )
+    classes_used, literal_state = _extract_widget_state(cell_source) if cell_source else ([], {})
     defaults: dict = {}
     if widget_defaults:
         for cls in classes_used:
@@ -109,7 +107,13 @@ def _rewrap_anywidget(
     it calls ``model.get("key")``.
     """
     div = soup.new_tag("div", attrs={"class": "marimo-book-anywidget"})
-    for attr in ("data-js-url", "data-js-hash", "data-initial-value", "data-model-id", "data-label"):
+    for attr in (
+        "data-js-url",
+        "data-js-hash",
+        "data-initial-value",
+        "data-model-id",
+        "data-label",
+    ):
         val = node.get(attr)
         if val is not None:
             div[attr] = val
@@ -212,7 +216,7 @@ def _literal_value(node: ast.expr):
         return out
     if isinstance(node, ast.Dict):
         out_d: dict = {}
-        for k, v in zip(node.keys, node.values):
+        for k, v in zip(node.keys, node.values, strict=True):
             if not isinstance(k, ast.Constant) or not isinstance(k.value, str):
                 return _SENTINEL
             lv = _literal_value(v)
@@ -233,12 +237,9 @@ def _handle_ui_wrapper(wrapper: Tag) -> None:
     """
     descendants = list(wrapper.find_all(True))
     has_mount = any(
-        d.name == "div" and "marimo-book-anywidget" in (d.get("class") or [])
-        for d in descendants
+        d.name == "div" and "marimo-book-anywidget" in (d.get("class") or []) for d in descendants
     )
-    non_control_descendants = [
-        d for d in descendants if d.name not in _STANDALONE_CONTROLS
-    ]
+    non_control_descendants = [d for d in descendants if d.name not in _STANDALONE_CONTROLS]
     if has_mount or non_control_descendants:
         wrapper.unwrap()
     else:

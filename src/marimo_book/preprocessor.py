@@ -89,9 +89,7 @@ class Preprocessor:
         self._write_defaults(docs_dir)
 
         file_entries = _iter_file_entries(self.book.toc)
-        md_basenames = {
-            _doc_relpath_for(e.file).with_suffix("").name for e in file_entries
-        }
+        md_basenames = {_doc_relpath_for(e.file).with_suffix("").name for e in file_entries}
 
         for entry in file_entries:
             try:
@@ -104,9 +102,7 @@ class Preprocessor:
                 )
                 report.pages += 1
             except Exception as exc:  # noqa: BLE001
-                report.errors.append(
-                    f"{entry.file}: {exc.__class__.__name__}: {exc}"
-                )
+                report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
 
         emit_mkdocs_yml(
             self.book,
@@ -139,9 +135,7 @@ class Preprocessor:
         extra_css = (assets_root / "extra.css").read_text(encoding="utf-8")
         if self.book.theme.palette.primary or self.book.theme.palette.accent:
             extra_css = _inject_palette(extra_css, self.book)
-        (docs_dir / "stylesheets" / "extra.css").write_text(
-            extra_css, encoding="utf-8"
-        )
+        (docs_dir / "stylesheets" / "extra.css").write_text(extra_css, encoding="utf-8")
 
         shutil.copy(assets_root / "mathjax.js", docs_dir / "javascripts" / "mathjax.js")
         shutil.copy(

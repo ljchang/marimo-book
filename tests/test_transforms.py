@@ -68,8 +68,8 @@ term
 def test_callout_html_info_to_admonition() -> None:
     raw = (
         "<marimo-callout-output "
-        'data-html=\'"&lt;span class=\\&quot;markdown prose dark:prose-invert contents\\&quot;&gt;'
-        '&lt;span class=\\&quot;paragraph\\&quot;&gt;Hello&lt;/span&gt;&lt;/span&gt;"\' '
+        "data-html='\"&lt;span class=\\&quot;markdown prose dark:prose-invert contents\\&quot;&gt;"
+        "&lt;span class=\\&quot;paragraph\\&quot;&gt;Hello&lt;/span&gt;&lt;/span&gt;\"' "
         "data-kind='\"info\"'></marimo-callout-output>"
     )
     out = render_callout_html(raw)
@@ -138,6 +138,6 @@ def test_simple_notebook_renders_expected_sections() -> None:
     md = cells_to_markdown(exp)
     assert "# Simple Notebook" in md
     assert "```python\nx = 2 + 3" in md  # code fence visible
-    assert 'admonition info marimo-book-callout' in md  # callout translated
+    assert "admonition info marimo-book-callout" in md  # callout translated
     # The hidden import cell should not leak into the output.
     assert "import marimo as mo" not in md

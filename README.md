@@ -39,6 +39,11 @@ cd mybook
 
 # Live-reload dev server (http://127.0.0.1:8000/)
 marimo-book serve
+#
+# Note on macOS: mkdocs's browser auto-reload is flaky on some
+# macOS setups. If the browser doesn't refresh automatically after a
+# save, hard-refresh (Cmd-R). The preprocessor + rebuild are
+# reliable; only the browser push is affected.
 
 # One-shot static build (emits ./_site/)
 marimo-book build
@@ -148,6 +153,25 @@ field.
 - `../images/` → `images/` relative-path fixup when `content/` is flattened
 - First-code-cell hiding (the setup-imports convention) — opt out via
   `defaults.hide_first_code_cell: false`
+
+## Broken-link checking
+
+`mkdocs build --strict` (use `marimo-book build --strict`) already fails on
+broken **in-tree** links and anchors. For external URLs and image `src`
+attributes, opt into the `htmlproofer` plugin:
+
+```yaml
+# book.yml
+check_external_links: true
+```
+
+```bash
+pip install 'marimo-book[linkcheck]'
+marimo-book build --strict
+```
+
+External link checking hits the live web, so it's slow (~1–3 s per link).
+Keep it off on CI unless you're cutting a release.
 
 **Not in v0.1 (planned):**
 

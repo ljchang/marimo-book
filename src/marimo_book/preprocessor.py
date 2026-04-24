@@ -78,9 +78,12 @@ class Preprocessor:
         else:
             site_dir = Path(site_dir).resolve()
 
-        # Clean staging tree — always rebuild in v0.1.
-        if docs_dir.exists():
-            shutil.rmtree(docs_dir)
+        # Stage into the existing docs tree in place — critical for
+        # ``marimo-book serve``: mkdocs's livereload tracks individual file
+        # mtimes, and wholesale rmtree + recreate was making it miss
+        # updates. Stale files from a previous build (entries removed from
+        # the TOC) will linger; users should ``marimo-book clean`` to start
+        # fresh, or rely on ``build --clean`` when cutting a release.
         docs_dir.mkdir(parents=True, exist_ok=True)
 
         report = BuildReport()

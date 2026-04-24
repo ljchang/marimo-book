@@ -27,6 +27,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,10 +63,13 @@ def export_notebook(py_path: Path, *, include_outputs: bool = True) -> ExportedN
     if include_outputs:
         cmd.append("--include-outputs")
 
-    # Write to a temp file inside the same parent so relative paths inside
-    # the notebook resolve the same way they do during interactive use.
-    tmp_out = py_path.with_suffix(".marimo_book.tmp.ipynb")
-    try:
+    # Route the temp .ipynb through a system temp dir so `marimo-book serve`'s
+    # watcher can never see creates/deletes happening in the source tree.
+    # Marimo uses the ``.py``'s own path as the working directory for cell
+    # execution regardless of where the output file lands, so relative
+    # imports inside the notebook still resolve correctly.
+    with tempfile.TemporaryDirectory(prefix="marimo_book_") as tmp_dir:
+        tmp_out = Path(tmp_dir) / f"{py_path.stem}.ipynb"
         cmd.extend(["-o", str(tmp_out)])
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         # marimo exits non-zero when *some* cells fail to execute but still
@@ -75,9 +79,6 @@ def export_notebook(py_path: Path, *, include_outputs: bool = True) -> ExportedN
         if result.returncode != 0 and not tmp_out.exists():
             raise RuntimeError(f"marimo export ipynb failed for {py_path}:\n{stderr[-400:]}")
         nb = json.loads(tmp_out.read_text(encoding="utf-8"))
-    finally:
-        if tmp_out.exists():
-            tmp_out.unlink()
 
     return ExportedNotebook(
         source=py_path,

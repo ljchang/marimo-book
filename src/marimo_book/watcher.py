@@ -19,6 +19,7 @@ Kept deliberately simple for v0.1:
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 from collections.abc import Callable
@@ -37,9 +38,23 @@ from .preprocessor import BuildReport, Preprocessor
 # notebook's own side-effects don't bounce the build.
 _TRACKED_SUFFIXES = {".md", ".py", ".yml", ".yaml", ".bib"}
 
-# Directory names that never warrant a rebuild — marimo's session cache,
-# Python bytecode, editor swap dirs.
-_IGNORED_DIR_NAMES = {"__marimo__", "__pycache__", ".ipynb_checkpoints"}
+# Directory names that never warrant a rebuild.
+#
+# - ``__marimo__`` / ``__pycache__`` / ``.ipynb_checkpoints`` — editor /
+#   runtime caches.
+# - ``_site`` / ``_site_src`` / ``.marimo_book_cache`` — **our own build
+#   output**. Without these, macOS FSEvents propagates events for inner
+#   writes up to the non-recursive book_dir watch and the preprocessor
+#   rebuilds itself in a loop.
+_IGNORED_DIR_NAMES = {
+    "__marimo__",
+    "__pycache__",
+    ".ipynb_checkpoints",
+    "_site",
+    "_site_src",
+    ".marimo_book_cache",
+    ".git",
+}
 
 
 class RebuildHandler(FileSystemEventHandler):
@@ -65,6 +80,14 @@ class RebuildHandler(FileSystemEventHandler):
         self._last_event_time = 0.0
         self._timer: threading.Timer | None = None
 
+        # Content-hash dedupe table. Marimo's ``export ipynb`` bumps the
+        # source ``.py``'s mtime during every read even when the contents
+        # are unchanged — without content-hashing, every rebuild fires a
+        # fresh watchdog event on the file it just exported, trapping
+        # ``marimo-book serve`` in an infinite rebuild loop.
+        self._source_hashes: dict[str, bytes] = {}
+        self._hash_lock = threading.Lock()
+
     # --- watchdog entry points ------------------------------------------------
 
     def on_modified(self, event: FileSystemEvent) -> None:
@@ -87,12 +110,40 @@ class RebuildHandler(FileSystemEventHandler):
         path = Path(getattr(event, "dest_path", None) or event.src_path)
         if not self._is_tracked(path):
             return
+        # Deduplicate by content hash — marimo's `export ipynb` touches the
+        # source .py's mtime even on pure-read, which would otherwise retrigger
+        # our own rebuilds infinitely.
+        if not self._content_changed(path):
+            return
         with self._lock:
             self._last_event_time = time.time()
             if self._timer is None:
                 self._timer = threading.Timer(self.debounce, self._rebuild)
                 self._timer.daemon = True
                 self._timer.start()
+
+    def _content_changed(self, path: Path) -> bool:
+        """True iff the file's contents differ from the last-seen hash.
+
+        Deleted or unreadable files count as "changed" so the rebuild still
+        runs (the preprocessor will report the missing file). The
+        dedupe-by-hash filter is the fix for marimo's mtime-touch-on-read
+        behaviour that otherwise spins the watcher in a rebuild loop.
+        """
+        try:
+            content = path.read_bytes()
+        except (FileNotFoundError, IsADirectoryError):
+            return True  # deleted / became a dir — let the rebuild handle it
+        except OSError:
+            return True  # permission or other transient — don't swallow
+        digest = hashlib.sha1(content, usedforsecurity=False).digest()
+        key = str(path.resolve())
+        with self._hash_lock:
+            prev = self._source_hashes.get(key)
+            if prev == digest:
+                return False
+            self._source_hashes[key] = digest
+        return True
 
     def _is_tracked(self, path: Path) -> bool:
         if path.suffix.lower() not in _TRACKED_SUFFIXES:

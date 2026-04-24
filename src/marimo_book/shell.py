@@ -57,6 +57,8 @@ def _build_config(
         "docs_dir": str(docs_dir),
         "site_dir": str(site_dir),
     }
+    if book.url:
+        cfg["site_url"] = book.url
     if book.description:
         cfg["site_description"] = book.description
     if book.repo:
@@ -78,11 +80,23 @@ def _build_config(
 
     cfg["markdown_extensions"] = _markdown_extensions()
 
-    # Plugins: mkdocs's default is just `search`. Add `htmlproofer` when the
-    # book opts into external-link checking. `htmlproofer` requires the
-    # optional ``marimo-book[linkcheck]`` extra; mkdocs will fail fast with a
-    # clear error if the user enables the flag without installing it.
+    # Plugins: mkdocs's default is just `search`. Opt-in plugins require
+    # matching ``marimo-book[...]`` extras; mkdocs fails fast with a clear
+    # error if a flag is enabled without its dep installed.
     plugins: list = ["search"]
+    if book.social_cards:
+        # Material's ``social`` plugin renders a PNG OG preview per page
+        # and injects the matching <meta> tags. Palette colours come from
+        # the theme block we already emitted.
+        plugins.append(
+            {
+                "social": {
+                    "cards_layout_options": {
+                        "background_color": book.theme.palette.primary or "#1976D2",
+                    },
+                }
+            }
+        )
     if book.check_external_links:
         plugins.append(
             {

@@ -5,6 +5,36 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0a2] — 2026-04-24
+
+Metadata + ergonomics pass on top of 0.1.0a1.
+
+### Added
+
+- `book.yml` gains two fields:
+  - `url` — canonical public URL, emitted as mkdocs `site_url` so the
+    social plugin and sitemap.xml get fully-qualified paths.
+  - `social_cards: bool` — opts into Material's `social` plugin for
+    auto-generated OpenGraph / Twitter preview images per page. Requires
+    the new `marimo-book[social]` extra (`pip install
+    'marimo-book[social]'`) which pulls `mkdocs-material[imaging]` +
+    Pillow + cairosvg.
+- `pyproject.toml` `Documentation` project URL now links directly to
+  the docs site, so PyPI's sidebar gains a "Documentation" link in
+  addition to Repository / Issues / Changelog.
+
+### Changed
+
+- CI + docs deploy workflows install `libcairo2` / `libpango` on
+  Ubuntu so the social plugin's SVG→PNG rendering works.
+
+### Fixed
+
+- `info.license` still reports `None` on pypi.org JSON API (this is a
+  Warehouse-side transition from `License` → `License-Expression` per
+  PEP 639). The real PyPI page and the wheel METADATA both report MIT
+  correctly.
+
 ## [0.1.0a1] — 2026-04-24
 
 First alpha release. Usable end-to-end for single-book sites.

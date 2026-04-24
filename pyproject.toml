@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "marimo-book"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Build clean, searchable static books from marimo notebooks and markdown"
 readme = "README.md"
 license = "MIT"
@@ -56,11 +56,19 @@ dev = [
 linkcheck = [
     "mkdocs-htmlproofer-plugin>=1.3",
 ]
+# Opt-in social-card / OpenGraph-image generation. Enable via
+# `social_cards: true` in book.yml and install this extra.
+# Pulls Pillow + cairosvg (~20 MB) for rasterising the template SVG.
+social = [
+    "mkdocs-material[imaging]>=9.5",
+]
 
 [project.urls]
-Homepage = "https://github.com/ljchang/marimo-book"
+Homepage = "https://ljchang.github.io/marimo-book/"
+Documentation = "https://ljchang.github.io/marimo-book/"
 Repository = "https://github.com/ljchang/marimo-book"
 Issues = "https://github.com/ljchang/marimo-book/issues"
+Changelog = "https://github.com/ljchang/marimo-book/blob/main/CHANGELOG.md"
 
 [project.scripts]
 marimo-book = "marimo_book.cli:app"

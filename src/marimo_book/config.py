@@ -208,6 +208,10 @@ class Book(BaseModel):
     repo: str | None = None
     branch: str = "main"
     doi: str | None = None
+    # Canonical public URL where this book is (or will be) hosted. Used by
+    # mkdocs as ``site_url`` so the social plugin can emit fully-qualified
+    # OpenGraph URLs, sitemap.xml gets the right href, etc.
+    url: str | None = None
 
     # branding
     logo: Path | None = None
@@ -233,6 +237,12 @@ class Book(BaseModel):
     # <img src> at build time against the live web. Slow; keep off in CI
     # unless you have a reason. Requires: ``pip install marimo-book[linkcheck]``.
     check_external_links: bool = False
+
+    # Opt-in social / OpenGraph card generation. When true, the generated
+    # mkdocs.yml adds Material's ``social`` plugin, which renders a PNG
+    # social preview per page and injects the matching ``<meta>`` tags.
+    # Requires: ``pip install marimo-book[social]``.
+    social_cards: bool = False
 
     # render defaults
     defaults: Defaults = Field(default_factory=Defaults)

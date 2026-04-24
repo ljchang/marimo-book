@@ -13,6 +13,7 @@ copyright: "2026"
 license: MIT
 repo: https://github.com/ljchang/marimo-book
 branch: main
+url: https://ljchang.github.io/marimo-book/
 
 theme:
   palette:
@@ -26,6 +27,11 @@ launch_buttons:
 
 dependencies:
   mode: env  # we ship the docs in the same env that runs marimo-book
+
+# Auto-generated OpenGraph / Twitter preview card per page. Requires
+# `pip install 'marimo-book[social]'` — which our CI does — and bundles
+# cairosvg + Pillow for rasterising the Material template.
+social_cards: true
 
 toc:
   - file: content/index.md

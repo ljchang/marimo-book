@@ -28,6 +28,7 @@ from pathlib import Path
 from .config import Book, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .shell import emit_mkdocs_yml
+from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import cells_to_markdown, export_notebook
 from .transforms.md_roles import apply_md_transforms
 
@@ -87,9 +88,20 @@ class Preprocessor:
         self._stage_assets(docs_dir, report)
         self._write_defaults(docs_dir)
 
-        for entry in _iter_file_entries(self.book.toc):
+        file_entries = _iter_file_entries(self.book.toc)
+        md_basenames = {
+            _doc_relpath_for(e.file).with_suffix("").name for e in file_entries
+        }
+
+        for entry in file_entries:
             try:
-                stage_page(self.book, self.book_dir, entry, docs_dir)
+                stage_page(
+                    self.book,
+                    self.book_dir,
+                    entry,
+                    docs_dir,
+                    md_basenames=md_basenames,
+                )
                 report.pages += 1
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(
@@ -158,7 +170,14 @@ def _iter_file_entries(toc: list) -> list[FileEntry]:
 # --- Single-page staging ----------------------------------------------------
 
 
-def stage_page(book: Book, book_dir: Path, entry: FileEntry, docs_dir: Path) -> Path:
+def stage_page(
+    book: Book,
+    book_dir: Path,
+    entry: FileEntry,
+    docs_dir: Path,
+    *,
+    md_basenames: set[str] | None = None,
+) -> Path:
     """Render a single TOC entry into ``docs_dir`` and return the output path."""
     src_abs = (book_dir / entry.file).resolve()
     if not src_abs.exists():
@@ -176,6 +195,10 @@ def stage_page(book: Book, book_dir: Path, entry: FileEntry, docs_dir: Path) -> 
         body = _render_markdown(src_abs)
     else:
         raise ValueError(f"Unsupported file type for TOC entry: {entry.file}")
+
+    # Link-rewrites run after both render paths so in-notebook prose and
+    # hand-authored Markdown get the same treatment.
+    body = apply_link_rewrites(body, md_basenames=md_basenames)
 
     full = _compose_page(buttons, body)
     dst.write_text(full, encoding="utf-8")

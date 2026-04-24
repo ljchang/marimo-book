@@ -205,6 +205,14 @@ class Book(BaseModel):
     # render defaults
     defaults: Defaults = Field(default_factory=Defaults)
 
+    # Optional per-widget-class default state. These seed the model that
+    # backs each anywidget mount, so widgets whose JS reads
+    # ``model.get("key")`` without a fallback still render correctly on the
+    # static site. Literal kwargs harvested from each cell override these
+    # defaults; whatever the widget's JS needs but neither source supplies
+    # stays undefined (and should be guarded client-side).
+    widget_defaults: dict[str, dict[str, object]] = Field(default_factory=dict)
+
     # TOC
     toc: list[TocEntry]
 

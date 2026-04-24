@@ -132,6 +132,10 @@ class Preprocessor:
         )
 
         shutil.copy(assets_root / "mathjax.js", docs_dir / "javascripts" / "mathjax.js")
+        shutil.copy(
+            assets_root / "marimo_book.js",
+            docs_dir / "javascripts" / "marimo_book.js",
+        )
 
 
 # --- TOC traversal ----------------------------------------------------------
@@ -181,7 +185,9 @@ def stage_page(book: Book, book_dir: Path, entry: FileEntry, docs_dir: Path) -> 
 def _render_marimo(src: Path, book: Book) -> str:
     exp = export_notebook(src)
     return cells_to_markdown(
-        exp, hide_first_code_cell=book.defaults.hide_first_code_cell
+        exp,
+        hide_first_code_cell=book.defaults.hide_first_code_cell,
+        widget_defaults=book.widget_defaults or None,
     )
 
 

@@ -30,6 +30,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .anywidgets import contains_anywidget, rewrite_anywidget_html
 from .callouts import render_callout_html
 
 # Marimo metadata lives under ``cell.metadata["marimo"]`` in the exported
@@ -91,6 +92,7 @@ def cells_to_markdown(
     exported: ExportedNotebook,
     *,
     hide_first_code_cell: bool = True,
+    widget_defaults: dict | None = None,
 ) -> str:
     """Render the notebook's cells to a single Markdown string.
 
@@ -107,7 +109,11 @@ def cells_to_markdown(
             first_code_seen = True
             if hide_first_code_cell and not cell.get("outputs"):
                 continue
-        rendered = _render_cell(cell, first_md_done=first_md_done)
+        rendered = _render_cell(
+            cell,
+            first_md_done=first_md_done,
+            widget_defaults=widget_defaults,
+        )
         if rendered:
             parts.append(rendered)
             if cell.get("cell_type") == "markdown":
@@ -120,12 +126,17 @@ def cells_to_markdown(
 # --- internal helpers --------------------------------------------------------
 
 
-def _render_cell(cell: dict, *, first_md_done: bool) -> str | None:
+def _render_cell(
+    cell: dict,
+    *,
+    first_md_done: bool,
+    widget_defaults: dict | None = None,
+) -> str | None:
     ct = cell.get("cell_type")
     if ct == "markdown":
         return _render_markdown_cell(cell, strip_duplicate_title=first_md_done)
     if ct == "code":
-        return _render_code_cell(cell)
+        return _render_code_cell(cell, widget_defaults=widget_defaults)
     if ct == "raw":
         return _as_str(cell.get("source", ""))
     return None
@@ -146,9 +157,13 @@ def _render_markdown_cell(cell: dict, *, strip_duplicate_title: bool) -> str:
     return "\n".join(lines).strip("\n")
 
 
-def _render_code_cell(cell: dict) -> str:
+def _render_code_cell(cell: dict, *, widget_defaults: dict | None = None) -> str:
     src = _as_str(cell.get("source", ""))
-    outputs_md = _render_outputs(cell.get("outputs", []))
+    outputs_md = _render_outputs(
+        cell.get("outputs", []),
+        cell_source=src,
+        widget_defaults=widget_defaults,
+    )
 
     hide_code = (
         cell.get("metadata", {})
@@ -169,16 +184,28 @@ def _render_code_cell(cell: dict) -> str:
     return f"{fence}\n\n{outputs_md}"
 
 
-def _render_outputs(outputs: list[dict]) -> str:
+def _render_outputs(
+    outputs: list[dict],
+    *,
+    cell_source: str = "",
+    widget_defaults: dict | None = None,
+) -> str:
     rendered: list[str] = []
     for out in outputs:
-        text = _render_single_output(out)
+        text = _render_single_output(
+            out, cell_source=cell_source, widget_defaults=widget_defaults
+        )
         if text:
             rendered.append(text)
     return "\n\n".join(rendered)
 
 
-def _render_single_output(out: dict) -> str:
+def _render_single_output(
+    out: dict,
+    *,
+    cell_source: str = "",
+    widget_defaults: dict | None = None,
+) -> str:
     ot = out.get("output_type")
     if ot == "stream":
         # stdout/stderr text
@@ -196,16 +223,27 @@ def _render_single_output(out: dict) -> str:
 
     if ot in {"display_data", "execute_result"}:
         data = out.get("data", {}) or {}
-        return _render_mime_bundle(data)
+        return _render_mime_bundle(
+            data, cell_source=cell_source, widget_defaults=widget_defaults
+        )
 
     return ""
 
 
-def _render_mime_bundle(data: dict) -> str:
+def _render_mime_bundle(
+    data: dict,
+    *,
+    cell_source: str = "",
+    widget_defaults: dict | None = None,
+) -> str:
     """Pick the richest renderable representation from a MIME bundle."""
     # Priority order: HTML (most expressive) → markdown → images → plain.
     if "text/html" in data:
-        return _render_html_output(_as_str(data["text/html"]))
+        return _render_html_output(
+            _as_str(data["text/html"]),
+            cell_source=cell_source,
+            widget_defaults=widget_defaults,
+        )
     if "text/markdown" in data:
         md = _as_str(data["text/markdown"]).strip()
         return md
@@ -222,13 +260,30 @@ def _render_mime_bundle(data: dict) -> str:
     return ""
 
 
-def _render_html_output(raw_html: str) -> str:
+def _render_html_output(
+    raw_html: str,
+    *,
+    cell_source: str = "",
+    widget_defaults: dict | None = None,
+) -> str:
     """Translate marimo custom elements to static HTML, pass the rest through."""
     stripped = raw_html.strip()
     if stripped.startswith("<marimo-callout-output"):
         callout = render_callout_html(stripped)
         if callout is not None:
             return callout
+    # Rewrap <marimo-anywidget> → <div class="marimo-book-anywidget">, drop
+    # standalone UI-control wrappers that have no static analog. Pass the
+    # cell's Python source so literal widget kwargs can seed the mount's
+    # initial value, plus any book-level widget defaults.
+    if contains_anywidget(stripped):
+        stripped = rewrite_anywidget_html(
+            stripped,
+            cell_source=cell_source,
+            widget_defaults=widget_defaults,
+        ).strip()
+        if not stripped:
+            return ""
     # Everything else (plain HTML, marimo wrappers we don't recognize yet)
     # passes through untouched. Wrap in a marker div so downstream CSS can
     # style marimo outputs consistently without affecting hand-authored HTML.

@@ -70,6 +70,9 @@ def _build_config(
     cfg["extra_javascript"] = [
         "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
         "javascripts/mathjax.js",
+        # marimo-book runtime shim — rehydrates <div class="marimo-book-anywidget">
+        # mounts without requiring marimo's frontend runtime.
+        {"path": "javascripts/marimo_book.js", "defer": True},
         *extra_javascript,
     ]
 

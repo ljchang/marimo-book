@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "marimo-book"
+version = "0.1.0.dev0"
+description = "Build clean, searchable static books from marimo notebooks and markdown"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Luke Chang", email = "luke.j.chang@dartmouth.edu" },
+]
+keywords = ["marimo", "notebook", "static-site", "documentation", "book", "mkdocs"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Documentation",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pybtex>=0.24",
+    "marimo>=0.23,<0.24",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "pymdown-extensions>=10.7",
+    "watchdog>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/ljchang/marimo-book"
+Repository = "https://github.com/ljchang/marimo-book"
+Issues = "https://github.com/ljchang/marimo-book/issues"
+
+[project.scripts]
+marimo-book = "marimo_book.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/marimo_book"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/marimo_book/assets" = "marimo_book/assets"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N"]
+ignore = ["E501"]  # long lines — ruff format handles most

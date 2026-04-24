@@ -1,0 +1,90 @@
+site_name: marimo-book Phase 0a Spike
+site_description: Material for MkDocs feasibility check for marimo-book v0.1
+docs_dir: docs
+site_dir: _site
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  font:
+    text: Source Sans Pro
+    code: JetBrains Mono
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.path
+    - navigation.footer
+    - navigation.instant
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem
+  - pymdownx.blocks.admonition
+  - pymdownx.blocks.caption
+  - pymdownx.blocks.details
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - javascripts/mathjax.js
+
+nav:
+  - Home: index.md
+  - Prose + math + admonitions: prose.md
+  - Anywidget-style script: widget.md
+  - Raw plotly output: plotly.md
+  - Sidebar scale test:
+      - Page 01: many/page01.md
+      - Page 02: many/page02.md
+      - Page 03: many/page03.md
+      - Page 04: many/page04.md
+      - Page 05: many/page05.md
+      - Page 06: many/page06.md
+      - Page 07: many/page07.md
+      - Page 08: many/page08.md
+      - Page 09: many/page09.md
+      - Page 10: many/page10.md

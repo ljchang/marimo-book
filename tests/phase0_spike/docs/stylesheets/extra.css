@@ -1,0 +1,20 @@
+/* Dartmouth palette test — marimo-book Phase 0a */
+:root {
+  --md-primary-fg-color:        #00693E;   /* Dartmouth green */
+  --md-primary-fg-color--light: #2E8B5A;
+  --md-primary-fg-color--dark:  #004A2B;
+  --md-accent-fg-color:         #A5D75F;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #2E8B5A;
+  --md-primary-fg-color--light: #4FA377;
+  --md-accent-fg-color:         #A5D75F;
+}
+
+/* Marker that the extra.css actually loaded — grep-able from the built site */
+body::before {
+  content: "";
+  display: none;
+  background: #phase0a-extracss-loaded;
+}

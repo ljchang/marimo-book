@@ -87,6 +87,30 @@ class Analytics(BaseModel):
     property: str | None = None
 
 
+class Dependencies(BaseModel):
+    """How notebooks get their Python dependencies at build time.
+
+    - ``env`` (default) — reuse the Python environment that invoked
+      ``marimo-book``. The consuming project is expected to pin its
+      notebook deps in its own ``pyproject.toml`` / ``requirements.txt``
+      and install them before running a build. This is the fastest mode
+      (no venv provisioning per notebook).
+    - ``sandbox`` — pass ``--sandbox`` to ``marimo export ipynb``. Marimo
+      then provisions an isolated ``uv`` environment per notebook from
+      the notebook's PEP 723 inline metadata
+      (``# /// script\\n# dependencies = [...]\\n# ///``). Slower on first
+      run (~5–10s to resolve) but reproducible and self-contained;
+      notebooks become portable to any machine with ``uv`` installed.
+
+    The CLI ``--sandbox`` / ``--no-sandbox`` flags on ``build`` and
+    ``serve`` override this per-invocation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["env", "sandbox"] = "env"
+
+
 class Defaults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -199,6 +223,10 @@ class Book(BaseModel):
 
     # analytics
     analytics: Analytics = Field(default_factory=Analytics)
+
+    # How notebook dependencies get provisioned at build time. See the
+    # :class:`Dependencies` docstring for the tradeoffs.
+    dependencies: Dependencies = Field(default_factory=Dependencies)
 
     # Opt-in external-link checker. When true, the generated mkdocs.yml adds
     # the ``htmlproofer`` plugin, which HEAD-checks every <a href> and

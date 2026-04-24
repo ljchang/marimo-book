@@ -48,8 +48,18 @@ class ExportedNotebook:
     metadata: dict
 
 
-def export_notebook(py_path: Path, *, include_outputs: bool = True) -> ExportedNotebook:
-    """Run ``marimo export ipynb`` and return the parsed notebook JSON."""
+def export_notebook(
+    py_path: Path,
+    *,
+    include_outputs: bool = True,
+    sandbox: bool = False,
+) -> ExportedNotebook:
+    """Run ``marimo export ipynb`` and return the parsed notebook JSON.
+
+    ``sandbox=True`` passes ``--sandbox`` to marimo, which reads the
+    notebook's PEP 723 inline metadata and runs the export in an isolated
+    ``uv run --isolated`` environment. Requires ``uv`` on PATH.
+    """
     py_path = Path(py_path)
     cmd = [
         sys.executable,
@@ -62,6 +72,8 @@ def export_notebook(py_path: Path, *, include_outputs: bool = True) -> ExportedN
     ]
     if include_outputs:
         cmd.append("--include-outputs")
+    if sandbox:
+        cmd.append("--sandbox")
 
     # Route the temp .ipynb through a system temp dir so `marimo-book serve`'s
     # watcher can never see creates/deletes happening in the source tree.

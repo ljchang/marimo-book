@@ -132,6 +132,14 @@ def build(
         "--clean",
         help="Remove _site_src/ and build cache before building.",
     ),
+    sandbox: bool | None = typer.Option(
+        None,
+        "--sandbox/--no-sandbox",
+        help=(
+            "Force per-notebook PEP 723 sandbox mode (uv) on or off, "
+            "ignoring book.yml's dependencies.mode. Default: follow book.yml."
+        ),
+    ),
 ) -> None:
     """Build the static site from ``book.yml``."""
     book = _load_or_exit(book_file)
@@ -144,8 +152,11 @@ def build(
             if target.exists():
                 shutil.rmtree(target)
 
-    typer.echo(f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages)...")
-    pre = Preprocessor(book, book_dir=book_dir)
+    pre = Preprocessor(book, book_dir=book_dir, sandbox_override=sandbox)
+    typer.echo(
+        f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages, "
+        f"deps={'sandbox' if pre.sandbox else 'env'})..."
+    )
     report = pre.build(out_dir=site_src, site_dir=site_dir)
 
     for warn in report.warnings:
@@ -186,6 +197,15 @@ def serve(
         "--no-watch",
         help="Serve without a source watcher (useful for debugging).",
     ),
+    sandbox: bool | None = typer.Option(
+        None,
+        "--sandbox/--no-sandbox",
+        help=(
+            "Force per-notebook PEP 723 sandbox mode on or off for this "
+            "serve session, ignoring book.yml. Note: sandbox mode adds "
+            "~5-10s to every rebuild; leave off for fast iteration."
+        ),
+    ),
 ) -> None:
     """Serve the book locally with live reload.
 
@@ -200,8 +220,11 @@ def serve(
     book_dir = book_file.resolve().parent
     site_src = book_dir / "_site_src"
 
-    typer.echo(f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages)...")
-    pre = Preprocessor(book, book_dir=book_dir)
+    pre = Preprocessor(book, book_dir=book_dir, sandbox_override=sandbox)
+    typer.echo(
+        f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages, "
+        f"deps={'sandbox' if pre.sandbox else 'env'})..."
+    )
     report = pre.build(out_dir=site_src)
     _report_build(report)
     if not report.ok:
@@ -232,6 +255,7 @@ def serve(
             book_dir=book_dir,
             site_src=site_src,
             on_report=_watcher_report_callback,
+            sandbox_override=sandbox,
         )
 
     try:

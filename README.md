@@ -154,6 +154,57 @@ field.
 - First-code-cell hiding (the setup-imports convention) — opt out via
   `defaults.hide_first_code_cell: false`
 
+## Notebook dependencies
+
+Notebooks need their imports satisfied at build time (marimo re-executes
+every cell to capture outputs). `marimo-book` supports two modes; pick
+in `book.yml`:
+
+```yaml
+dependencies:
+  mode: env       # default — reuse the active venv
+  # mode: sandbox # per-notebook PEP 723 isolation via uv
+```
+
+**`env` mode** (default). Whatever Python env runs `marimo-book` provides
+the deps. The typical consumer has a `pyproject.toml` at the book root
+listing notebook dependencies (`numpy`, `pandas`, your domain package,
+etc.), installs with `pip install -e .` or `uv pip install -e .`, and
+runs `marimo-book` from that env. Fast, straightforward, good when all
+notebooks share the same stack.
+
+**`sandbox` mode.** Passes `--sandbox` to `marimo export`. Each notebook
+must declare its own deps via PEP 723 inline script metadata:
+
+```python
+# /// script
+# dependencies = [
+#     "marimo>=0.23",
+#     "numpy>=2.0",
+#     "pandas>=2.0",
+# ]
+# ///
+
+import marimo
+# ...
+```
+
+At build time, marimo uses `uv run --isolated` to provision a fresh env
+per notebook. ~5–10 s on first run, cached after. Notebooks become
+portable — copy a `.py` into any repo with `uv` installed and it just
+works. The book root doesn't need a `pyproject.toml`.
+
+**Override per invocation:**
+
+```bash
+marimo-book build --sandbox    # force sandbox regardless of book.yml
+marimo-book build --no-sandbox # force env mode
+marimo-book serve --sandbox    # slower iteration, but reproducible
+```
+
+Use `env` for local dev loops and `sandbox` on CI where reproducibility
+matters more than rebuild speed.
+
 ## Broken-link checking
 
 `mkdocs build --strict` (use `marimo-book build --strict`) already fails on

@@ -22,6 +22,19 @@ launch_buttons:
   github: true
   download: true
 
+# How notebook dependencies get provisioned at build time.
+#   env     — reuse the Python environment that runs `marimo-book`. You
+#             manage deps via pyproject.toml / requirements.txt in this
+#             repo. Fastest; good for books where all notebooks share a
+#             stack (e.g. numpy + pandas + your domain package).
+#   sandbox — pass --sandbox to marimo, which provisions an isolated uv
+#             env per notebook from each .py's PEP 723 header. Slower
+#             (~5-10s first run per notebook, cached after) but
+#             reproducible; notebooks are portable anywhere uv is
+#             installed. Override per-invocation with `build --sandbox`.
+dependencies:
+  mode: env
+
 # Anywidget defaults. Keyed by widget class name; merged with literal
 # kwargs parsed from each notebook cell. Fill in when your widgets need
 # initial state for their JS to render on first paint.

@@ -59,9 +59,24 @@ class Preprocessor:
     happens in :meth:`build`.
     """
 
-    def __init__(self, book: Book, *, book_dir: Path) -> None:
+    def __init__(
+        self,
+        book: Book,
+        *,
+        book_dir: Path,
+        sandbox_override: bool | None = None,
+    ) -> None:
         self.book = book
         self.book_dir = Path(book_dir).resolve()
+        # None = honour book.yml's dependencies.mode; True/False overrides.
+        self.sandbox_override = sandbox_override
+
+    @property
+    def sandbox(self) -> bool:
+        """Effective sandbox setting for this build."""
+        if self.sandbox_override is not None:
+            return self.sandbox_override
+        return self.book.dependencies.mode == "sandbox"
 
     # --- public API ----------------------------------------------------------
 
@@ -102,6 +117,7 @@ class Preprocessor:
                     entry,
                     docs_dir,
                     md_basenames=md_basenames,
+                    sandbox=self.sandbox,
                 )
                 report.pages += 1
             except Exception as exc:  # noqa: BLE001
@@ -174,6 +190,7 @@ def stage_page(
     docs_dir: Path,
     *,
     md_basenames: set[str] | None = None,
+    sandbox: bool = False,
 ) -> Path:
     """Render a single TOC entry into ``docs_dir`` and return the output path."""
     src_abs = (book_dir / entry.file).resolve()
@@ -187,7 +204,7 @@ def stage_page(
     buttons = render_button_row(book, Path(entry.file))
 
     if src_abs.suffix == ".py":
-        body = _render_marimo(src_abs, book)
+        body = _render_marimo(src_abs, book, sandbox=sandbox)
     elif src_abs.suffix == ".md":
         body = _render_markdown(src_abs)
     else:
@@ -202,8 +219,8 @@ def stage_page(
     return dst
 
 
-def _render_marimo(src: Path, book: Book) -> str:
-    exp = export_notebook(src)
+def _render_marimo(src: Path, book: Book, *, sandbox: bool = False) -> str:
+    exp = export_notebook(src, sandbox=sandbox)
     return cells_to_markdown(
         exp,
         hide_first_code_cell=book.defaults.hide_first_code_cell,

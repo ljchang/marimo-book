@@ -68,12 +68,17 @@ class RebuildHandler(FileSystemEventHandler):
         site_src: Path,
         debounce_seconds: float = 0.4,
         on_report: Callable[[BuildReport], None] | None = None,
+        sandbox_override: bool | None = None,
     ) -> None:
         self.book_file = Path(book_file).resolve()
         self.book_dir = Path(book_dir).resolve()
         self.site_src = Path(site_src).resolve()
         self.debounce = debounce_seconds
         self.on_report = on_report
+        # Forwarded to every rebuild's Preprocessor so `marimo-book serve
+        # --sandbox` / `--no-sandbox` sticks across file-change rebuilds
+        # instead of reverting to book.yml's mode.
+        self.sandbox_override = sandbox_override
 
         self._lock = threading.Lock()
         self._pending = False
@@ -176,7 +181,11 @@ class RebuildHandler(FileSystemEventHandler):
             return
 
         try:
-            report = Preprocessor(book, book_dir=self.book_dir).build(out_dir=self.site_src)
+            report = Preprocessor(
+                book,
+                book_dir=self.book_dir,
+                sandbox_override=self.sandbox_override,
+            ).build(out_dir=self.site_src)
         except Exception as exc:  # noqa: BLE001 — keep the watcher alive
             self._emit_error(f"preprocessor crashed: {exc.__class__.__name__}: {exc}")
             return
@@ -201,6 +210,7 @@ def start_watcher(
     book_dir: Path,
     site_src: Path,
     on_report: Callable[[BuildReport], None] | None = None,
+    sandbox_override: bool | None = None,
 ) -> tuple[Observer, RebuildHandler]:
     """Install the rebuild handler on a watchdog Observer and start it.
 
@@ -212,6 +222,7 @@ def start_watcher(
         book_dir=book_dir,
         site_src=site_src,
         on_report=on_report,
+        sandbox_override=sandbox_override,
     )
     observer = Observer()
     # Watch content/ recursively for .md / .py changes.

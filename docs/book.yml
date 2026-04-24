@@ -1,0 +1,55 @@
+# Self-hosted docs for marimo-book — built with marimo-book.
+#
+# This book is both the reference for the tool and a working example of
+# every feature it ships. Browse it live, then read the .md source in
+# this directory to see exactly how each page is authored.
+
+title: marimo-book
+description: A Jupyter-Book-style static site generator for marimo notebooks.
+authors:
+  - name: Luke Chang
+    affiliation: Dartmouth College
+copyright: "2026"
+license: MIT
+repo: https://github.com/ljchang/marimo-book
+branch: main
+
+theme:
+  palette:
+    primary: "#2E7D32"   # marimo green-ish
+    accent:  "#66BB6A"
+
+launch_buttons:
+  molab: true
+  github: true
+  download: true
+
+dependencies:
+  mode: env  # we ship the docs in the same env that runs marimo-book
+
+toc:
+  - file: content/index.md
+
+  - section: Getting Started
+    children:
+      - file: content/quickstart.md
+      - file: content/book_yml.md
+
+  - section: Authoring
+    children:
+      - file: content/authoring.md
+      - file: content/example.py
+      - file: content/dependencies.md
+      - file: content/widgets.md
+
+  - section: Publishing
+    children:
+      - file: content/deploying.md
+      - file: content/link_checks.md
+
+  - section: Project
+    children:
+      - file: content/roadmap.md
+      - file: content/inspiration.md
+      - url: https://github.com/ljchang/marimo-book
+        title: GitHub Repository

@@ -1,0 +1,50 @@
+name: Build and deploy docs
+
+# Self-host marimo-book's own docs (built with marimo-book) on GitHub
+# Pages. Triggered on pushes to main that touch the docs tree or the
+# package source (so tool changes also re-render the docs immediately).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install marimo-book (editable)
+        run: pip install -e '.[linkcheck]'
+      - name: Build docs
+        run: marimo-book build -b docs/book.yml --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

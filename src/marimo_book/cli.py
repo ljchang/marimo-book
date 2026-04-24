@@ -139,11 +139,90 @@ def serve(
     ),
     host: str = typer.Option("127.0.0.1", "--host", help="Dev server host."),
     port: int = typer.Option(8000, "--port", help="Dev server port."),
+    no_watch: bool = typer.Option(
+        False,
+        "--no-watch",
+        help="Serve without a source watcher (useful for debugging).",
+    ),
 ) -> None:
-    """Serve the book locally with live reload."""
-    _load_or_exit(book_file)
-    typer.echo(f"[stub] marimo-book serve (host={host}, port={port})")
-    raise typer.Exit(code=1)
+    """Serve the book locally with live reload.
+
+    Runs an initial build, then starts mkdocs's dev server with livereload.
+    A watchdog observer re-runs the preprocessor on changes to book.yml or
+    content/*, and mkdocs picks up the resulting _site_src/docs/ updates to
+    refresh the browser. Ctrl-C stops both the observer and mkdocs cleanly.
+    """
+    from .watcher import start_watcher
+
+    book = _load_or_exit(book_file)
+    book_dir = book_file.resolve().parent
+    site_src = book_dir / "_site_src"
+
+    typer.echo(f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages)...")
+    pre = Preprocessor(book, book_dir=book_dir)
+    report = pre.build(out_dir=site_src)
+    _report_build(report)
+    if not report.ok:
+        raise typer.Exit(code=1)
+    typer.echo(f"Preprocessing OK ({report.pages} pages staged at {site_src}).")
+
+    typer.echo(f"Starting mkdocs serve on http://{host}:{port}/")
+    mkdocs_cmd = [
+        sys.executable,
+        "-m",
+        "mkdocs",
+        "serve",
+        "--config-file",
+        str(site_src / "mkdocs.yml"),
+        "--dev-addr",
+        f"{host}:{port}",
+    ]
+    # Start mkdocs serve in its own process group so Ctrl-C in our terminal
+    # doesn't propagate twice and produce duplicate tracebacks. We wait on it
+    # in a try/finally to guarantee cleanup.
+    mkdocs_proc = subprocess.Popen(mkdocs_cmd, cwd=site_src)
+
+    observer = None
+    if not no_watch:
+        typer.echo(f"Watching {book_dir / 'content'} and {book_file.name} for changes...")
+        observer, _ = start_watcher(
+            book_file=book_file,
+            book_dir=book_dir,
+            site_src=site_src,
+            on_report=_watcher_report_callback,
+        )
+
+    try:
+        mkdocs_proc.wait()
+    except KeyboardInterrupt:
+        typer.echo("\nShutting down...")
+    finally:
+        if observer is not None:
+            observer.stop()
+            observer.join(timeout=2)
+        if mkdocs_proc.poll() is None:
+            mkdocs_proc.terminate()
+            try:
+                mkdocs_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                mkdocs_proc.kill()
+
+
+def _report_build(report) -> None:
+    """Print preprocessor warnings/errors from a BuildReport."""
+    for warn in report.warnings:
+        typer.echo(f"  warning: {warn}", err=True)
+    for err in report.errors:
+        typer.echo(f"  error: {err}", err=True)
+
+
+def _watcher_report_callback(report) -> None:
+    """Called by the watcher after each rebuild. Logs result; never raises."""
+    if report.ok:
+        typer.echo(f"  rebuilt ({report.pages} pages)")
+    else:
+        typer.echo("  rebuild failed:", err=True)
+        _report_build(report)
 
 
 @app.command("check")

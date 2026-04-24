@@ -45,3 +45,4 @@ _site_src/
 # uv
 uv.lock
 .python-version
+__marimo__/

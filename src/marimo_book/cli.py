@@ -12,8 +12,13 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 
+import shutil
+import subprocess
+import sys
+
 from marimo_book import __version__
 from marimo_book.config import load_book
+from marimo_book.preprocessor import Preprocessor
 
 app = typer.Typer(
     name="marimo-book",
@@ -88,12 +93,38 @@ def build(
 ) -> None:
     """Build the static site from ``book.yml``."""
     book = _load_or_exit(book_file)
-    typer.echo(
-        f"[stub] marimo-book build (book={book_file}, output={output}, "
-        f"strict={strict}, clean={clean}) — loaded '{book.title}' with "
-        f"{_count_toc(book.toc)} TOC entries"
-    )
-    raise typer.Exit(code=1)
+    book_dir = book_file.resolve().parent
+    site_src = book_dir / "_site_src"
+    site_dir = Path(output).resolve() if output.is_absolute() else (book_dir / output).resolve()
+
+    if clean:
+        for target in (site_src, site_dir):
+            if target.exists():
+                shutil.rmtree(target)
+
+    typer.echo(f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages)...")
+    pre = Preprocessor(book, book_dir=book_dir)
+    report = pre.build(out_dir=site_src, site_dir=site_dir)
+
+    for warn in report.warnings:
+        typer.echo(f"  warning: {warn}", err=True)
+    for err in report.errors:
+        typer.echo(f"  error: {err}", err=True)
+    if not report.ok:
+        typer.echo(f"Preprocessing failed ({len(report.errors)} errors).", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Preprocessing OK ({report.pages} pages staged at {site_src}).")
+
+    typer.echo(f"Running mkdocs build → {site_dir}")
+    build_cmd = [sys.executable, "-m", "mkdocs", "build"]
+    if strict:
+        build_cmd.append("--strict")
+    build_cmd.extend(["--config-file", str(site_src / "mkdocs.yml")])
+    result = subprocess.run(build_cmd, cwd=site_src)
+    if result.returncode != 0:
+        typer.echo("mkdocs build failed.", err=True)
+        raise typer.Exit(code=result.returncode)
+    typer.echo(f"Done. Site at {site_dir}")
 
 
 @app.command("serve")

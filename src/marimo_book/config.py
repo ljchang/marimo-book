@@ -179,6 +179,7 @@ class Book(BaseModel):
     copyright: str | None = None
     license: str | None = None
     repo: str | None = None
+    branch: str = "main"
     doi: str | None = None
 
     # branding

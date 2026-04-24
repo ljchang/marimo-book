@@ -1,0 +1,66 @@
+/* marimo-book default stylesheet — Material-for-MkDocs overrides. */
+
+/* Launch buttons row at the top of each page. */
+.marimo-book-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem 0;
+}
+
+.marimo-book-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 0.375rem;
+  background: var(--md-default-bg-color--light, #f5f5f5);
+  color: var(--md-default-fg-color, #333);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: 1px solid var(--md-default-fg-color--lightest, #ddd);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.marimo-book-button:hover {
+  background: var(--md-primary-fg-color--light, #eef);
+  border-color: var(--md-primary-fg-color, #446);
+  color: var(--md-primary-fg-color, #446);
+}
+
+[data-md-color-scheme="slate"] .marimo-book-button {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
+  color: var(--md-default-fg-color, #eee);
+}
+[data-md-color-scheme="slate"] .marimo-book-button:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+/* Marimo cell output containers. */
+.marimo-book-output {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+}
+.marimo-book-output img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Marimo plain text / stream outputs rendered as <pre>. */
+pre.marimo-book-output-text {
+  background: var(--md-code-bg-color, #f5f5f5);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+pre.marimo-stream-stderr,
+pre.marimo-error {
+  border-left: 3px solid var(--md-warning-fg-color, #e67e22);
+  background: rgba(230, 126, 34, 0.05);
+}
+
+/* Marimo callouts come through as .admonition with an extra marker class;
+   no overrides needed — Material styles them. */

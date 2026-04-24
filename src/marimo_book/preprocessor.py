@@ -167,7 +167,7 @@ def stage_page(book: Book, book_dir: Path, entry: FileEntry, docs_dir: Path) -> 
     buttons = render_button_row(book, Path(entry.file))
 
     if src_abs.suffix == ".py":
-        body = _render_marimo(src_abs)
+        body = _render_marimo(src_abs, book)
     elif src_abs.suffix == ".md":
         body = _render_markdown(src_abs)
     else:
@@ -178,9 +178,11 @@ def stage_page(book: Book, book_dir: Path, entry: FileEntry, docs_dir: Path) -> 
     return dst
 
 
-def _render_marimo(src: Path) -> str:
+def _render_marimo(src: Path, book: Book) -> str:
     exp = export_notebook(src)
-    return cells_to_markdown(exp)
+    return cells_to_markdown(
+        exp, hide_first_code_cell=book.defaults.hide_first_code_cell
+    )
 
 
 def _render_markdown(src: Path) -> str:

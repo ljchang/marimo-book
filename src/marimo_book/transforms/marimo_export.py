@@ -87,11 +87,26 @@ def export_notebook(py_path: Path, *, include_outputs: bool = True) -> ExportedN
     )
 
 
-def cells_to_markdown(exported: ExportedNotebook) -> str:
-    """Render the notebook's cells to a single Markdown string."""
+def cells_to_markdown(
+    exported: ExportedNotebook,
+    *,
+    hide_first_code_cell: bool = True,
+) -> str:
+    """Render the notebook's cells to a single Markdown string.
+
+    ``hide_first_code_cell`` drops the first code cell when it doesn't have
+    an output — a common dartbrains-style convention where cell 0 is the
+    ``import marimo as mo`` setup. Any marimo notebook whose first cell
+    *does* produce an output (rare) keeps it unchanged.
+    """
     parts: list[str] = []
     first_md_done = False
+    first_code_seen = False
     for cell in exported.cells:
+        if cell.get("cell_type") == "code" and not first_code_seen:
+            first_code_seen = True
+            if hide_first_code_cell and not cell.get("outputs"):
+                continue
         rendered = _render_cell(cell, first_md_done=first_md_done)
         if rendered:
             parts.append(rendered)

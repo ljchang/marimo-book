@@ -93,6 +93,11 @@ class Defaults(BaseModel):
     mode: Literal["static"] = "static"  # v0.2 adds "wasm", "hybrid"
     hide_author_line: bool = True
     show_source_link: bool = True
+    # The first code cell in a marimo notebook is, by convention, the setup /
+    # imports cell. Most notebooks author it as ``@app.cell`` (not
+    # ``hide_code=True``), but it's almost never part of the lesson. Drop it
+    # unconditionally by default; authors can opt out per-book.
+    hide_first_code_cell: bool = True
 
 
 # --- TOC entries (discriminated union) ---------------------------------------

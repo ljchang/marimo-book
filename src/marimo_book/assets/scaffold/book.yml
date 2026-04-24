@@ -1,0 +1,34 @@
+title: My Marimo Book
+description: A static site built from marimo notebooks + Markdown.
+authors:
+  - name: Your Name
+
+# Uncomment + fill in to enable repo-aware launch buttons (molab / GitHub /
+# Download) on every .py page. The branch is where molab will resolve
+# against; if you're working on a feature branch, change it here.
+# repo: https://github.com/your-org/your-repo
+# branch: main
+
+# Material for MkDocs palette. Any hex color works; uncomment to customise.
+# theme:
+#   palette:
+#     primary: "#1976D2"
+#     accent:  "#FF9800"
+
+# Per-chapter launch buttons. molab / download apply to .py only; github
+# applies to both .md and .py. Set any of these to false to hide them.
+launch_buttons:
+  molab: true
+  github: true
+  download: true
+
+# Anywidget defaults. Keyed by widget class name; merged with literal
+# kwargs parsed from each notebook cell. Fill in when your widgets need
+# initial state for their JS to render on first paint.
+# widget_defaults:
+#   MyWidget:
+#     some_param: 42
+
+toc:
+  - file: content/intro.md
+  - file: content/example.py

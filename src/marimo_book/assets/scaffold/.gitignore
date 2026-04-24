@@ -1,0 +1,20 @@
+# marimo-book build artifacts
+_site/
+_site_src/
+.marimo_book_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+
+# marimo cache
+__marimo__/
+
+# OS
+.DS_Store
+Thumbs.db

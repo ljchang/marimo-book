@@ -53,15 +53,59 @@ def _main(
 @app.command("new")
 def new_book(
     directory: Path = typer.Argument(..., help="Target directory for the new book."),
-    example: str = typer.Option(
-        "minimal",
-        "--example",
-        help="Scaffold template to use (currently only 'minimal').",
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Write into an existing non-empty directory (may overwrite files).",
     ),
 ) -> None:
-    """Scaffold a new book in ``DIRECTORY``."""
-    typer.echo(f"[stub] marimo-book new {directory} (example={example})")
-    raise typer.Exit(code=1)
+    """Scaffold a new book in ``DIRECTORY``.
+
+    Copies a minimal starter layout (book.yml, content/intro.md,
+    content/example.py, .gitignore, README.md, GitHub Pages workflow) into
+    the target directory. After it finishes, ``cd`` into the directory and
+    run ``marimo-book serve``.
+    """
+    target = directory.resolve()
+    if target.exists() and any(target.iterdir()) and not force:
+        typer.echo(
+            f"error: {target} already exists and is not empty. "
+            f"Pass --force to scaffold into it anyway.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    scaffold_src = Path(__file__).parent / "assets" / "scaffold"
+    if not scaffold_src.is_dir():
+        typer.echo(
+            f"error: scaffold assets missing at {scaffold_src}. "
+            f"This is a packaging bug.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    target.mkdir(parents=True, exist_ok=True)
+    _copy_scaffold(scaffold_src, target)
+
+    typer.echo(f"Created new marimo-book at {target}")
+    typer.echo("")
+    typer.echo("Next steps:")
+    typer.echo(f"  cd {target}")
+    typer.echo("  marimo-book serve")
+    typer.echo("")
+    typer.echo("Edit book.yml to set your title, repo URL, and launch-button targets.")
+
+
+def _copy_scaffold(src: Path, dst: Path) -> None:
+    """Recursively copy the scaffold tree, preserving hidden files and dirs."""
+    for item in src.rglob("*"):
+        rel = item.relative_to(src)
+        out = dst / rel
+        if item.is_dir():
+            out.mkdir(parents=True, exist_ok=True)
+        else:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, out)
 
 
 @app.command("build")
@@ -252,16 +296,41 @@ def check(
 
 @app.command("clean")
 def clean(
+    book_file: Path = typer.Option(
+        Path("book.yml"),
+        "--book",
+        "-b",
+        help="Path to the book.yml config (used to locate the book directory).",
+        exists=True,
+        dir_okay=False,
+    ),
     output: Path = typer.Option(
         Path("_site"),
         "--output",
         "-o",
-        help="Output directory to remove.",
+        help="Output directory to remove (relative paths resolve against the book directory).",
     ),
 ) -> None:
     """Remove build artifacts (``_site/``, ``_site_src/``, cache)."""
-    typer.echo(f"[stub] marimo-book clean (output={output})")
-    raise typer.Exit(code=1)
+    book_dir = book_file.resolve().parent
+    site_dir = (
+        output.resolve() if output.is_absolute() else (book_dir / output).resolve()
+    )
+    targets = [
+        site_dir,
+        book_dir / "_site_src",
+        book_dir / ".marimo_book_cache",
+    ]
+    removed = 0
+    for t in targets:
+        if t.is_dir():
+            shutil.rmtree(t)
+            typer.echo(f"  removed {t}")
+            removed += 1
+    if removed == 0:
+        typer.echo("Nothing to clean.")
+    else:
+        typer.echo(f"Cleaned {removed} directorie(s).")
 
 
 # --- helpers -----------------------------------------------------------------

@@ -1,0 +1,51 @@
+name: Deploy marimo-book to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install marimo-book
+        run: pip install marimo-book
+
+      # If your notebooks depend on other libraries to execute (numpy,
+      # pandas, your domain packages), install them here too:
+      # - name: Install notebook dependencies
+      #   run: pip install -r requirements.txt
+
+      - name: Build site
+        run: marimo-book build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

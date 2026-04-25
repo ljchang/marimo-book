@@ -27,8 +27,7 @@ from pathlib import Path
 
 from .config import Book, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
-from .shell import emit_mkdocs_yml
-from .shell import _nav_from_toc
+from .shell import _nav_from_toc, emit_mkdocs_yml
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import cells_to_markdown, export_notebook
 

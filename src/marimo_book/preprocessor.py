@@ -39,6 +39,7 @@ from .transforms.precompute import (
     WidgetCandidate,
     estimate_combinations,
     page_excluded,
+    precompute_page,
     scan_widgets,
 )
 
@@ -211,6 +212,28 @@ def _book_signature(book: Book) -> str:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _splice_precomputed_body(original_page: str, result) -> str:
+    """Replace the staged page's body with the precomputed version.
+
+    The original page is ``<launch buttons block>\\n\\n<body>``. We
+    preserve the launch-button row verbatim, inject the widget control
+    after it, and replace the body with ``result.body`` (which already
+    contains the cell wrappers + embedded lookup-table script blocks).
+
+    If the page has no launch-button block (``repo`` not set in
+    ``book.yml``), we just prepend the widget control to the body.
+    """
+    marker_open = '<div class="marimo-book-buttons">'
+    marker_close = "</div>"
+    if marker_open in original_page:
+        head_end = original_page.index(marker_open)
+        # Find the matching close — launch buttons render is one flat div.
+        close_at = original_page.index(marker_close, head_end) + len(marker_close)
+        head = original_page[:close_at]
+        return head + "\n\n" + result.widget_html + "\n\n" + result.body
+    return result.widget_html + "\n\n" + result.body
+
+
 def _file_sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -305,11 +328,13 @@ class Preprocessor:
                     report.pages_rendered += 1
                 report.pages += 1
 
-                # Static-reactivity preview: scan widgets + apply count
-                # caps so authors see the inventory now. Actual execution
-                # ships in a follow-up PR (Phase 3).
+                # Static-reactivity precompute: scan widgets, apply caps,
+                # re-export per value, splice the lookup table into the
+                # staged page so the JS shim can swap reactive cells.
+                # TODO(v0.2): gate on `book.defaults.mode == "static"` once
+                # WASM render mode lands — WASM pages don't need this.
                 if entry.file.suffix == ".py" and self.book.precompute.enabled:
-                    self._preview_precompute(entry, src_abs, report)
+                    self._run_precompute(entry, src_abs, docs_dir, report)
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
 
@@ -342,18 +367,20 @@ class Preprocessor:
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
 
-    def _preview_precompute(self, entry: FileEntry, src_abs: Path, report: BuildReport) -> None:
-        """Scan a notebook for widget candidates + apply count caps.
+    def _run_precompute(
+        self,
+        entry: FileEntry,
+        src_abs: Path,
+        docs_dir: Path,
+        report: BuildReport,
+    ) -> None:
+        """Detect widget candidates, apply caps, run the per-value re-export.
 
-        Phase 2 of the static-reactivity rollout: we report the inventory
-        and surface cap-violation warnings, but do NOT actually re-export
-        the notebook per value yet (that lands in a follow-up PR). This
-        lets authors enable ``precompute.enabled: true`` early and tune
-        their caps without waiting for the full pipeline.
-
-        The function is a no-op for pages listed in ``exclude_pages``.
-        Per-widget cap violations downgrade the widget to "skipped"; the
-        page-wide cap collapses every candidate on the page to "skipped".
+        v1 only handles single-widget pages; multi-widget pages render
+        every widget static with a warning so the lookup table doesn't
+        explode on combinatorial cross-products. Per-value re-execution
+        happens in :func:`precompute_page` and the result body is
+        spliced into the already-staged page.
         """
         cfg = self.book.precompute
         if page_excluded(entry.file, cfg.exclude_pages):
@@ -367,6 +394,7 @@ class Preprocessor:
         if not candidates:
             return
 
+        # Per-widget count cap (cheap pre-check before any execution).
         kept: list[WidgetCandidate] = []
         for c in candidates:
             if len(c.values) > cfg.max_values_per_widget:
@@ -379,18 +407,50 @@ class Preprocessor:
                 report.widgets_skipped += 1
                 continue
             kept.append(c)
+        if not kept:
+            return
 
-        combos = estimate_combinations(kept)
-        if combos > cfg.max_combinations_per_page:
+        # v1 only handles single-widget pages; multi-widget = static + warning.
+        if len(kept) > 1:
             report.warnings.append(
-                f"{entry.file}: {len(kept)} widgets generate {combos} "
-                f"combinations, exceeding max_combinations_per_page "
-                f"({cfg.max_combinations_per_page}); page rendered static."
+                f"{entry.file}: {len(kept)} precomputable widgets found; "
+                "v1 supports single-widget pages only. All rendered static."
             )
             report.widgets_skipped += len(kept)
             return
 
-        report.widgets_precomputed += len(kept)
+        combos = estimate_combinations(kept)
+        if combos > cfg.max_combinations_per_page:
+            report.warnings.append(
+                f"{entry.file}: widget generates {combos} combinations, "
+                f"exceeding max_combinations_per_page "
+                f"({cfg.max_combinations_per_page}); rendered static."
+            )
+            report.widgets_skipped += len(kept)
+            return
+
+        candidate = kept[0]
+        result = precompute_page(
+            src_abs,
+            candidate,
+            max_seconds=float(cfg.max_seconds_per_page),
+            max_bytes=cfg.max_bytes_per_page,
+            sandbox=self.sandbox,
+        )
+        if result.skipped:
+            report.warnings.append(f"{entry.file}: {result.skip_reason}")
+            report.widgets_skipped += 1
+            return
+        if not result.reactive_cell_indices:
+            return  # widget exists but no downstream cells changed; static is fine
+
+        out_rel = _doc_relpath_for(entry.file)
+        staged_path = docs_dir / out_rel
+        if not staged_path.exists():
+            return
+        original = staged_path.read_text(encoding="utf-8")
+        staged_path.write_text(_splice_precomputed_body(original, result), encoding="utf-8")
+        report.widgets_precomputed += 1
 
     def _stage_changelog(self, docs_dir: Path) -> bool:
         """Copy ``CHANGELOG.md`` into the staged tree.

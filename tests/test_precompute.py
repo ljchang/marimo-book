@@ -1,17 +1,19 @@
-"""Tests for the static-reactivity widget detection (Phase 1).
+"""Tests for the static-reactivity precompute pipeline.
 
-These cover the AST scanner only — no actual notebook execution. The
-re-export + lookup-table pipeline has its own end-to-end tests once
-Phase 3 lands.
+Phase 1+2 (AST scanner + cap preview) and Phase 3a (value substitution +
+re-export with overrides) covered here. Phase 3b/3c (per-cell rendering
++ end-to-end lookup-table) tests live alongside.
 """
 
 from __future__ import annotations
 
 from marimo_book.transforms.precompute import (
     WidgetCandidate,
+    WidgetSubstitutionError,
     estimate_combinations,
     page_excluded,
     scan_widgets,
+    substitute_widget_value,
 )
 
 
@@ -165,6 +167,69 @@ def test_page_excluded_matches_normalised_path() -> None:
     assert page_excluded("content\\heavy.py", ["content/heavy.py"]) is True
 
 
+# --- value substitution (Phase 3a) ----------------------------------------
+
+
+def _single_cand(src: str) -> WidgetCandidate:
+    cands = scan_widgets(src)
+    assert len(cands) == 1
+    return cands[0]
+
+
+def test_substitute_appends_value_kwarg_when_absent() -> None:
+    src = "slider = mo.ui.slider(steps=[0, 1, 5, 10])"
+    out = substitute_widget_value(src, _single_cand(src), 5)
+    assert "value=5" in out
+    assert "steps=[0, 1, 5, 10]" in out
+
+
+def test_substitute_replaces_existing_value_kwarg() -> None:
+    src = "slider = mo.ui.slider(steps=[0, 1, 5, 10], value=1)"
+    out = substitute_widget_value(src, _single_cand(src), 5)
+    assert "value=5" in out
+    assert "value=1" not in out
+
+
+def test_substitute_preserves_surrounding_lines() -> None:
+    src = "# comment\nslider = mo.ui.slider(steps=[0, 1, 5, 10])\n# trailing\n"
+    out = substitute_widget_value(src, _single_cand(src), 5)
+    assert out.startswith("# comment\n")
+    assert out.rstrip().endswith("# trailing")
+
+
+def test_substitute_dropdown_with_string_value() -> None:
+    src = 'd = mo.ui.dropdown(options=["a", "b", "c"])'
+    out = substitute_widget_value(src, _single_cand(src), "b")
+    assert "value='b'" in out
+
+
+def test_substitute_switch_with_bool() -> None:
+    src = "s = mo.ui.switch()"
+    out = substitute_widget_value(src, _single_cand(src), True)
+    assert "value=True" in out
+
+
+def test_substitute_raises_on_multi_line_call() -> None:
+    src = "slider = mo.ui.slider(\n    steps=[0, 1, 5, 10],\n)"
+    cand = _single_cand(src)
+    try:
+        substitute_widget_value(src, cand, 5)
+    except WidgetSubstitutionError:
+        pass
+    else:
+        raise AssertionError("expected WidgetSubstitutionError on multi-line call")
+
+
+def test_substitute_only_touches_target_call() -> None:
+    """Two widgets on consecutive lines — only the targeted one should change."""
+    src = "a = mo.ui.slider(steps=[0, 1])\nb = mo.ui.slider(steps=[10, 20])"
+    cands = scan_widgets(src)
+    out = substitute_widget_value(src, cands[1], 20)  # second slider
+    a_line, b_line = out.split("\n")
+    assert "value" not in a_line  # untouched
+    assert "value=20" in b_line
+
+
 # --- preview integration (Phase 2) ----------------------------------------
 #
 # These cover the inventory + cap-checking layer the preprocessor adds when
@@ -240,24 +305,89 @@ def test_preview_widget_over_max_values_skipped_with_warning(tmp_path: Path) -> 
     assert any("max_values_per_widget" in w for w in report.warnings)
 
 
-def test_preview_page_over_max_combinations_skips_all(tmp_path: Path) -> None:
-    # 11 × 11 × 11 = 1331 combinations on a low cap of 100.
+def test_preview_page_with_multiple_widgets_falls_back_to_static(tmp_path: Path) -> None:
+    """v1 only supports single-widget pages; multi-widget = render static."""
     book = _book_with_widget_notebook(
         tmp_path,
         source="\n    ".join(
             [
-                "a = mo.ui.slider(0, 10, step=1)",
-                "b = mo.ui.slider(0, 10, step=1)",
-                "c = mo.ui.slider(0, 10, step=1)",
+                "a = mo.ui.slider(steps=[0, 1])",
+                "b = mo.ui.slider(steps=[0, 1])",
             ]
         ),
     )
-    book = _enable_precompute(book, max_combinations_per_page=100)
+    book = _enable_precompute(book)
 
     report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
     assert report.widgets_precomputed == 0
-    assert report.widgets_skipped == 3
+    assert report.widgets_skipped == 2
+    assert any("single-widget pages only" in w for w in report.warnings)
+
+
+def test_preview_single_widget_over_max_combinations_skips(tmp_path: Path) -> None:
+    """A single widget whose value count exceeds the combinations cap."""
+    # 20 values on a 10-cap, with the widget cap raised so that's not what trips.
+    big = ", ".join(str(i) for i in range(20))
+    book = _book_with_widget_notebook(tmp_path, source=f"slider = mo.ui.slider(steps=[{big}])")
+    book = _enable_precompute(book, max_values_per_widget=50, max_combinations_per_page=10)
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 0
+    assert report.widgets_skipped == 1
     assert any("max_combinations_per_page" in w for w in report.warnings)
+
+
+def test_precompute_end_to_end_emits_lookup_table(tmp_path: Path) -> None:
+    """Real precompute run should produce a lookup-table script + cell wrappers.
+
+    Drives a tiny book through Preprocessor.build() with a widget whose
+    downstream cell renders different markdown per value, and asserts the
+    staged page contains the JS-discoverable markup.
+    """
+    content = tmp_path / "content"
+    content.mkdir()
+    nb = content / "demo.py"
+    nb.write_text(
+        "import marimo\n\n"
+        "__generated_with = '0.23.3'\n"
+        "app = marimo.App()\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import marimo as mo\n"
+        "    return (mo,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    n = mo.ui.slider(steps=[1, 2, 3])\n"
+        "    return (n,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _(mo, n):\n"
+        "    mo.md(f'value is {n.value}')\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
+    )
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "precompute": {"enabled": True},
+            "toc": [{"file": "content/demo.py"}],
+        }
+    )
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 1, report.warnings
+    assert not report.errors
+
+    staged = (tmp_path / "_site_src" / "docs" / "demo.md").read_text(encoding="utf-8")
+    assert 'class="marimo-book-precompute-control"' in staged
+    assert 'data-precompute-var="n"' in staged
+    assert "data-precompute-cell=" in staged
+    assert 'class="marimo-book-precompute-widget"' in staged
+    assert 'class="marimo-book-precompute-table"' in staged
+    # Lookup keys are JSON-stringified slider values; default (1) is omitted.
+    assert '"2"' in staged
+    assert '"3"' in staged
 
 
 def test_preview_excluded_page_is_silent(tmp_path: Path) -> None:

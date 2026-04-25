@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — static reactivity execution (2/2)
+
+- Per-value re-export pipeline: when `precompute.enabled: true` and a
+  page has a single discrete-widget candidate, the preprocessor runs
+  `marimo export ipynb` once per non-default value (substituting the
+  widget's `value=` via AST surgery in a temp source), captures
+  per-cell HTML, and stores the diff against the base render as a
+  JSON lookup table embedded in the page.
+- `max_seconds_per_page` cap is now wall-clock-enforced: the first
+  re-export's runtime is extrapolated; if projected total exceeds the
+  budget, remaining values are skipped and the page renders static.
+- `max_bytes_per_page` cap is now byte-enforced after each combination
+  is captured.
+- Reactive cells (those whose output differs across at least one value)
+  are wrapped in `<div class="marimo-book-precompute-cell" ...>` for
+  client-side targeting. Cells whose output is identical across all
+  values are not stored — bundle stays bounded by what actually changes.
+- Client-side JS shim (`assets/marimo_book.js`): renders the input
+  control (range slider, select, or checkbox depending on widget kind),
+  reads the embedded lookup table, and swaps reactive cell HTML on
+  input — smooth, no page reflow, headers/sidebar/scroll position all
+  preserved.
+- New CSS for `.marimo-book-precompute-control` and the input controls
+  (Material-themed, accent-coloured slider, tabular-numerics for the
+  value label).
+- New "Static reactivity" section in `docs/content/building.md`
+  documenting the feature, the detection rules, the caps, and the v1
+  limitations (single-widget pages only, Path-X execution path).
+- New live demo chapter at `docs/content/precompute_demo.py` —
+  temperature-conversion slider that swaps a Markdown table per value.
+  Visible at `Authoring → Static reactivity demo` on the docs site
+  with `precompute.enabled: true`.
+- `Preprocessing OK` summary now reports precompute counts:
+  `(14 pages, 13 rendered, 0 cached, 1 precomputed, 0 skipped)`.
+- v1 limitation: multi-widget pages render every widget static with a
+  warning. Multi-widget cross-products + Path-Y subgraph re-execution
+  are deferred to v2 / when WASM render mode lands.
+
 ### Added — static reactivity foundation (1/2)
 
 - `book.yml` `precompute` block (off by default) — opt-in static

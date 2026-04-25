@@ -120,12 +120,154 @@
     });
   }
 
+  // ---- Static reactivity (precompute) ------------------------------------
+  //
+  // The preprocessor injects three things per page when book.precompute
+  // succeeds for that page:
+  //
+  //   1. <div class="marimo-book-precompute-control">  — empty mount where
+  //      we render the input control (range / select / checkbox).
+  //   2. <div class="marimo-book-precompute-cell" data-precompute-cell="N">
+  //      — wraps each cell whose output differs across widget values.
+  //   3. Two <script type="application/json"> blocks: -widget (metadata) and
+  //      -table (per-value cell HTML deltas).
+  //
+  // On input we look up the value's delta and swap the affected cells'
+  // innerHTML; cells absent from the delta restore to their initial
+  // (default-value) HTML, snapshotted at first init.
+
+  function valueKey(value) {
+    return JSON.stringify(value);
+  }
+
+  function buildSliderControl(widget) {
+    const wrap = document.createElement("div");
+    wrap.className = "marimo-book-precompute-input marimo-book-precompute-input--slider";
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = "0";
+    input.max = String(widget.values.length - 1);
+    input.step = "1";
+    const defaultIdx = Math.max(0, widget.values.indexOf(widget.default));
+    input.value = String(defaultIdx);
+    const label = document.createElement("output");
+    label.className = "marimo-book-precompute-label";
+    label.textContent = String(widget.values[defaultIdx]);
+    wrap.appendChild(input);
+    wrap.appendChild(label);
+    function getValue() { return widget.values[parseInt(input.value, 10)]; }
+    function syncLabel() { label.textContent = String(getValue()); }
+    return { wrap, input, getValue, syncLabel };
+  }
+
+  function buildSelectControl(widget) {
+    const wrap = document.createElement("div");
+    wrap.className = "marimo-book-precompute-input marimo-book-precompute-input--select";
+    const select = document.createElement("select");
+    widget.values.forEach((v, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = String(v);
+      select.appendChild(opt);
+    });
+    const defaultIdx = Math.max(0, widget.values.indexOf(widget.default));
+    select.value = String(defaultIdx);
+    wrap.appendChild(select);
+    function getValue() { return widget.values[parseInt(select.value, 10)]; }
+    function syncLabel() {}
+    return { wrap, input: select, getValue, syncLabel };
+  }
+
+  function buildCheckboxControl(widget) {
+    const wrap = document.createElement("label");
+    wrap.className = "marimo-book-precompute-input marimo-book-precompute-input--checkbox";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = widget.default === true;
+    wrap.appendChild(input);
+    const span = document.createElement("span");
+    span.textContent = " " + (widget.var_name || "value");
+    wrap.appendChild(span);
+    function getValue() { return input.checked; }
+    function syncLabel() {}
+    return { wrap, input, getValue, syncLabel };
+  }
+
+  function buildControl(widget) {
+    if (widget.kind === "slider") return buildSliderControl(widget);
+    if (widget.kind === "dropdown" || widget.kind === "radio") return buildSelectControl(widget);
+    if (widget.kind === "switch") return buildCheckboxControl(widget);
+    return null;
+  }
+
+  function initPrecomputeOnce(scope) {
+    const widgetEl = scope.querySelector(
+      "script.marimo-book-precompute-widget:not([data-mb-precompute-init])"
+    );
+    if (!widgetEl) return;
+    const tableEl = scope.querySelector(
+      "script.marimo-book-precompute-table:not([data-mb-precompute-init])"
+    );
+    if (!tableEl) return;
+    const controlEl = scope.querySelector(
+      ".marimo-book-precompute-control:not([data-mb-precompute-init])"
+    );
+    if (!controlEl) return;
+
+    let widget, table;
+    try {
+      widget = JSON.parse(widgetEl.textContent || "{}");
+      table = JSON.parse(tableEl.textContent || "{}");
+    } catch (err) {
+      console.error("[marimo-book] precompute JSON parse failed", err);
+      return;
+    }
+
+    const built = buildControl(widget);
+    if (!built) return;
+
+    // Snapshot the initial (default-value) HTML of every reactive cell so
+    // we can restore it when the user returns to the default value.
+    const cells = scope.querySelectorAll("[data-precompute-cell]");
+    const baseSnapshot = {};
+    cells.forEach((el) => {
+      const idx = el.getAttribute("data-precompute-cell");
+      baseSnapshot[idx] = el.innerHTML;
+    });
+
+    function applyValue() {
+      const value = built.getValue();
+      const key = valueKey(value);
+      const delta = table[key] || {};
+      cells.forEach((el) => {
+        const idx = el.getAttribute("data-precompute-cell");
+        const html = Object.prototype.hasOwnProperty.call(delta, idx) ? delta[idx] : baseSnapshot[idx];
+        if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+      });
+      if (typeof built.syncLabel === "function") built.syncLabel();
+    }
+
+    built.input.addEventListener("input", applyValue);
+    built.input.addEventListener("change", applyValue);
+    controlEl.appendChild(built.wrap);
+
+    widgetEl.setAttribute("data-mb-precompute-init", "1");
+    tableEl.setAttribute("data-mb-precompute-init", "1");
+    controlEl.setAttribute("data-mb-precompute-init", "1");
+  }
+
+  function bootAll(root) {
+    const scope = root || document;
+    hydrateAll(scope);
+    initPrecomputeOnce(scope);
+  }
+
   if (typeof document$ !== "undefined" && document$.subscribe) {
-    // Material for MkDocs instant-navigation: re-hydrate after each load.
-    document$.subscribe(() => hydrateAll(document));
+    // Material for MkDocs instant-navigation: re-init after each load.
+    document$.subscribe(() => bootAll(document));
   } else if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => hydrateAll(document));
+    document.addEventListener("DOMContentLoaded", () => bootAll(document));
   } else {
-    hydrateAll(document);
+    bootAll(document);
   }
 })();

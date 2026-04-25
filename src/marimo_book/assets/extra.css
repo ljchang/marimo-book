@@ -330,3 +330,68 @@ pre.marimo-error {
 
 /* Marimo callouts come through as .admonition with an extra marker class;
    no overrides needed — Material styles them. */
+
+/* --- Static reactivity (precompute) -------------------------------------- */
+/* Renders for the input control + the cell-swap target. Kept minimal; sits
+   inline in the page just above the first reactive cell. */
+
+.marimo-book-precompute-control {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  margin: 0 0 1.25rem 0;
+  border-radius: 4px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  background: var(--md-default-bg-color--light);
+  font-size: 0.78rem;
+}
+.marimo-book-precompute-control:empty {
+  display: none;
+}
+.marimo-book-precompute-control::before {
+  content: "Adjust:";
+  font-weight: 600;
+  color: var(--md-default-fg-color--lighter);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.62rem;
+}
+
+.marimo-book-precompute-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+.marimo-book-precompute-input--slider input[type="range"] {
+  flex: 1;
+  accent-color: var(--md-primary-fg-color);
+  height: 1.25rem;
+}
+.marimo-book-precompute-input--select select {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 3px;
+  padding: 0.2rem 0.4rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  font-family: inherit;
+  font-size: 0.78rem;
+}
+.marimo-book-precompute-input--checkbox input[type="checkbox"] {
+  accent-color: var(--md-primary-fg-color);
+  margin: 0;
+}
+.marimo-book-precompute-label {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--md-primary-fg-color);
+  min-width: 2.5rem;
+  text-align: right;
+}
+
+.marimo-book-precompute-cell {
+  /* Reactive cell wrapper — invisible chrome, just a swap target. */
+  display: block;
+}

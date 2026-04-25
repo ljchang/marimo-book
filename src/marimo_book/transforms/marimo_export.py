@@ -99,6 +99,33 @@ def export_notebook(
     )
 
 
+def export_notebook_with_overrides(
+    py_path: Path,
+    *,
+    rewritten_source: str,
+    include_outputs: bool = True,
+    sandbox: bool = False,
+) -> ExportedNotebook:
+    """Run ``marimo export`` against ``rewritten_source`` instead of the file.
+
+    Used by the static-reactivity precompute pipeline: it AST-rewrites the
+    notebook's source to substitute a widget's ``value=`` (one variant per
+    combination), then re-exports to capture cell outputs at that value.
+
+    The rewritten source is written to a temp file inside ``py_path``'s
+    parent directory so relative imports resolve identically to the
+    original notebook. The temp file's stem matches the original (with a
+    suffix) so any user-facing path strings stay intuitive.
+    """
+    py_path = Path(py_path)
+    with tempfile.TemporaryDirectory(
+        prefix="marimo_book_precompute_", dir=py_path.parent
+    ) as tmp_dir:
+        tmp_in = Path(tmp_dir) / py_path.name
+        tmp_in.write_text(rewritten_source, encoding="utf-8")
+        return export_notebook(tmp_in, include_outputs=include_outputs, sandbox=sandbox)
+
+
 def cells_to_markdown(
     exported: ExportedNotebook,
     *,
@@ -112,10 +139,33 @@ def cells_to_markdown(
     ``import marimo as mo`` setup. Any marimo notebook whose first cell
     *does* produce an output (rare) keeps it unchanged.
     """
-    parts: list[str] = []
+    segments = cells_to_markdown_segments(
+        exported,
+        hide_first_code_cell=hide_first_code_cell,
+        widget_defaults=widget_defaults,
+    )
+    return _join_segments(segments)
+
+
+def cells_to_markdown_segments(
+    exported: ExportedNotebook,
+    *,
+    hide_first_code_cell: bool = True,
+    widget_defaults: dict | None = None,
+) -> list[tuple[int, str]]:
+    """Render the notebook into ``(cell_index, body)`` tuples, in order.
+
+    Used by the static-reactivity precompute path so the orchestrator can
+    diff individual cells across re-exports. ``cell_index`` is the index
+    into ``exported.cells`` (so it survives even if some cells get
+    dropped by the hide-first-code-cell rule). The :func:`cells_to_markdown`
+    public API joins these into a single Markdown string for the normal
+    render path.
+    """
+    out: list[tuple[int, str]] = []
     first_md_done = False
     first_code_seen = False
-    for cell in exported.cells:
+    for idx, cell in enumerate(exported.cells):
         if cell.get("cell_type") == "code" and not first_code_seen:
             first_code_seen = True
             if hide_first_code_cell and not cell.get("outputs"):
@@ -126,11 +176,15 @@ def cells_to_markdown(
             widget_defaults=widget_defaults,
         )
         if rendered:
-            parts.append(rendered)
+            out.append((idx, rendered))
             if cell.get("cell_type") == "markdown":
                 first_md_done = True
-    # Normalize whitespace: no more than a single blank line between blocks.
-    joined = "\n\n".join(p.strip("\n") for p in parts if p.strip())
+    return out
+
+
+def _join_segments(segments: list[tuple[int, str]]) -> str:
+    """Same whitespace normalisation as the legacy :func:`cells_to_markdown`."""
+    joined = "\n\n".join(body.strip("\n") for _, body in segments if body.strip())
     return re.sub(r"\n{3,}", "\n\n", joined) + "\n"
 
 

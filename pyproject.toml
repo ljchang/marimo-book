@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "marimo-book"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Build clean, searchable static books from marimo notebooks and markdown"
 readme = "README.md"
 license = "MIT"

@@ -46,3 +46,11 @@ _site_src/
 uv.lock
 .python-version
 __marimo__/
+
+# Browser-automation artifacts (Playwright MCP screenshots, snapshots)
+.playwright-mcp/
+# Stray screenshots at repo root only — leading slash anchors to root,
+# so legit assets under .github/, docs/, src/, etc. are unaffected.
+/*.png
+/*.jpg
+/*.jpeg

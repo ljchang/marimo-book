@@ -12,6 +12,8 @@ becomes a page.
 
 ### Admonitions
 
+Source:
+
 ```markdown
 !!! note
     Notes are blue.
@@ -23,13 +25,54 @@ becomes a page.
     Uses `pymdownx.details` syntax — collapses when you click.
 ```
 
-Supported types: `note`, `tip`, `warning`, `danger`, `important`,
-`seealso`, `abstract`, `info`, `success`, `question`, `failure`, `bug`,
-`example`, `quote`.
+Renders as:
+
+!!! note
+    Notes are blue.
+
+!!! warning "A custom title"
+    Warnings are orange.
+
+???+ tip "Collapsible (default open)"
+    Uses `pymdownx.details` syntax — collapses when you click.
+
+Supported types — each renders with its own icon and color stripe:
+
+!!! note
+    `note` — neutral blue, the default for general callouts.
+
+!!! tip
+    `tip` — green, for helpful asides.
+
+!!! info
+    `info` — cyan, for context the reader needs but isn't critical.
+
+!!! warning
+    `warning` — orange, for "watch out" guidance.
+
+!!! danger
+    `danger` — red, for breaking changes or destructive operations.
+
+!!! success
+    `success` — green checkmark, for confirmation.
+
+!!! question
+    `question` — purple, for FAQ-style content.
+
+!!! abstract
+    `abstract` — for executive summaries at the top of a long page.
+
+!!! example
+    `example` — gold, for worked examples.
+
+!!! quote
+    `quote` — for pull quotes from other sources.
+
+Other types: `important`, `seealso`, `failure`, `bug` — same pattern.
 
 ### Math
 
-Inline `$x^2$` and block `$$...$$` blocks work. amsmath environments
+Inline `$x^2$` renders as $x^2$. Block `$$...$$` and amsmath environments
 (`align`, `equation`, etc.) are supported:
 
 ```markdown
@@ -40,13 +83,30 @@ $$
 $$
 ```
 
+Renders as:
+
+$$
+\begin{align}
+\hat{\boldsymbol{\beta}} &= (X^\top X)^{-1} X^\top \mathbf{y}
+\end{align}
+$$
+
 ### Code blocks
 
-```markdown
+Source:
+
+````markdown
 ```python
 def hello():
     return "world"
 ```
+````
+
+Renders as:
+
+```python
+def hello():
+    return "world"
 ```
 
 Syntax-highlighted, with a copy button in the top-right corner. Works
@@ -54,7 +114,9 @@ for every language Pygments understands.
 
 ### Tables
 
-Standard GitHub-flavoured Markdown tables work:
+Standard GitHub-flavoured Markdown tables work.
+
+Source:
 
 ```markdown
 | Column | Type | Notes |
@@ -62,6 +124,13 @@ Standard GitHub-flavoured Markdown tables work:
 | a     | int  | ok    |
 | b     | str  | ok    |
 ```
+
+Renders as:
+
+| Column | Type | Notes |
+|---|---|---|
+| a     | int  | ok    |
+| b     | str  | ok    |
 
 ### Images
 
@@ -76,6 +145,72 @@ If your `.md` lives under `content/` and images are at the repo root
 `images/`, the relative path `../images/foo.png` works in source —
 `marimo-book` auto-rewrites it to `images/foo.png` in the staged output
 so it resolves correctly in the final site.
+
+### Cross-references
+
+`marimo-book` uses Material's standard Markdown — same syntax for cross-refs
+inside both `.md` files and `mo.md(...)` cells.
+
+**Page → page.** Reference another file in your TOC by its source path:
+
+```markdown
+See [Notebook dependencies](dependencies.md) for the full picture.
+```
+
+Renders as: See [Notebook dependencies](dependencies.md) for the full
+picture.
+
+**Page → specific heading on another page.** Append the heading slug:
+
+```markdown
+Jump to [sandbox mode](dependencies.md#sandbox-mode) directly.
+```
+
+Heading slugs are auto-generated from the heading text — lowercased,
+spaces become hyphens, punctuation stripped. Renders as: Jump to
+[sandbox mode](dependencies.md#sandbox-mode) directly.
+
+**Within-page anchor.** Same syntax, drop the file:
+
+```markdown
+[Back to top](#authoring-content).
+```
+
+**Resolve by heading text (opt-in).** With `cross_references: true` in
+`book.yml`, you can write `[Heading text][]` and it resolves to whatever
+page has that heading — the MkDocs equivalent of MyST's `{ref}`. Useful
+when you don't want to hard-code paths:
+
+```markdown
+The [Anywidgets][] page covers the JS shim in detail.
+```
+
+The [Anywidgets][] page covers the JS shim in detail.
+
+This requires the optional plugin: `pip install 'marimo-book[autorefs]'`.
+
+**Term tooltips.** Define an abbreviation once and it becomes a hover
+tooltip everywhere on the page:
+
+```markdown
+The *[HTML]* output is bundled inline.
+
+*[HTML]: HyperText Markup Language
+```
+
+The *[HTML]* output is bundled inline.
+
+*[HTML]: HyperText Markup Language
+
+**File includes.** Pull a snippet from another file using
+`pymdownx.snippets`:
+
+```markdown
+--8<-- "snippets/license-blurb.md"
+```
+
+Useful for things you need to repeat across pages (license footers,
+install snippets, etc.).
 
 ## Marimo notebooks (`.py`)
 

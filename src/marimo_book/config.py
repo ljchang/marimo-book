@@ -244,6 +244,15 @@ class Book(BaseModel):
     # Requires: ``pip install marimo-book[social]``.
     social_cards: bool = False
 
+    # Opt-in cross-reference resolution by heading text — the MkDocs analog
+    # of MyST ``{ref}``. When true, the generated mkdocs.yml adds the
+    # ``autorefs`` plugin so authors can write ``[Heading text][]`` and have
+    # it resolve to whatever page contains that heading. Headings on the
+    # same page already resolve via Material's standard anchor IDs; this
+    # flag enables the cross-page case. Requires:
+    # ``pip install marimo-book[autorefs]``.
+    cross_references: bool = False
+
     # render defaults
     defaults: Defaults = Field(default_factory=Defaults)
 

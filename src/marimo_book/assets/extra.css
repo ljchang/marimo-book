@@ -1,5 +1,267 @@
 /* marimo-book default stylesheet — Material-for-MkDocs overrides. */
 
+/* --- Mono + violet-ink: modernized Material defaults --------------------- */
+/* Neutrals (zinc scale), typography, spacing, and a deep-black dark scheme.
+   Palette primary/accent still come from book.yml via preprocessor injection
+   at :root {}; this block tunes everything else plus per-scheme contrast. */
+
+:root {
+  --md-default-bg-color:              #ffffff;
+  --md-default-bg-color--light:       #fafafa;
+  --md-default-fg-color:              #09090b;  /* zinc 950 */
+  --md-default-fg-color--light:       #3f3f46;  /* zinc 700 */
+  --md-default-fg-color--lighter:     #a1a1aa;  /* zinc 400 */
+  --md-default-fg-color--lightest:    #e4e4e7;  /* zinc 200 — hairline borders */
+  --md-code-bg-color:                 #f4f4f5;  /* zinc 100 */
+  --md-code-fg-color:                 #18181b;
+  --md-accent-fg-color--transparent:  rgba(99, 102, 241, 0.08);
+  --md-typeset-a-color:               var(--md-primary-fg-color);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color:              #0a0a0a;
+  --md-default-bg-color--light:       #111113;
+  --md-default-bg-color--lighter:     #17171a;
+  --md-default-fg-color:              #fafafa;
+  --md-default-fg-color--light:       #d4d4d8;
+  --md-default-fg-color--lighter:     #71717a;
+  --md-default-fg-color--lightest:    #27272a;  /* zinc 800 */
+  --md-code-bg-color:                 #111113;
+  --md-code-fg-color:                 #e4e4e7;
+  /* Lift primary/accent in dark mode (indigo 400 instead of 500) */
+  --md-primary-fg-color:              #818cf8 !important;
+  --md-accent-fg-color:               #818cf8;
+  --md-accent-fg-color--transparent:  rgba(129, 140, 248, 0.12);
+  --md-typeset-color:                 #e4e4e7;
+  --md-typeset-a-color:               #a5b4fc;  /* indigo 300 */
+}
+
+/* --- Typography: lighter headers, generous line-height ------------------- */
+.md-typeset {
+  font-size: 0.82rem;
+  line-height: 1.7;
+  font-weight: 400;
+}
+
+/* h1: large but light — size carries the hierarchy, weight stays sleek.
+   Violet ink for the page title; everything below stays grayscale. */
+.md-typeset h1 {
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  font-size: 2.4rem;
+  line-height: 1.1;
+  margin-bottom: 1.6rem;
+  color: var(--md-primary-fg-color);
+}
+
+/* h2: section heading. Lighter weight, no top border (was too heavy). */
+.md-typeset h2 {
+  font-weight: 550;
+  letter-spacing: -0.018em;
+  font-size: 1.45rem;
+  margin-top: 2.4em;
+  color: var(--md-default-fg-color);
+}
+.md-typeset h3 {
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  color: var(--md-default-fg-color);
+}
+
+/* Wider content column — Material's default ~61rem feels cramped. */
+.md-grid { max-width: 68rem; }
+
+/* --- Sidebar hierarchy: distinguish sections from leaf links ------------- */
+/* Material renders top-level section labels as `<label class="md-nav__link">`
+   inside `.md-nav__item--section` when `navigation.sections` is on. We
+   target both the link form and the label form for safety. */
+.md-nav--primary .md-nav__item--section > .md-nav__link,
+.md-nav--primary .md-nav__item--section > label.md-nav__link {
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--md-default-fg-color--lighter);
+  margin-top: 1.5rem;
+  margin-bottom: 0.25rem;
+  cursor: default;
+}
+.md-nav--primary .md-nav__item--section:first-of-type > .md-nav__link,
+.md-nav--primary .md-nav__item--section:first-of-type > label.md-nav__link {
+  margin-top: 0.4rem;
+}
+/* Indent leaf chapter links under their section header. */
+.md-nav--primary .md-nav__item--section .md-nav__list .md-nav__item .md-nav__link {
+  padding-left: 0.9rem;
+  font-size: 0.74rem;
+  font-weight: 400;
+}
+/* Top-level (no-section) leaf links: keep flush. */
+.md-nav--primary > .md-nav__list > .md-nav__item:not(.md-nav__item--section) > .md-nav__link {
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+/* --- Footer: airy light mode, blended dark mode -------------------------- */
+/* Material's default footer is a heavy dark bar in both schemes — fights
+   the minimal aesthetic. Make it match the page bg with a hairline border,
+   and bump text contrast so the prev/next nav and copyright actually read. */
+.md-footer {
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+}
+.md-footer__link {
+  opacity: 1;
+}
+.md-footer__link:hover {
+  opacity: 1;
+}
+.md-footer__title {
+  color: var(--md-default-fg-color);
+  font-weight: 500;
+}
+.md-footer__direction {
+  color: var(--md-default-fg-color--lighter);
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  opacity: 1;
+}
+.md-footer__button {
+  color: var(--md-default-fg-color--light);
+}
+.md-footer-meta {
+  background: var(--md-default-bg-color--light);
+  color: var(--md-default-fg-color--light);
+}
+.md-footer-meta.md-typeset a {
+  color: var(--md-default-fg-color--light);
+}
+.md-footer-meta.md-typeset a:hover {
+  color: var(--md-primary-fg-color);
+}
+.md-copyright {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.72rem;
+}
+.md-copyright__highlight {
+  color: var(--md-default-fg-color);
+}
+
+/* --- Right-side TOC: mirror the left sidebar treatment ------------------- */
+/* "Table of contents" header: uppercase, tracked, muted — same vocab as
+   the section labels in the left sidebar. */
+.md-nav--secondary .md-nav__title {
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--md-default-fg-color--lighter);
+  padding: 0 0 0.4rem 0;
+  margin-bottom: 0.4rem;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  background: transparent;
+  box-shadow: none;
+}
+/* TOC entries: smaller, lighter, with the same indent feel as left sidebar. */
+.md-nav--secondary .md-nav__link {
+  font-size: 0.74rem;
+  font-weight: 400;
+  padding-left: 0.9rem;
+  margin: 0.05rem 0;
+  border-left: 1px solid transparent;
+  transition: color 0.1s, border-color 0.1s;
+}
+/* Nested TOC entries (h3 inside h2) get an extra indent. */
+.md-nav--secondary .md-nav__list .md-nav__list .md-nav__link {
+  padding-left: 1.5rem;
+  font-size: 0.7rem;
+}
+/* Active heading (toc.follow): violet text + matching left stripe. */
+.md-nav--secondary .md-nav__link--active {
+  color: var(--md-primary-fg-color);
+  font-weight: 500;
+  border-left-color: var(--md-primary-fg-color);
+}
+
+/* --- Links: hairline underline, accent only on hover --------------------- */
+.md-typeset a:not(.md-button):not(.headerlink) {
+  color: var(--md-default-fg-color);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: var(--md-default-fg-color--lighter);
+  transition: color 0.12s, text-decoration-color 0.12s;
+}
+.md-typeset a:not(.md-button):not(.headerlink):hover {
+  color: var(--md-primary-fg-color);
+  text-decoration-color: var(--md-primary-fg-color);
+}
+
+/* --- Code: sharp corners, hairline border (not chunky) ------------------- */
+.md-typeset pre > code,
+.md-typeset .highlight > pre {
+  border-radius: 4px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+.md-typeset :not(pre) > code {
+  border-radius: 3px;
+  padding: 0.1em 0.38em;
+  font-size: 0.86em;
+  background: var(--md-code-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* --- Navigation: minimal, color-only active state ------------------------ */
+.md-nav__link { transition: color 0.1s; }
+.md-nav__link--active,
+.md-nav__link[aria-current="page"] {
+  color: var(--md-primary-fg-color);
+  font-weight: 500;
+}
+
+/* --- Header: hairline bottom, no shadow ---------------------------------- */
+.md-header {
+  box-shadow: none;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+}
+.md-header__title { font-weight: 600; }
+/* Site title in the header bar — match the violet h1 treatment so the
+   accent reads consistently across page titles and chrome. */
+.md-header__topic .md-ellipsis,
+.md-header__topic > .md-header__button + .md-ellipsis {
+  color: var(--md-primary-fg-color);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* --- Admonitions: thin left stripe, no heavy fill ------------------------ */
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 4px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-left-width: 3px;
+  box-shadow: none;
+}
+
+/* --- Tables: hairlines, sharp corners ------------------------------------ */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 0.78rem;
+}
+.md-typeset table:not([class]) th {
+  background: var(--md-default-bg-color--light);
+  font-weight: 600;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* --- marimo-book-specific elements (preserved) --------------------------- */
+
 /* Launch buttons row at the top of each page. */
 .marimo-book-buttons {
   display: flex;
@@ -12,29 +274,33 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.35rem 0.85rem;
-  border-radius: 0.375rem;
-  background: var(--md-default-bg-color--light, #f5f5f5);
-  color: var(--md-default-fg-color, #333);
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--md-default-fg-color);
   text-decoration: none;
-  font-size: 0.85rem;
+  font-size: 0.72rem;
   font-weight: 500;
-  border: 1px solid var(--md-default-fg-color--lightest, #ddd);
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  letter-spacing: 0.005em;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 .marimo-book-button:hover {
-  background: var(--md-primary-fg-color--light, #eef);
-  border-color: var(--md-primary-fg-color, #446);
-  color: var(--md-primary-fg-color, #446);
+  background: transparent;
+  border-color: var(--md-primary-fg-color);
+  color: var(--md-primary-fg-color);
+  text-decoration: none;
 }
 
 [data-md-color-scheme="slate"] .marimo-book-button {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.12);
-  color: var(--md-default-fg-color, #eee);
+  background: transparent;
+  border-color: var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color--light);
 }
 [data-md-color-scheme="slate"] .marimo-book-button:hover {
-  background: rgba(255,255,255,0.12);
+  background: transparent;
+  border-color: var(--md-primary-fg-color);
+  color: var(--md-primary-fg-color);
 }
 
 /* Marimo cell output containers. */

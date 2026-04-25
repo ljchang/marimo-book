@@ -11,55 +11,8 @@ from marimo_book.transforms.marimo_export import (
     cells_to_markdown,
     export_notebook,
 )
-from marimo_book.transforms.md_roles import (
-    apply_md_transforms,
-    rewrite_download_roles,
-    strip_glossary_fences,
-)
 
 FIXTURES = Path(__file__).parent / "fixtures"
-
-
-# --- md_roles ---------------------------------------------------------------
-
-
-def test_rewrite_download_role_with_text() -> None:
-    md = "See {download}`slides <lectures/foo.pdf>` for context."
-    out = rewrite_download_roles(md)
-    assert "[slides](lectures/foo.pdf)" in out
-    assert "{download}" not in out
-
-
-def test_rewrite_download_role_without_text_uses_filename() -> None:
-    md = "See {download}` <lectures/bar.pdf>` for context."
-    out = rewrite_download_roles(md)
-    assert "[bar.pdf](lectures/bar.pdf)" in out
-
-
-def test_strip_glossary_fences_preserves_definition_list() -> None:
-    md = """
-:::{glossary}
-marimo
-: A reactive notebook.
-:::
-""".lstrip()
-    out = strip_glossary_fences(md)
-    assert ":::{glossary}" not in out
-    assert out.count("\n:::\n") == 0  # closing fence removed
-    assert "marimo\n: A reactive notebook." in out
-
-
-def test_apply_md_transforms_runs_both() -> None:
-    md = """See {download}`here <foo.pdf>`.
-
-:::{glossary}
-term
-: def
-:::
-"""
-    out = apply_md_transforms(md)
-    assert "[here](foo.pdf)" in out
-    assert ":::" not in out
 
 
 # --- callouts ---------------------------------------------------------------

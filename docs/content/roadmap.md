@@ -12,8 +12,8 @@ not a contract.
   palette, launch buttons, per-widget defaults, analytics,
   dependencies mode, external-link checker flag, TOC
 - Preprocessor transforms: marimo `.py` → Markdown + inlined outputs;
-  callouts, anywidgets, `{download}` role, `:::{glossary}` fences,
-  `.ipynb` cross-ref rewrite, `../images/` path fixup
+  callouts, anywidgets, `.ipynb` → `.md` cross-ref rewrite,
+  `../images/` path fixup
 - Anywidget runtime shim (client-side rehydration, no marimo kernel)
 - Material for MkDocs shell with sensible defaults; dark mode,
   full-text search, code-copy buttons, responsive theme
@@ -87,6 +87,32 @@ differential-build engine, a faster client search (Disco), and a
 longer support runway than Material for MkDocs which is entering
 12-month maintenance mode.
 
+**Smoke test — 2026-04-24 (zensical 0.0.36):** a `pip install zensical`
+run against the `_site_src/mkdocs.yml` that `marimo-book build` emits
+*builds successfully in 0.21s* — ~5× the speed of MkDocs on this site
+— and picks up our custom `extra.css`, Inter/JetBrains Mono fonts,
+and `theme.palette` hex. Observations from the first build:
+
+- The Rust core panics (`invariant: Format(Path(RootDir))`) on
+  absolute `site_dir` paths. `shell.py` currently emits absolute
+  paths; the port will need to emit relative or pre-resolve.
+- `zensical new` generates a `zensical.toml` with a different
+  schema than `mkdocs.yml` (TOML tables, no `plugins:`, Lucide icons
+  instead of `material/*`). The compat-page claim of "no new config
+  format to learn" is currently aspirational; a real port will still
+  want to emit a zensical-native config rather than relying on the
+  YAML fallback.
+- Plugins we use (`social`, `htmlproofer`) are not in zensical's
+  0.0.x plugin surface yet. Search is built-in (Disco).
+- Nav entries lose explicit `title:` labels; zensical uses the
+  page's `# H1` instead. Preserving TOC titles will need a config
+  or preprocessor change.
+- Our icon uses (`material/weather-sunny`) render as Lucide
+  substitutes.
+
+Net: zensical is further along than the 2026 v0.3 expectation, but
+still 0.0.x. A real port remains a v0.3 item, not a near-term swap.
+
 Timeline: tracking zensical's own trajectory, not ours. Likely
 6–12 months out.
 
@@ -126,9 +152,10 @@ Things we've deliberately decided not to do, with reasoning:
 - **A kernel runner.** The static site serves HTML + JS; no server-side
   execution. Reactivity comes from anywidgets (client-side) or molab
   (external).
-- **Perfect MyST syntax compatibility.** We support the MyST directives
-  and roles that actual books use; the long tail (`{numref}`,
-  `{glossary}`, `{xref}`, etc.) is case-by-case.
+- **MyST syntax.** marimo-book uses Material for MkDocs's Markdown dialect
+  (`!!! note` for admonitions, `[label](page.md)` for cross-refs). Existing
+  Jupyter Book content using MyST directives like `:::{glossary}` or roles
+  like `{download}` needs a one-time migration to Material syntax.
 
 ## How to influence this
 

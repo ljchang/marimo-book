@@ -62,6 +62,13 @@ linkcheck = [
 social = [
     "mkdocs-material[imaging]>=9.5",
 ]
+# Opt-in cross-reference resolution by heading text — the MkDocs analog
+# of MyST `{ref}`. Enable via `cross_references: true` in book.yml and
+# install this extra. Lets you write `[Heading text][]` and have it
+# resolve to whatever page contains that heading.
+autorefs = [
+    "mkdocs-autorefs>=1.0",
+]
 
 [project.urls]
 Homepage = "https://ljchang.github.io/marimo-book/"

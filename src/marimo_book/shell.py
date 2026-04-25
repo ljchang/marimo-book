@@ -106,6 +106,11 @@ def _build_config(
                 }
             }
         )
+    if book.cross_references:
+        # mkdocs-autorefs resolves ``[Heading text][]`` against any heading
+        # in the site, regardless of which page it lives on. Must come
+        # AFTER ``search`` in the plugins list so it sees the indexed pages.
+        plugins.append("autorefs")
     cfg["plugins"] = plugins
 
     # Analytics

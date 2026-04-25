@@ -5,6 +5,35 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `book.yml` `cross_references: bool` flag opts into the
+  `mkdocs-autorefs` plugin so authors can write `[Heading text][]` and
+  have it resolve to whatever page has that heading — the MkDocs analog
+  of MyST `{ref}`. Requires the new `marimo-book[autorefs]` extra.
+- Default stylesheet (`assets/extra.css`) modernized: zinc neutrals,
+  near-black dark scheme (`#0a0a0a`), Geist Sans + Geist Mono via
+  `theme.font`, indigo accent on h1 / header title, uppercase tracked
+  section labels in left sidebar + right TOC, hairline footer that
+  matches page bg in both schemes. Carries forward to zensical.
+- README badges (PyPI version, Python versions, CI, License, Docs).
+- Live admonition / math / table / code examples on the Authoring page.
+- Cross-references documentation on the Authoring page (page-to-page,
+  anchors, abbreviations, snippets, autorefs).
+
+### Removed
+
+- **Breaking:** MyST migration transforms (`{download}` role rewrite,
+  `:::{glossary}` fence stripping). marimo-book now uses Material's
+  Markdown dialect exclusively. Books written for marimo-book have
+  always used Material syntax (`!!! note` admonitions, `[label](page.md)`
+  links); the removed transforms only affected content ported from
+  Jupyter Book. To migrate: replace `{download}\`text <path>\`` with
+  `[text](path)` and remove `:::{glossary}` / `:::` fence markers (the
+  inner definition lists pass through Material's `def_list` natively).
+
 ## [0.1.0a2] — 2026-04-24
 
 Metadata + ergonomics pass on top of 0.1.0a1.

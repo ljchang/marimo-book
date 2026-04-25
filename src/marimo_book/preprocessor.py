@@ -30,7 +30,6 @@ from .launch_buttons import render_button_row
 from .shell import emit_mkdocs_yml
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import cells_to_markdown, export_notebook
-from .transforms.md_roles import apply_md_transforms
 
 # Directories and glob patterns of assets we copy verbatim when present.
 _ASSET_DIRS: tuple[str, ...] = ("images", "Code", "data")
@@ -229,8 +228,7 @@ def _render_marimo(src: Path, book: Book, *, sandbox: bool = False) -> str:
 
 
 def _render_markdown(src: Path) -> str:
-    raw = src.read_text(encoding="utf-8")
-    return apply_md_transforms(raw)
+    return src.read_text(encoding="utf-8")
 
 
 def _compose_page(buttons: str, body: str) -> str:

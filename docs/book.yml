@@ -17,8 +17,11 @@ url: https://ljchang.github.io/marimo-book/
 
 theme:
   palette:
-    primary: "#2E7D32"   # marimo green-ish
-    accent:  "#66BB6A"
+    primary: "#6366f1"   # indigo 500 — muted violet accent
+    accent:  "#818cf8"   # indigo 400
+  font:
+    text: Geist
+    code: Geist Mono
 
 launch_buttons:
   molab: true
@@ -32,6 +35,11 @@ dependencies:
 # `pip install 'marimo-book[social]'` — which our CI does — and bundles
 # cairosvg + Pillow for rasterising the Material template.
 social_cards: true
+
+# Resolve cross-page heading references. Lets us write `[Anywidgets][]`
+# and have it auto-link to whatever page has that heading. Requires
+# `pip install 'marimo-book[autorefs]'`.
+cross_references: true
 
 toc:
   - file: content/index.md

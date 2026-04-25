@@ -65,6 +65,10 @@ cross_references: false
 # in the nav. No-op if no CHANGELOG.md exists at the book root.
 include_changelog: false
 
+# Single-PDF export of the entire book (opt-in,
+# requires marimo-book[pdf]). Adds a "Download PDF" link to the footer.
+pdf_export: false
+
 # Render defaults (applied per-page unless overridden)
 defaults:
   mode: static           # v0.2: wasm | hybrid

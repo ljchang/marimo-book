@@ -52,6 +52,7 @@ toc:
   - section: Getting Started
     children:
       - file: content/quickstart.md
+      - file: content/building.md
       - file: content/book_yml.md
 
   - section: Authoring

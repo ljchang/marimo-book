@@ -111,6 +111,21 @@ def _build_config(
         # in the site, regardless of which page it lives on. Must come
         # AFTER ``search`` in the plugins list so it sees the indexed pages.
         plugins.append("autorefs")
+    if book.pdf_export:
+        # mkdocs-with-pdf walks the rendered pages and emits a single PDF
+        # via WeasyPrint. The "Download PDF" link goes in the footer.
+        plugins.append(
+            {
+                "with-pdf": {
+                    "output_path": "pdf/book.pdf",
+                    "cover_title": book.title,
+                    "cover_subtitle": book.description or "",
+                    "author": ", ".join(a.name for a in book.authors) if book.authors else None,
+                    "copyright": book.copyright or "",
+                    "toc_title": "Contents",
+                }
+            }
+        )
     cfg["plugins"] = plugins
 
     # Analytics

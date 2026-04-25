@@ -5,7 +5,16 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0a5] — 2026-04-25
+
+Static reactivity for marimo's discrete UI widgets ships in two
+PRs (#6 + #7). Authors enable `precompute.enabled: true` in `book.yml`
+and discrete widgets (`mo.ui.slider(steps=[...])`,
+`mo.ui.dropdown(options=[...])`, `mo.ui.switch()`,
+`mo.ui.checkbox()`, `mo.ui.radio(options=[...])`) get real
+client-side interactivity backed by build-time per-value rendering —
+no Python kernel at runtime. Caps cap compute time and bundle size;
+v1 supports single-widget pages.
 
 ### Added — static reactivity execution (2/2)
 

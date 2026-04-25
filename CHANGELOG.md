@@ -5,6 +5,23 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `book.yml` `pdf_export: bool` flag — when true, emits the
+  `mkdocs-with-pdf` plugin so the build produces a single
+  `_site/pdf/book.pdf` rendered through WeasyPrint, with a "Download
+  PDF" link injected into the footer. Cover metadata (title,
+  subtitle, author, copyright) inherits from existing `book.yml`
+  fields. Requires the new `marimo-book[pdf]` extra; needs the same
+  `libcairo2` / `libpango` system deps as `social_cards`.
+- New "Building" page in the docs (`content/building.md`) — full
+  reference covering the two-stage build pipeline, every CLI command
+  with all flags, the five opt-in feature flags with their extras,
+  the `_site_src/` and `_site/` output layouts, an ePub recipe via
+  pandoc, and approximate build-performance numbers.
+
 ## [0.1.0a3] — 2026-04-25
 
 Visual + authoring overhaul plus a release-flow modernisation.

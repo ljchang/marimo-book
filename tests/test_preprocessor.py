@@ -88,3 +88,23 @@ def test_include_changelog_silent_when_no_file(tmp_path: Path) -> None:
 
     assert not (out_dir / "docs" / "changelog.md").exists()
     assert not report.errors
+
+
+def test_pdf_export_adds_with_pdf_plugin(tmp_path: Path) -> None:
+    """`pdf_export: true` should append `with-pdf` to the generated plugins."""
+    _minimal_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "pdf_export": True,
+            "toc": [{"file": "content/intro.md"}],
+        }
+    )
+
+    pre = Preprocessor(book, book_dir=tmp_path)
+    pre.build(out_dir=out_dir)
+
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    plugin_names = [next(iter(p.keys())) if isinstance(p, dict) else p for p in mkdocs["plugins"]]
+    assert "with-pdf" in plugin_names

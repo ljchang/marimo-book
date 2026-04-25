@@ -69,6 +69,14 @@ social = [
 autorefs = [
     "mkdocs-autorefs>=1.0",
 ]
+# Opt-in single-PDF export of the entire book. Enable via
+# `pdf_export: true` in book.yml and install this extra. Renders the
+# built site through WeasyPrint into a single PDF + adds a "Download
+# PDF" link to the nav. Shares system deps with the social-cards
+# pipeline (libcairo2 / libpango).
+pdf = [
+    "mkdocs-with-pdf>=0.9",
+]
 
 [project.urls]
 Homepage = "https://ljchang.github.io/marimo-book/"

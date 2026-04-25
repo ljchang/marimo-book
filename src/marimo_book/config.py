@@ -260,6 +260,14 @@ class Book(BaseModel):
     # rendered book. No-op if no ``CHANGELOG.md`` exists.
     include_changelog: bool = False
 
+    # Opt-in single-PDF export of the entire book. When true, the
+    # generated mkdocs.yml adds the ``with-pdf`` plugin which renders
+    # the site through WeasyPrint into ``_site/pdf/<title>.pdf`` and
+    # injects a download link into the page footer. Slow on large books
+    # (~30 s for ~50 pages); turn off in ``serve`` and on in CI / for
+    # release builds. Requires: ``pip install marimo-book[pdf]``.
+    pdf_export: bool = False
+
     # render defaults
     defaults: Defaults = Field(default_factory=Defaults)
 

@@ -80,6 +80,51 @@ class Bibliography(BaseModel):
     files: list[Path] = Field(default_factory=list)
 
 
+class Precompute(BaseModel):
+    """Static-reactivity opt-in for discrete marimo UI widgets.
+
+    When ``enabled`` is true, the preprocessor scans each ``.py`` page
+    for widget calls whose value set is statically determinable
+    (``mo.ui.slider`` with ``steps=[...]`` or explicit ``step=N``,
+    ``mo.ui.dropdown``, ``mo.ui.switch``, ``mo.ui.radio``). For each
+    candidate it re-runs ``marimo export`` once per value (or per
+    cartesian combination across widgets sharing a downstream subgraph)
+    and embeds a JSON lookup table in the rendered page. A small JS
+    shim swaps the visible output as the reader interacts with the
+    widget — real-feeling interactivity without a Python kernel.
+
+    Caps protect against pathological cases. Widgets / pages that
+    exceed any cap are gracefully skipped (rendered static, with a
+    ``BuildReport.warnings`` entry); the build does not fail unless
+    you pass ``--strict``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+    # Hard count caps — checked before any execution starts. Cheap.
+    max_values_per_widget: int = Field(default=50, ge=1)
+    max_combinations_per_page: int = Field(default=200, ge=1)
+
+    # Wall-clock budget per page — checked after the first re-export
+    # completes. If `first_export_seconds * remaining_combinations` would
+    # exceed this, the rest of the page's precompute is aborted and the
+    # page renders static at default values. The first export is *always*
+    # paid (we need it as the static fallback anyway), so very small
+    # budgets just mean "skip precompute, render static".
+    max_seconds_per_page: int = Field(default=60, ge=1)
+
+    # Bundle-size cap — checked after each combination's output is
+    # captured. Aborts further precompute when total embedded bytes for
+    # the page would exceed.
+    max_bytes_per_page: int = Field(default=10 * 1024 * 1024, ge=1024)
+
+    # Per-page opt-out. Pages listed here render every widget as static
+    # even when `enabled: true`.
+    exclude_pages: list[str] = Field(default_factory=list)
+
+
 class Analytics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -267,6 +312,15 @@ class Book(BaseModel):
     # (~30 s for ~50 pages); turn off in ``serve`` and on in CI / for
     # release builds. Requires: ``pip install marimo-book[pdf]``.
     pdf_export: bool = False
+
+    # Opt-in static reactivity for marimo UI elements. When enabled, the
+    # preprocessor scans each ``.py`` page for discrete widget candidates
+    # (``mo.ui.slider`` with explicit ``steps=[]`` or ``step=N``,
+    # ``mo.ui.dropdown``, ``mo.ui.switch``, ``mo.ui.radio``) and re-runs
+    # ``marimo export`` once per value, embedding the results as a
+    # client-side lookup table. A small JS shim binds the widget input to
+    # swap the visible output without a Python kernel.
+    precompute: Precompute = Field(default_factory=lambda: Precompute())
 
     # render defaults
     defaults: Defaults = Field(default_factory=Defaults)

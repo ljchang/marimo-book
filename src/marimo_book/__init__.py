@@ -1,3 +1,11 @@
 """marimo-book: build static sites from marimo notebooks and Markdown."""
 
-__version__ = "0.1.0a2"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
+try:
+    __version__ = _pkg_version("marimo-book")
+except PackageNotFoundError:
+    # Editable install on an untagged commit before the build hook has
+    # materialised _version.py. Fall back to a sentinel.
+    __version__ = "0.0.0+unknown"

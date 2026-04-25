@@ -4,6 +4,21 @@ This doc is for maintainers. `marimo-book` uses PyPI's [Trusted
 Publishers](https://docs.pypi.org/trusted-publishers/) feature — no API
 token needed once the one-time setup is done.
 
+## How releases work (the short version)
+
+1. Open a tiny PR that dates the `[Unreleased]` section in
+   `CHANGELOG.md` to today (one-line change). Merge it.
+2. Go to <https://github.com/ljchang/marimo-book/releases>. The
+   `release-drafter` bot has been maintaining a draft populated with
+   bullets from every merged PR. Edit if needed, set the tag to
+   `v0.1.0a3` (or whatever the next version is), and click **Publish
+   release**.
+3. The `v*` tag fires `publish.yml`. `hatch-vcs` reads the tag, builds
+   a wheel versioned `0.1.0a3`, ships it to PyPI via OIDC.
+
+That's it. **No `pyproject.toml` edit, no `__init__.py` edit, no direct
+push to main.** The version is the tag.
+
 ## One-time setup
 
 ### 1. PyPI Trusted Publisher
@@ -35,39 +50,6 @@ Optionally add protection rules (require manual approval, restrict to
 `main`, etc.) at
 <https://github.com/ljchang/marimo-book/settings/environments>.
 
-### 3. TestPyPI dry-run (optional but recommended)
-
-For the very first release, verify the packaging on TestPyPI before
-committing to the real index:
-
-```bash
-# Register a Trusted Publisher on TestPyPI with the same settings as above.
-# Then temporarily change publish.yml to use test.pypi.org:
-#
-#     with:
-#       repository-url: https://test.pypi.org/legacy/
-#
-# Tag something like v0.1.0a1-test and push, then revert.
-```
-
-## Release flow
-
-Once setup is done, releases are a single tag:
-
-```bash
-# Version bump (edit in pyproject.toml AND src/marimo_book/__init__.py)
-# Update CHANGELOG.md
-
-git add pyproject.toml src/marimo_book/__init__.py CHANGELOG.md
-git commit -m "Release v0.1.0a1"
-git tag v0.1.0a1
-git push origin main --tags
-```
-
-GitHub Actions picks up the `v*` tag, builds `sdist` + `wheel`, and
-publishes to PyPI via OIDC. Watch it run at
-<https://github.com/ljchang/marimo-book/actions/workflows/publish.yml>.
-
 ## Pre-release checks
 
 Before tagging:
@@ -78,7 +60,10 @@ pytest -q
 ruff check src/ tests/
 ruff format --check src/ tests/
 
-# Wheel builds cleanly and includes everything
+# Wheel builds cleanly with the right version (hatch-vcs reads from
+# `git describe`, so a local build on an untagged commit reports a dev
+# version like `0.1.0a3.dev2+gSHA` — that's expected; the real wheel
+# from CI builds on the tag and gets a clean version)
 python -m build --wheel
 python -c "
 import zipfile, pathlib
@@ -86,21 +71,12 @@ wheel = next(pathlib.Path('dist').glob('marimo_book-*.whl'))
 with zipfile.ZipFile(wheel) as z: print(len(z.namelist()), 'entries')
 "
 
-# Fresh-venv install smoke test
-uv venv /tmp/mb-fresh --python 3.13
-uv pip install --python /tmp/mb-fresh/bin/python dist/marimo_book-*.whl
-/tmp/mb-fresh/bin/marimo-book new /tmp/mb-fresh-book
-cd /tmp/mb-fresh-book && /tmp/mb-fresh/bin/marimo-book build
-
 # Docs book still builds --strict
-cd -
 marimo-book build -b docs/book.yml --strict
 ```
 
 CI (`.github/workflows/ci.yml`) runs the first four of these on every
-PR — if CI is green you can tag with confidence. The fresh-venv smoke
-test is worth doing locally for major releases since CI uses editable
-installs which can hide packaging bugs.
+PR — if CI is green the release is safe.
 
 ## Versioning
 
@@ -113,13 +89,34 @@ versions.
 - `0.1.0` — first stable 0.1 release; `book.yml` schema frozen within 0.1.x
 - `1.0.0` — `book.yml` schema frozen long-term; breaking changes require major bump
 
-Version lives in two places that must stay in sync:
+The version lives in **exactly one place**: the latest git tag matching
+`v*`. `hatch-vcs` reads it at build time and bakes it into the wheel.
+`marimo_book.__version__` resolves it via `importlib.metadata.version`.
 
-- `pyproject.toml` → `[project] version = ...`
-- `src/marimo_book/__init__.py` → `__version__ = ...`
+Untagged dev commits get versions like `0.1.0a3.dev5+gabc1234.d20260425`
+(latest tag + commits-since + short sha + date). That's by design — it
+makes pre-release wheels distinguishable without needing a manual bump.
 
-A pre-commit hook or release script could enforce this; today it's
-manual.
+## Release-drafter
+
+`.github/workflows/release-drafter.yml` runs on every merged PR and
+keeps a draft Release on github.com up to date. It groups entries by
+PR label:
+
+| Label | Section |
+|---|---|
+| `enhancement`, `feature` | Added |
+| `change`, `refactor`, `performance` | Changed |
+| `bug`, `fix` | Fixed |
+| `removal`, `breaking` | Removed |
+| `documentation`, `docs` | Documentation |
+| `ci`, `build`, `dependencies` | Build & CI |
+
+Tag PRs with at least one label so they categorize correctly. PRs
+labelled `skip-changelog` are excluded.
+
+The bot's draft is your starting point for release notes — edit it
+freely before publishing.
 
 ## Yanking a release
 

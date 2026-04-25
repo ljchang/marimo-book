@@ -41,6 +41,11 @@ social_cards: true
 # `pip install 'marimo-book[autorefs]'`.
 cross_references: true
 
+# Auto-include the repo-root CHANGELOG.md as a "Changelog" page in the
+# nav. Single source of truth — the file you maintain for PyPI also
+# becomes a docs page, so readers can browse release history in-book.
+include_changelog: true
+
 toc:
   - file: content/index.md
 

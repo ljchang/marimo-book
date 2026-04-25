@@ -5,7 +5,9 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0a3] — 2026-04-25
+
+Visual + authoring overhaul plus a release-flow modernisation.
 
 ### Added
 
@@ -13,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mkdocs-autorefs` plugin so authors can write `[Heading text][]` and
   have it resolve to whatever page has that heading — the MkDocs analog
   of MyST `{ref}`. Requires the new `marimo-book[autorefs]` extra.
+- `book.yml` `include_changelog: bool` flag — when true, the
+  preprocessor copies `CHANGELOG.md` from the book root into the staged
+  docs tree and appends a "Changelog" entry to the nav. Single source
+  of truth: the same file PyPI links to also becomes a docs page.
 - Default stylesheet (`assets/extra.css`) modernized: zinc neutrals,
   near-black dark scheme (`#0a0a0a`), Geist Sans + Geist Mono via
   `theme.font`, indigo accent on h1 / header title, uppercase tracked
@@ -22,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live admonition / math / table / code examples on the Authoring page.
 - Cross-references documentation on the Authoring page (page-to-page,
   anchors, abbreviations, snippets, autorefs).
+- `release-drafter` workflow + config — every merged PR updates a
+  draft GitHub Release; tagging publishes it. Categorises by PR label
+  (Added / Changed / Fixed / Removed / Documentation / Build & CI).
+
+### Changed
+
+- **Versioning:** switched to `hatch-vcs` for dynamic versions derived
+  from git tags. `pyproject.toml` no longer carries a hard-coded
+  `version`; tagging `v0.1.0a3` is sufficient to publish a wheel
+  versioned `0.1.0a3`. `src/marimo_book/__init__.py` reads
+  `__version__` via `importlib.metadata`. Eliminates the version-skew
+  bug class (3 files no longer need to stay in sync per release).
+- `PUBLISHING.md` rewritten around the new flow: tag-driven release,
+  optional CHANGELOG-date PR, release-drafter populating release notes.
 
 ### Removed
 

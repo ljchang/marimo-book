@@ -47,6 +47,9 @@ uv.lock
 .python-version
 __marimo__/
 
+# hatch-vcs build hook output — version materialised at build time
+src/marimo_book/_version.py
+
 # Browser-automation artifacts (Playwright MCP screenshots, snapshots)
 .playwright-mcp/
 # Stray screenshots at repo root only — leading slash anchors to root,

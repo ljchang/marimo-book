@@ -1,0 +1,24 @@
+name: Release Drafter
+
+# Updates the draft GitHub Release whenever a PR merges to main. The
+# draft accumulates entries grouped by PR label; the draft is published
+# (auto-tagging the commit) when you click "Publish release" on github.com.
+# The published `v*` tag then triggers publish.yml → PyPI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write   # required to draft releases
+  pull-requests: read
+
+jobs:
+  update_release_draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

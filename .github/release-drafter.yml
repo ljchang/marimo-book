@@ -1,0 +1,64 @@
+# release-drafter config — https://github.com/release-drafter/release-drafter
+#
+# Maintains a single draft Release on github.com/<repo>/releases that gets
+# updated whenever a PR merges to main. The draft accumulates entries
+# categorised by PR label; when you cut a release you tag the commit and
+# the draft auto-publishes against that tag.
+
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - title: "Added"
+    labels:
+      - "enhancement"
+      - "feature"
+  - title: "Changed"
+    labels:
+      - "change"
+      - "refactor"
+      - "performance"
+  - title: "Fixed"
+    labels:
+      - "bug"
+      - "fix"
+  - title: "Removed"
+    labels:
+      - "removal"
+      - "breaking"
+  - title: "Documentation"
+    labels:
+      - "documentation"
+      - "docs"
+  - title: "Build & CI"
+    labels:
+      - "ci"
+      - "build"
+      - "dependencies"
+
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+change-title-escapes: '\<*_&'
+
+# Resolve next version from labels: `breaking` → minor bump (we're 0.x),
+# `feature` → patch, anything else → patch. Tweak when we hit 1.0.
+version-resolver:
+  major:
+    labels: ["major"]
+  minor:
+    labels: ["breaking", "feature", "enhancement"]
+  patch:
+    labels: ["bug", "fix", "documentation", "ci", "build"]
+  default: patch
+
+# Filter out merge commits and dependabot noise from auto-categorisation.
+exclude-labels:
+  - "skip-changelog"
+exclude-contributors:
+  - "dependabot"
+
+template: |
+  ## What's changed
+
+  $CHANGES
+
+  **Full diff:** https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION

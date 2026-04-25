@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "marimo-book"
-version = "0.1.0a2"
+dynamic = ["version"]
 description = "Build clean, searchable static books from marimo notebooks and markdown"
 readme = "README.md"
 license = "MIT"
@@ -79,6 +79,19 @@ Changelog = "https://github.com/ljchang/marimo-book/blob/main/CHANGELOG.md"
 
 [project.scripts]
 marimo-book = "marimo_book.cli:app"
+
+[tool.hatch.version]
+# Version is derived from the latest git tag matching `v*`. Tagging
+# `v0.1.0a3` produces a wheel with version `0.1.0a3`. Untagged commits
+# get a dev version like `0.1.0a3.dev2+g<sha>`. See PUBLISHING.md.
+source = "vcs"
+raw-options = { version_scheme = "no-guess-dev", local_scheme = "node-and-date" }
+
+[tool.hatch.build.hooks.vcs]
+# Materialise the resolved version into the package at build time so
+# `marimo_book.__version__` works in installed wheels (importlib.metadata
+# is the runtime fallback for editable installs).
+version-file = "src/marimo_book/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/marimo_book"]

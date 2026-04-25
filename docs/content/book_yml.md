@@ -57,6 +57,14 @@ analytics:
 # External-link check (opt-in, requires marimo-book[linkcheck])
 check_external_links: false
 
+# Cross-page heading references via mkdocs-autorefs (opt-in,
+# requires marimo-book[autorefs])
+cross_references: false
+
+# Auto-include CHANGELOG.md from the book root as a "Changelog" page
+# in the nav. No-op if no CHANGELOG.md exists at the book root.
+include_changelog: false
+
 # Render defaults (applied per-page unless overridden)
 defaults:
   mode: static           # v0.2: wasm | hybrid

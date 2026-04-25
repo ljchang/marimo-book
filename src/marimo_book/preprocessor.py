@@ -28,6 +28,7 @@ from pathlib import Path
 from .config import Book, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .shell import emit_mkdocs_yml
+from .shell import _nav_from_toc
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import cells_to_markdown, export_notebook
 
@@ -122,11 +123,17 @@ class Preprocessor:
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
 
+        nav = _nav_from_toc(self.book.toc)
+        if self.book.include_changelog and self._stage_changelog(docs_dir):
+            nav.append({"Changelog": "changelog.md"})
+            report.pages += 1
+
         emit_mkdocs_yml(
             self.book,
             docs_dir=docs_dir.relative_to(out_dir),
             site_dir=site_dir,
             out_path=out_dir / "mkdocs.yml",
+            nav=nav,
         )
 
         return report
@@ -142,6 +149,28 @@ class Preprocessor:
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
+
+    def _stage_changelog(self, docs_dir: Path) -> bool:
+        """Copy ``CHANGELOG.md`` into the staged tree.
+
+        Looks first at ``book_dir/CHANGELOG.md`` (the typical single-dir
+        book layout) and falls back to ``book_dir.parent/CHANGELOG.md``
+        (the common case where the docs site lives in a ``docs/`` subdir
+        of a repo whose CHANGELOG sits at the repo root).
+
+        Returns ``True`` if a changelog was staged, ``False`` if neither
+        location has one — silent no-op so the flag is safe to leave on.
+        """
+        for candidate in (
+            self.book_dir / "CHANGELOG.md",
+            self.book_dir.parent / "CHANGELOG.md",
+        ):
+            if candidate.exists():
+                (docs_dir / "changelog.md").write_text(
+                    candidate.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+                return True
+        return False
 
     def _write_defaults(self, docs_dir: Path) -> None:
         """Copy the built-in default CSS / JS into the staging tree."""

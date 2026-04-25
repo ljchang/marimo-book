@@ -253,6 +253,13 @@ class Book(BaseModel):
     # ``pip install marimo-book[autorefs]``.
     cross_references: bool = False
 
+    # When true, the preprocessor copies ``CHANGELOG.md`` from the book
+    # root into the staged docs tree and appends a ``Changelog`` entry
+    # to the nav. Lets you maintain a single CHANGELOG.md at the repo
+    # root (canonical PyPI convention) while still surfacing it in the
+    # rendered book. No-op if no ``CHANGELOG.md`` exists.
+    include_changelog: bool = False
+
     # render defaults
     defaults: Defaults = Field(default_factory=Defaults)
 

@@ -109,6 +109,10 @@ Material's named-palette machinery doesn't fight us.
   — `dynamic = ["version"]` + hatch-vcs derives it from tags.
 - **Do not edit `src/marimo_book/_version.py`.** It's auto-generated
   at build time (gitignored, excluded from ruff).
+- **Do not hand-edit `{book_root}/.marimo_book_cache/manifest.json`.**
+  It's the build cache; the next preprocessor run overwrites it. To
+  force a full rebuild: `marimo-book build --rebuild` (preserves
+  cache after the run) or `marimo-book clean` (wipes everything).
 - **Do not push directly to `main`.** The harness blocks this; route
   through a PR.
 - **Do not bypass CI** with `--no-verify` or by skipping checks. Fix

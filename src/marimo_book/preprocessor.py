@@ -21,8 +21,13 @@ mkdocs installed.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from .config import Book, FileEntry, SectionEntry, UrlEntry
@@ -43,12 +48,164 @@ class BuildReport:
     """Summary of what the preprocessor produced."""
 
     pages: int = 0
+    pages_cached: int = 0
+    pages_rendered: int = 0
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return not self.errors
+
+
+# --- build cache ------------------------------------------------------------
+
+# Bumped whenever the cache schema or hit-decision rules change.
+_CACHE_SCHEMA_VERSION = 1
+_CACHE_DIR_NAME = ".marimo_book_cache"
+_CACHE_FILE_NAME = "manifest.json"
+
+
+class BuildCache:
+    """Per-file content cache for ``marimo export`` outputs.
+
+    Each TOC entry resolves to a HIT (skip the expensive notebook export
+    and reuse the staged ``.md``) or MISS (render fresh, record the new
+    fingerprint). The cache is keyed by source content, the marimo-book
+    version, and any ``book.yml`` field that affects rendering — so a
+    schema change, tool upgrade, or relevant config change invalidates
+    everything safely.
+
+    Markdown TOC entries are NOT cached: their render is ~10 ms each and
+    not worth the bookkeeping. Only ``.py`` notebook entries pass through
+    the cache.
+    """
+
+    def __init__(self, book_dir: Path, book: Book, *, force_rebuild: bool = False) -> None:
+        self.path = book_dir / _CACHE_DIR_NAME / _CACHE_FILE_NAME
+        self.force_rebuild = force_rebuild
+        self.tool_version = _resolve_tool_version()
+        self.book_signature = _book_signature(book)
+        self.entries: dict[str, dict] = {}
+        self.dirty = False
+        if not force_rebuild:
+            self._load()
+
+    def is_hit(self, src_rel: str, src_abs: Path, docs_dir: Path) -> bool:
+        if self.force_rebuild:
+            return False
+        entry = self.entries.get(src_rel)
+        if entry is None:
+            return False
+        out_abs = docs_dir / entry["out_path"]
+        if not out_abs.exists():
+            return False
+        try:
+            mtime = src_abs.stat().st_mtime
+        except OSError:
+            return False
+        if mtime == entry["src_mtime"]:
+            return True
+        # mtime moved but content might still match (git checkout, touch,
+        # editor that rewrites unchanged files). Fall through to a hash
+        # check; refresh the recorded mtime on a content-equal hit so the
+        # next build takes the fast path.
+        try:
+            digest = _file_sha256(src_abs)
+        except OSError:
+            return False
+        if digest != entry["src_hash"]:
+            return False
+        entry["src_mtime"] = mtime
+        self.dirty = True
+        return True
+
+    def record(self, src_rel: str, src_abs: Path, out_rel: str) -> None:
+        try:
+            mtime = src_abs.stat().st_mtime
+            digest = _file_sha256(src_abs)
+        except OSError:
+            return
+        self.entries[src_rel] = {
+            "src_mtime": mtime,
+            "src_hash": digest,
+            "out_path": out_rel,
+            "rendered_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        self.dirty = True
+
+    def save(self) -> None:
+        if not self.dirty and self.path.exists():
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": _CACHE_SCHEMA_VERSION,
+            "marimo_book_version": self.tool_version,
+            "book_yml_hash": self.book_signature,
+            "entries": self.entries,
+        }
+        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        self.dirty = False
+
+    # --- internals ----------------------------------------------------------
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return  # corrupt cache → silent cold start
+        if data.get("version") != _CACHE_SCHEMA_VERSION:
+            return
+        if data.get("marimo_book_version") != self.tool_version:
+            return
+        if data.get("book_yml_hash") != self.book_signature:
+            return
+        loaded = data.get("entries", {})
+        if isinstance(loaded, dict):
+            self.entries = loaded
+
+
+def _resolve_tool_version() -> str:
+    """Read the installed package version; fall back to a sentinel if missing."""
+    try:
+        return _pkg_version("marimo-book")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
+
+
+def _book_signature(book: Book) -> str:
+    """Hash ``book.yml`` fields whose changes invalidate rendered pages.
+
+    Includes anything the preprocessor reads while rendering a notebook
+    or applying link-rewrites: ``defaults`` (e.g. ``hide_first_code_cell``),
+    ``dependencies`` (mode), ``widget_defaults`` (anywidget seed state),
+    ``launch_buttons`` + ``repo`` + ``branch`` (button row), and the
+    flattened TOC (link rewrites depend on which other pages exist).
+
+    Excludes title / palette / fonts / analytics — those only affect
+    ``mkdocs.yml`` emission, which is always re-run and cheap.
+    """
+    relevant: dict = {
+        "widget_defaults": book.widget_defaults,
+        "defaults": book.defaults.model_dump(mode="json"),
+        "dependencies": book.dependencies.model_dump(mode="json"),
+        "launch_buttons": book.launch_buttons.model_dump(mode="json"),
+        "repo": book.repo,
+        "branch": book.branch,
+        "toc": [e.model_dump(mode="json") for e in book.toc],
+    }
+    payload = json.dumps(relevant, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return "sha256:" + h.hexdigest()
 
 
 class Preprocessor:
@@ -64,11 +221,15 @@ class Preprocessor:
         *,
         book_dir: Path,
         sandbox_override: bool | None = None,
+        rebuild: bool = False,
     ) -> None:
         self.book = book
         self.book_dir = Path(book_dir).resolve()
         # None = honour book.yml's dependencies.mode; True/False overrides.
         self.sandbox_override = sandbox_override
+        # When True, every TOC entry is re-rendered regardless of cache state.
+        # The cache is still updated so future builds without --rebuild benefit.
+        self.rebuild = rebuild
 
     @property
     def sandbox(self) -> bool:
@@ -108,19 +269,34 @@ class Preprocessor:
         file_entries = _iter_file_entries(self.book.toc)
         md_basenames = {_doc_relpath_for(e.file).with_suffix("").name for e in file_entries}
 
+        cache = BuildCache(self.book_dir, self.book, force_rebuild=self.rebuild)
+
         for entry in file_entries:
+            src_rel = str(entry.file)
+            src_abs = (self.book_dir / entry.file).resolve()
+            out_rel = _doc_relpath_for(entry.file).as_posix()
             try:
-                stage_page(
-                    self.book,
-                    self.book_dir,
-                    entry,
-                    docs_dir,
-                    md_basenames=md_basenames,
-                    sandbox=self.sandbox,
-                )
+                # Notebook entries are the only ones worth caching: marimo
+                # export takes seconds-to-minutes, vs ~10 ms for Markdown.
+                if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs, docs_dir):
+                    report.pages_cached += 1
+                else:
+                    stage_page(
+                        self.book,
+                        self.book_dir,
+                        entry,
+                        docs_dir,
+                        md_basenames=md_basenames,
+                        sandbox=self.sandbox,
+                    )
+                    if entry.file.suffix == ".py":
+                        cache.record(src_rel, src_abs, out_rel)
+                    report.pages_rendered += 1
                 report.pages += 1
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
+
+        cache.save()
 
         nav = _nav_from_toc(self.book.toc)
         if self.book.include_changelog and self._stage_changelog(docs_dir):

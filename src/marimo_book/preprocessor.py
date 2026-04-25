@@ -35,6 +35,12 @@ from .launch_buttons import render_button_row
 from .shell import _nav_from_toc, emit_mkdocs_yml
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import cells_to_markdown, export_notebook
+from .transforms.precompute import (
+    WidgetCandidate,
+    estimate_combinations,
+    page_excluded,
+    scan_widgets,
+)
 
 # Directories and glob patterns of assets we copy verbatim when present.
 _ASSET_DIRS: tuple[str, ...] = ("images", "Code", "data")
@@ -50,6 +56,10 @@ class BuildReport:
     pages: int = 0
     pages_cached: int = 0
     pages_rendered: int = 0
+    # Counts of widgets that passed cap checks and would precompute
+    # (Phase 2 only previews; Phase 3 wires the actual execution).
+    widgets_precomputed: int = 0
+    widgets_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -192,6 +202,7 @@ def _book_signature(book: Book) -> str:
         "defaults": book.defaults.model_dump(mode="json"),
         "dependencies": book.dependencies.model_dump(mode="json"),
         "launch_buttons": book.launch_buttons.model_dump(mode="json"),
+        "precompute": book.precompute.model_dump(mode="json"),
         "repo": book.repo,
         "branch": book.branch,
         "toc": [e.model_dump(mode="json") for e in book.toc],
@@ -293,6 +304,12 @@ class Preprocessor:
                         cache.record(src_rel, src_abs, out_rel)
                     report.pages_rendered += 1
                 report.pages += 1
+
+                # Static-reactivity preview: scan widgets + apply count
+                # caps so authors see the inventory now. Actual execution
+                # ships in a follow-up PR (Phase 3).
+                if entry.file.suffix == ".py" and self.book.precompute.enabled:
+                    self._preview_precompute(entry, src_abs, report)
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
 
@@ -324,6 +341,56 @@ class Preprocessor:
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
+
+    def _preview_precompute(self, entry: FileEntry, src_abs: Path, report: BuildReport) -> None:
+        """Scan a notebook for widget candidates + apply count caps.
+
+        Phase 2 of the static-reactivity rollout: we report the inventory
+        and surface cap-violation warnings, but do NOT actually re-export
+        the notebook per value yet (that lands in a follow-up PR). This
+        lets authors enable ``precompute.enabled: true`` early and tune
+        their caps without waiting for the full pipeline.
+
+        The function is a no-op for pages listed in ``exclude_pages``.
+        Per-widget cap violations downgrade the widget to "skipped"; the
+        page-wide cap collapses every candidate on the page to "skipped".
+        """
+        cfg = self.book.precompute
+        if page_excluded(entry.file, cfg.exclude_pages):
+            return
+
+        try:
+            source = src_abs.read_text(encoding="utf-8")
+        except OSError:
+            return
+        candidates = scan_widgets(source)
+        if not candidates:
+            return
+
+        kept: list[WidgetCandidate] = []
+        for c in candidates:
+            if len(c.values) > cfg.max_values_per_widget:
+                report.warnings.append(
+                    f"{entry.file}:{c.line} {c.var_name} "
+                    f"({len(c.values)} values) exceeds "
+                    f"max_values_per_widget ({cfg.max_values_per_widget}); "
+                    f"rendered static."
+                )
+                report.widgets_skipped += 1
+                continue
+            kept.append(c)
+
+        combos = estimate_combinations(kept)
+        if combos > cfg.max_combinations_per_page:
+            report.warnings.append(
+                f"{entry.file}: {len(kept)} widgets generate {combos} "
+                f"combinations, exceeding max_combinations_per_page "
+                f"({cfg.max_combinations_per_page}); page rendered static."
+            )
+            report.widgets_skipped += len(kept)
+            return
+
+        report.widgets_precomputed += len(kept)
 
     def _stage_changelog(self, docs_dir: Path) -> bool:
         """Copy ``CHANGELOG.md`` into the staged tree.

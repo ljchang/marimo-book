@@ -5,6 +5,37 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — static reactivity foundation (1/2)
+
+- `book.yml` `precompute` block (off by default) — opt-in static
+  reactivity for discrete marimo UI widgets. Five fields:
+  `enabled`, `max_values_per_widget` (default 50),
+  `max_combinations_per_page` (200), `max_seconds_per_page` (60),
+  `max_bytes_per_page` (10 MB), `exclude_pages` ([]).
+- AST scanner (`src/marimo_book/transforms/precompute.py`) that finds
+  precompute candidates without executing the notebook. Recognises:
+  `mo.ui.slider(steps=[...])`, `mo.ui.slider(start, stop, step=N)`
+  (or 3 positional args), `mo.ui.dropdown(options=[...])`,
+  `mo.ui.dropdown(options={...})`, `mo.ui.switch()`, `mo.ui.checkbox()`,
+  `mo.ui.radio(options=[...])`. Continuous sliders without an explicit
+  step are deliberately skipped (render static). Non-literal arguments
+  (`mo.ui.dropdown(options=opts)`) are skipped — value sets must be
+  statically extractable.
+- Preprocessor preview pass: when `precompute.enabled: true`, every
+  `.py` page is scanned, count caps are applied, and over-cap widgets
+  are recorded as `BuildReport.warnings` ("rendered static") with the
+  page + widget name + which cap was hit. `BuildReport` gains
+  `widgets_precomputed` / `widgets_skipped` counters.
+- Build cache `_book_signature` now includes the `precompute` block,
+  so toggling the flag invalidates rendered notebooks correctly.
+
+This is the foundation only — the actual per-value re-export pipeline
++ client-side JS swap shim ship in the next PR. Until that lands,
+`widgets_precomputed` is a *would-precompute* count: useful for tuning
+caps before paying for execution.
+
 ## [0.1.0a4] — 2026-04-25
 
 Build-cache + PDF + docs release. Cuts repeat-build time on books

@@ -5,7 +5,11 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0a4] — 2026-04-25
+
+Build-cache + PDF + docs release. Cuts repeat-build time on books
+with non-trivial notebooks (the dartbrains use case) from minutes to
+seconds.
 
 ### Added
 

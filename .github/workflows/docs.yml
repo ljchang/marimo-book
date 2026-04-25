@@ -34,7 +34,7 @@ jobs:
       - name: Install system deps for social-card generation
         run: sudo apt-get update -y && sudo apt-get install -y libcairo2 libpango-1.0-0 libpangocairo-1.0-0
       - name: Install marimo-book + extras for docs build
-        run: pip install -e '.[linkcheck,social]'
+        run: pip install -e '.[linkcheck,social,autorefs]'
       - name: Build docs
         run: marimo-book build -b docs/book.yml --strict
       - uses: actions/upload-pages-artifact@v3

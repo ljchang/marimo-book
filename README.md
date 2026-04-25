@@ -1,5 +1,11 @@
 # marimo-book
 
+[![PyPI version](https://img.shields.io/pypi/v/marimo-book.svg)](https://pypi.org/project/marimo-book/)
+[![Python versions](https://img.shields.io/pypi/pyversions/marimo-book.svg)](https://pypi.org/project/marimo-book/)
+[![CI](https://github.com/ljchang/marimo-book/actions/workflows/ci.yml/badge.svg)](https://github.com/ljchang/marimo-book/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://ljchang.github.io/marimo-book/)
+
 Build clean, searchable static books from [marimo](https://marimo.io)
 notebooks and Markdown files.
 
@@ -71,8 +77,7 @@ content/*.md + *.py + book.yml
 ```
 
 1. The preprocessor reads `book.yml` and walks the TOC. For each `.md` it
-   applies small content transforms (MyST `:::{glossary}` fence stripping,
-   `{download}` role rewrite, `../images/` path fixups, `.ipynb` →
+   applies small content transforms (`../images/` path fixups, `.ipynb` →
    `.md` cross-ref rewriting). For each marimo `.py` it runs
    `marimo export ipynb --include-outputs` and converts the cells into
    Markdown + inline HTML, translating marimo custom elements
@@ -146,8 +151,6 @@ field.
 - Static rehydration of anywidgets via a small JS shim
   (`marimo_book.js`, loaded via `extra_javascript`)
 - Launch-button row per chapter (molab / GitHub / download)
-- MyST `{download}\`label <path>\`` → `[label](path)`
-- `:::{glossary}` fence stripping (definition lists pass through natively)
 - `[text](Foo.ipynb)` → `[text](Foo.md)` cross-ref rewrite when `Foo.md`
   exists in the staged tree
 - `../images/` → `images/` relative-path fixup when `content/` is flattened

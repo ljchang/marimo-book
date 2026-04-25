@@ -86,9 +86,9 @@ jobs:
           python-version: "3.13"
       - name: Install system deps for social-card generation
         run: sudo apt-get update -y && sudo apt-get install -y libcairo2 libpango-1.0-0 libpangocairo-1.0-0
-      - name: Install marimo-book with linkcheck + social extras
+      - name: Install marimo-book with linkcheck + social + autorefs extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[linkcheck,social]'
+          pip install -e '.[linkcheck,social,autorefs]'
       - name: Build docs --strict (also exercises social-card generation)
         run: marimo-book build -b docs/book.yml --strict

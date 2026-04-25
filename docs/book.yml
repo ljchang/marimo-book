@@ -46,6 +46,13 @@ cross_references: true
 # becomes a docs page, so readers can browse release history in-book.
 include_changelog: true
 
+# Static reactivity for discrete marimo UI widgets. Enabled here so the
+# precompute_demo chapter actually demonstrates the feature live. The
+# defaults (50 values/widget, 200 combinations/page, 60s/page, 10MB/page)
+# are conservative; demo widget has 6 values so it's well within all caps.
+precompute:
+  enabled: true
+
 toc:
   - file: content/index.md
 
@@ -59,6 +66,7 @@ toc:
     children:
       - file: content/authoring.md
       - file: content/example.py
+      - file: content/precompute_demo.py
       - file: content/dependencies.md
       - file: content/widgets.md
 

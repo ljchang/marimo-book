@@ -288,6 +288,100 @@ your-book/
 rebuilds in `serve` are much faster when the staged tree exists. To
 force a wholly fresh build, use `marimo-book build --clean`.
 
+## Static reactivity
+
+`marimo-book` can give static pages a *real* feel of interactivity for
+marimo's discrete UI widgets — without a Python kernel at runtime. The
+preprocessor re-executes the notebook once per widget value at build
+time, ships the resulting cell outputs as a JSON lookup table, and a
+small JS shim swaps the affected cells when the reader interacts with
+the widget.
+
+**This is the kernel-free reactivity path for `defaults.mode: static`
+(the only mode in v0.1.x).** When v0.2 introduces WASM render mode,
+WASM-rendered pages will get native reactivity via Pyodide and this
+whole pipeline will be a no-op for them — the static fallback works
+the same way either side of that transition.
+
+### Opt in via `book.yml`
+
+```yaml
+precompute:
+  enabled: true                     # off by default
+  max_values_per_widget: 50         # graceful skip if a widget has more
+  max_combinations_per_page: 200    # graceful skip on multi-widget pages
+  max_seconds_per_page: 60          # wall-clock budget for one page
+  max_bytes_per_page: 10485760      # 10 MB inline-table budget
+  exclude_pages: []                 # ["content/heavy_chapter.py"]
+```
+
+All caps default to safe values that work for typical exploratory
+notebooks. **Over-cap = render static, log a warning** — the build
+doesn't fail unless `--strict` is passed.
+
+### What's a precompute candidate?
+
+The widget IS the annotation. Authors write normal marimo code; the
+choice between discrete and continuous widgets implicitly declares
+candidacy. Notebooks stay portable — zero imports from marimo-book
+in the `.py` source.
+
+| Widget call | Precompute? |
+|---|---|
+| `mo.ui.slider(steps=[0, 1, 5, 10])` | ✅ explicit value list |
+| `mo.ui.slider(0, 10, step=1)` | ✅ explicit step |
+| `mo.ui.slider(0, 10)` (no step) | ❌ continuous, render static |
+| `mo.ui.dropdown(options=["a", "b"])` | ✅ |
+| `mo.ui.dropdown(options={"a": 1, "b": 2})` | ✅ keys enumerated |
+| `mo.ui.switch()` / `mo.ui.checkbox()` | ✅ two values |
+| `mo.ui.radio(options=[...])` | ✅ |
+| `mo.ui.range_slider(...)` | ❌ deferred to v2 |
+| Widget created via non-literal call (`make_slider(low, high)`) | ❌ value set not statically extractable |
+
+Continuous sliders and any widget the AST scanner can't statically
+resolve fall back to the existing static render — no surprises, no
+silent failures.
+
+### What's NOT in v1
+
+- **Multi-widget pages.** A page with two precomputable widgets falls
+  back to static for both, with a warning. The cross-product semantics
+  + JS shim for joint widgets are deferred to v2.
+- **Path Y subgraph re-execution.** v1 re-runs the whole notebook per
+  value; v2 will use marimo's dataflow graph to re-execute only the
+  affected subgraph (10–100× speedup for notebooks with expensive
+  imports / data loads).
+- **`mo.ui.range_slider`.** Two-handle widget with pair-valued state
+  needs more design.
+
+### Demo
+
+The `Authoring → Static reactivity demo` page in this book shows the
+feature live. View its source on GitHub to see exactly how the author
+wrote it — there's nothing marimo-book-specific in the `.py`.
+
+### When to use it (and when not to)
+
+**Good fit:**
+- Educational notebooks with "tweak this parameter and see what happens"
+- Discrete dropdowns of options with cheap-to-compute outputs
+- Single-slider plot explorations with ≤50 values
+
+**Bad fit:**
+- Continuous sliders that need fine-grained interactivity (use WASM
+  mode in v0.2 when it lands, or link to a molab session)
+- Notebooks where every cell is expensive (build time × N values)
+- Multi-widget cross-products with shared downstream cells (v2)
+
+### Build cost
+
+- **First export** is the static fallback render — paid regardless.
+- **Each additional value** = one full notebook re-execution. Use
+  `max_seconds_per_page` to bound this; the orchestrator extrapolates
+  after the first export and aborts if projected runtime exceeds.
+- **The build cache** (v0.1.0a4) interacts with precompute correctly:
+  toggling `precompute.enabled` invalidates affected pages.
+
 ## ePub / other formats?
 
 Not supported as a flag yet. **Recipe via [pandoc](https://pandoc.org)

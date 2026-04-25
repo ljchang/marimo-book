@@ -308,10 +308,12 @@ def _report_build(report) -> None:
 
 
 def _summarise_report(report) -> str:
-    """Compact one-liner describing a BuildReport's pages + cache stats."""
+    """Compact one-liner describing a BuildReport's pages + cache + precompute stats."""
     parts = [f"{report.pages} pages"]
     if report.pages_cached or report.pages_rendered:
         parts.append(f"{report.pages_rendered} rendered, {report.pages_cached} cached")
+    if report.widgets_precomputed or report.widgets_skipped:
+        parts.append(f"{report.widgets_precomputed} precomputed, {report.widgets_skipped} skipped")
     return ", ".join(parts)
 
 

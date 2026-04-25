@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import time
 from pathlib import Path
 
 import yaml
 
 from marimo_book.config import Book
 from marimo_book.preprocessor import Preprocessor
+
+FIXTURES = Path(__file__).parent / "fixtures"
+NOTEBOOK_FIXTURE = FIXTURES / "simple_notebook.py"
 
 
 def _minimal_book(book_dir: Path) -> None:
@@ -108,3 +114,126 @@ def test_pdf_export_adds_with_pdf_plugin(tmp_path: Path) -> None:
     mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
     plugin_names = [next(iter(p.keys())) if isinstance(p, dict) else p for p in mkdocs["plugins"]]
     assert "with-pdf" in plugin_names
+
+
+# --- BuildCache --------------------------------------------------------------
+#
+# These tests drive the preprocessor end-to-end against a real .py notebook
+# fixture, so they invoke `marimo export ipynb` per build. ~2-3 seconds each
+# on a warm machine; we run a tiny notebook fixture to keep them fast.
+
+
+def _book_with_notebook(book_dir: Path) -> Book:
+    """Lay down a book with one Markdown page and one notebook (the fixture)."""
+    content = book_dir / "content"
+    content.mkdir(exist_ok=True)
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    shutil.copy(NOTEBOOK_FIXTURE, content / "notebook.py")
+    return Book.model_validate(
+        {
+            "title": "Cache Test",
+            "toc": [
+                {"file": "content/intro.md"},
+                {"file": "content/notebook.py"},
+            ],
+        }
+    )
+
+
+def _manifest(out_dir: Path, book_dir: Path) -> dict:
+    return json.loads(
+        (book_dir / ".marimo_book_cache" / "manifest.json").read_text(encoding="utf-8")
+    )
+
+
+def test_cache_cold_then_warm(tmp_path: Path) -> None:
+    """First build renders + writes manifest; second build hits the cache."""
+    book = _book_with_notebook(tmp_path)
+    out_dir = tmp_path / "_site_src"
+
+    cold = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    assert cold.pages_rendered == 2  # intro.md + notebook.py
+    assert cold.pages_cached == 0
+    assert (tmp_path / ".marimo_book_cache" / "manifest.json").exists()
+
+    warm = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    # .md still re-renders (not cached); .py is the only cache target.
+    assert warm.pages_cached == 1
+    assert warm.pages_rendered == 1
+
+
+def test_cache_invalidates_on_source_change(tmp_path: Path) -> None:
+    """Editing the notebook source forces a re-render of just that entry."""
+    book = _book_with_notebook(tmp_path)
+    out_dir = tmp_path / "_site_src"
+
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    nb = tmp_path / "content" / "notebook.py"
+    # Bump mtime AND content so both fast-path and slow-path miss.
+    time.sleep(0.01)
+    nb.write_text(nb.read_text(encoding="utf-8") + "\n# touched\n", encoding="utf-8")
+
+    second = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    assert second.pages_rendered == 2  # intro.md (always) + notebook.py (invalidated)
+    assert second.pages_cached == 0
+
+
+def test_rebuild_flag_forces_full_render(tmp_path: Path) -> None:
+    """`rebuild=True` skips the cache even when entries are valid."""
+    book = _book_with_notebook(tmp_path)
+    out_dir = tmp_path / "_site_src"
+
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    forced = Preprocessor(book, book_dir=tmp_path, rebuild=True).build(out_dir=out_dir)
+    assert forced.pages_cached == 0
+    assert forced.pages_rendered == 2
+
+
+def test_cache_invalidates_on_tool_version_change(tmp_path: Path) -> None:
+    """Bumping the recorded marimo_book_version invalidates the whole cache."""
+    book = _book_with_notebook(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    manifest_path = tmp_path / ".marimo_book_cache" / "manifest.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data["marimo_book_version"] = "0.0.0+impossible"
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+
+    second = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    assert second.pages_cached == 0
+    assert second.pages_rendered == 2
+
+
+def test_cache_invalidates_on_widget_defaults_change(tmp_path: Path) -> None:
+    """Editing widget_defaults in book.yml invalidates rendered notebooks."""
+    book = _book_with_notebook(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    book2 = Book.model_validate(
+        {
+            "title": "Cache Test",
+            "widget_defaults": {"FakeWidget": {"x": 1}},
+            "toc": [
+                {"file": "content/intro.md"},
+                {"file": "content/notebook.py"},
+            ],
+        }
+    )
+    second = Preprocessor(book2, book_dir=tmp_path).build(out_dir=out_dir)
+    assert second.pages_cached == 0
+    assert second.pages_rendered == 2
+
+
+def test_cache_invalidates_when_staged_output_missing(tmp_path: Path) -> None:
+    """If someone wipes _site_src but leaves the cache, we must re-render."""
+    book = _book_with_notebook(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    # Wipe the staged tree but leave the manifest alone.
+    shutil.rmtree(out_dir)
+    second = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    assert second.pages_cached == 0
+    assert second.pages_rendered == 2

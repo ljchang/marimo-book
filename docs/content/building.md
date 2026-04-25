@@ -30,6 +30,57 @@ artifacts mkdocs can consume. This keeps the shell swappable —
 [zensical](https://zensical.org) (Material's Rust successor) reuses
 the same `mkdocs.yml` verbatim.
 
+## Build cache
+
+`marimo export ipynb` re-executes every cell in a notebook from scratch
+— the dominant cost for any book with non-trivial computation. To
+avoid paying that cost on every rebuild, the preprocessor maintains a
+content-addressed cache.
+
+**How it works**
+
+After each successful build, the preprocessor writes a manifest at
+`{book_root}/.marimo_book_cache/manifest.json` recording, per `.py`
+TOC entry: source mtime, source SHA-256, the staged output path, and
+a timestamp. On the next build it consults the manifest:
+
+| Check | If true | If false |
+|---|---|---|
+| `cache.version` matches current schema | continue | full miss (reset cache) |
+| `marimo_book_version` matches | continue | full miss |
+| Hash of relevant `book.yml` fields matches | continue | full miss |
+| Per-entry: source mtime unchanged | **HIT** (skip render) | hash check |
+| Per-entry: source hash unchanged | **HIT** (refresh mtime) | MISS — re-render |
+
+`book.yml` fields that invalidate the cache: `widget_defaults`,
+`defaults`, `dependencies`, `launch_buttons`, `repo`, `branch`, the
+flattened `toc`. Fields that don't (palette, fonts, title, analytics)
+only affect `mkdocs.yml` emission, which is always re-run.
+
+**Markdown TOC entries are not cached** — Markdown render takes
+~10 ms each, so the bookkeeping isn't worth it.
+
+**What the cache cannot detect** (use `--rebuild` for these):
+
+- Data files the notebook reads (`pd.read_csv("data/foo.csv")`)
+- `env`-mode dependency upgrades (`pip install -U numpy`)
+- `sandbox`-mode PEP 723 dep changes inside the notebook (the
+  notebook's own mtime catches *some* of these, but pinned versions
+  on disk that change underneath you don't)
+- A `marimo` package upgrade (rare; bump the marimo-book version
+  yourself or `--rebuild` if a notebook starts rendering wrong)
+
+**Inspecting the cache**
+
+```bash
+cat .marimo_book_cache/manifest.json | jq .
+```
+
+Hand-edit at your peril; the next build will overwrite anything you
+change. To reset: `marimo-book clean` (removes `_site/`, `_site_src/`,
+and `.marimo_book_cache/`) or `marimo-book build --rebuild` (rebuilds
+fresh + repopulates the cache in one step).
+
 ## CLI commands
 
 ### `marimo-book new <directory>`
@@ -69,7 +120,8 @@ marimo-book build --clean --sandbox        # clean rebuild + force sandbox
 | `-b`, `--book PATH` | `book.yml` | Path to the book.yml config |
 | `-o`, `--output PATH` | `_site` | Output directory |
 | `--strict` | off | Fail on warnings (broken in-tree links, missing files, etc.) |
-| `--clean` | off | Remove `_site_src/` and the build cache before building |
+| `--clean` | off | Remove `_site/`, `_site_src/`, and `.marimo_book_cache/` before building (implies `--rebuild`) |
+| `--rebuild` | off | Re-render every notebook regardless of cache state — use when data files or env-mode deps changed |
 | `--sandbox` / `--no-sandbox` | follow `book.yml` | Override the dependency mode |
 
 **Use `--strict` in CI.** It surfaces issues that would otherwise be
@@ -101,6 +153,7 @@ edited. mkdocs's livereload pushes the browser refresh.
 | `--host TEXT` | `127.0.0.1` | Dev-server bind address |
 | `--port INTEGER` | `8000` | Dev-server port |
 | `--no-watch` | off | Disable the source watcher (useful for debugging) |
+| `--rebuild` | off | Cold-build the initial render (watcher rebuilds always honour the cache) |
 | `--sandbox` / `--no-sandbox` | follow `book.yml` | Override the dependency mode |
 
 !!! warning "macOS browser-reload flake"

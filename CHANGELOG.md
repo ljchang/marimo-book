@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Incremental build cache.** The preprocessor now caches `marimo
+  export ipynb` outputs at `{book_root}/.marimo_book_cache/manifest.json`
+  keyed by source content hash, marimo-book version, and relevant
+  `book.yml` fields (`widget_defaults`, `defaults`, `dependencies`,
+  `launch_buttons`, `repo`, `branch`, `toc`). Subsequent builds skip
+  notebooks whose source hasn't changed. Typical edit-one-chapter
+  rebuild on a 20-notebook book drops from "every notebook" to "only
+  the edited one". Markdown entries are not cached (10 ms each, not
+  worth the bookkeeping).
+- `marimo-book build --rebuild` and `marimo-book serve --rebuild` —
+  bypass the cache for the current invocation. Use when you changed
+  something the cache can't detect (data file the notebook reads,
+  env-mode dep upgrade). `--clean` continues to wipe `_site_src/` and
+  now also wipes `.marimo_book_cache/`, which has the same effect.
+- Build summary line now reports cache stats:
+  `Preprocessing OK (13 pages, 11 rendered, 1 cached at _site_src).`
 - `book.yml` `pdf_export: bool` flag — when true, emits the
   `mkdocs-with-pdf` plugin so the build produces a single
   `_site/pdf/book.pdf` rendered through WeasyPrint, with a "Download
@@ -20,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference covering the two-stage build pipeline, every CLI command
   with all flags, the five opt-in feature flags with their extras,
   the `_site_src/` and `_site/` output layouts, an ePub recipe via
-  pandoc, and approximate build-performance numbers.
+  pandoc, and approximate build-performance numbers. Now also covers
+  the build cache + invalidation rules.
 
 ## [0.1.0a3] — 2026-04-25
 

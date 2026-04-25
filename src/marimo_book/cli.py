@@ -132,6 +132,15 @@ def build(
         "--clean",
         help="Remove _site_src/ and build cache before building.",
     ),
+    rebuild: bool = typer.Option(
+        False,
+        "--rebuild",
+        help=(
+            "Re-render every notebook regardless of cache state. Use when you "
+            "changed something the cache can't detect (a data file the notebook "
+            "reads, an env-mode dep upgrade, etc.). --clean implies --rebuild."
+        ),
+    ),
     sandbox: bool | None = typer.Option(
         None,
         "--sandbox/--no-sandbox",
@@ -148,11 +157,18 @@ def build(
     site_dir = Path(output).resolve() if output.is_absolute() else (book_dir / output).resolve()
 
     if clean:
-        for target in (site_src, site_dir):
+        for target in (site_src, site_dir, book_dir / ".marimo_book_cache"):
             if target.exists():
                 shutil.rmtree(target)
 
-    pre = Preprocessor(book, book_dir=book_dir, sandbox_override=sandbox)
+    # --clean removes the cache directory above, so the next build is
+    # cold either way; setting rebuild=True is just for clarity.
+    pre = Preprocessor(
+        book,
+        book_dir=book_dir,
+        sandbox_override=sandbox,
+        rebuild=rebuild or clean,
+    )
     typer.echo(
         f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages, "
         f"deps={'sandbox' if pre.sandbox else 'env'})..."
@@ -166,7 +182,7 @@ def build(
     if not report.ok:
         typer.echo(f"Preprocessing failed ({len(report.errors)} errors).", err=True)
         raise typer.Exit(code=1)
-    typer.echo(f"Preprocessing OK ({report.pages} pages staged at {site_src}).")
+    typer.echo(f"Preprocessing OK ({_summarise_report(report)} at {site_src}).")
 
     typer.echo(f"Running mkdocs build → {site_dir}")
     build_cmd = [sys.executable, "-m", "mkdocs", "build"]
@@ -197,6 +213,15 @@ def serve(
         "--no-watch",
         help="Serve without a source watcher (useful for debugging).",
     ),
+    rebuild: bool = typer.Option(
+        False,
+        "--rebuild",
+        help=(
+            "Re-render every notebook on the initial build (ignores cache). "
+            "Watcher rebuilds always honour the cache; use this only when the "
+            "first build needs to be cold."
+        ),
+    ),
     sandbox: bool | None = typer.Option(
         None,
         "--sandbox/--no-sandbox",
@@ -220,7 +245,7 @@ def serve(
     book_dir = book_file.resolve().parent
     site_src = book_dir / "_site_src"
 
-    pre = Preprocessor(book, book_dir=book_dir, sandbox_override=sandbox)
+    pre = Preprocessor(book, book_dir=book_dir, sandbox_override=sandbox, rebuild=rebuild)
     typer.echo(
         f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages, "
         f"deps={'sandbox' if pre.sandbox else 'env'})..."
@@ -229,7 +254,7 @@ def serve(
     _report_build(report)
     if not report.ok:
         raise typer.Exit(code=1)
-    typer.echo(f"Preprocessing OK ({report.pages} pages staged at {site_src}).")
+    typer.echo(f"Preprocessing OK ({_summarise_report(report)} at {site_src}).")
 
     typer.echo(f"Starting mkdocs serve on http://{host}:{port}/")
     mkdocs_cmd = [
@@ -282,10 +307,18 @@ def _report_build(report) -> None:
         typer.echo(f"  error: {err}", err=True)
 
 
+def _summarise_report(report) -> str:
+    """Compact one-liner describing a BuildReport's pages + cache stats."""
+    parts = [f"{report.pages} pages"]
+    if report.pages_cached or report.pages_rendered:
+        parts.append(f"{report.pages_rendered} rendered, {report.pages_cached} cached")
+    return ", ".join(parts)
+
+
 def _watcher_report_callback(report) -> None:
     """Called by the watcher after each rebuild. Logs result; never raises."""
     if report.ok:
-        typer.echo(f"  rebuilt ({report.pages} pages)")
+        typer.echo(f"  rebuilt ({_summarise_report(report)})")
     else:
         typer.echo("  rebuild failed:", err=True)
         _report_build(report)

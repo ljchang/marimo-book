@@ -5,7 +5,17 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] — 2026-04-26
+
+**First stable release.** marimo-book is suitable for real production
+use. The `book.yml` schema is frozen within the 0.1.x series — fields
+may be added (additive, backward-compatible) but no field will be
+removed or have its meaning changed without a major version bump.
+
+This release ships per-page WASM render mode via marimo's islands
+runtime, completing the render-mode story: every page can opt into
+its preferred reactivity model (static / static + precompute / WASM)
+based on the chapter's needs, with the rest staying fast and light.
 
 ### Added — WASM render mode (per-page opt-in)
 

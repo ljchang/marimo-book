@@ -511,6 +511,14 @@ class Preprocessor:
             docs_dir / "javascripts" / "marimo_book.js",
         )
 
+        # Optional: Jupyter-Book-style sidebar logo. Stage the stylesheet
+        # only when opted in; shell.py picks it up via extra_css.
+        if self.book.logo_placement == "sidebar":
+            shutil.copy(
+                assets_root / "logo_sidebar.css",
+                docs_dir / "stylesheets" / "logo_sidebar.css",
+            )
+
 
 # --- TOC traversal ----------------------------------------------------------
 

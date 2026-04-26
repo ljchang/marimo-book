@@ -275,6 +275,11 @@ class Book(BaseModel):
     # branding
     logo: Path | None = None
     favicon: Path | None = None
+    # Where to render the logo. ``header`` is Material's default — small
+    # icon in the top-left header bar next to the site title. ``sidebar``
+    # mirrors Jupyter Book: a large logo above the left navigation,
+    # acting as the primary visual anchor of the site.
+    logo_placement: Literal["header", "sidebar"] = "header"
     theme: Theme = Field(default_factory=Theme)
 
     # per-chapter buttons (can be overridden on an entry-by-entry basis later)

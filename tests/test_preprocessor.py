@@ -96,6 +96,38 @@ def test_include_changelog_silent_when_no_file(tmp_path: Path) -> None:
     assert not report.errors
 
 
+def test_logo_placement_sidebar_stages_stylesheet(tmp_path: Path) -> None:
+    """`logo_placement: sidebar` should stage logo_sidebar.css and list it in extra_css."""
+    _minimal_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "logo_placement": "sidebar",
+            "toc": [{"file": "content/intro.md"}],
+        }
+    )
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    assert (out_dir / "docs" / "stylesheets" / "logo_sidebar.css").exists()
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    assert "stylesheets/logo_sidebar.css" in mkdocs["extra_css"]
+
+
+def test_logo_placement_header_omits_sidebar_stylesheet(tmp_path: Path) -> None:
+    """Default header placement should not stage or reference logo_sidebar.css."""
+    _minimal_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    book = Book.model_validate(
+        {"title": "Test", "toc": [{"file": "content/intro.md"}]}
+    )
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    assert not (out_dir / "docs" / "stylesheets" / "logo_sidebar.css").exists()
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    assert "stylesheets/logo_sidebar.css" not in mkdocs["extra_css"]
+
+
 def test_pdf_export_adds_with_pdf_plugin(tmp_path: Path) -> None:
     """`pdf_export: true` should append `with-pdf` to the generated plugins."""
     _minimal_book(tmp_path)

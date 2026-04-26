@@ -68,7 +68,10 @@ def _build_config(
         cfg["copyright"] = book.copyright
 
     cfg["theme"] = _theme_block(book)
-    cfg["extra_css"] = ["stylesheets/extra.css", *extra_css]
+    base_css = ["stylesheets/extra.css"]
+    if book.logo_placement == "sidebar":
+        base_css.append("stylesheets/logo_sidebar.css")
+    cfg["extra_css"] = [*base_css, *extra_css]
     cfg["extra_javascript"] = [
         "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
         "javascripts/mathjax.js",

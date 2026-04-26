@@ -34,7 +34,11 @@ from .config import Book, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .shell import _nav_from_toc, emit_mkdocs_yml
 from .transforms.link_rewrites import apply_link_rewrites
-from .transforms.marimo_export import cells_to_markdown, export_notebook
+from .transforms.marimo_export import (
+    cells_to_markdown,
+    cleanup_orphan_precompute_dirs,
+    export_notebook,
+)
 from .transforms.precompute import (
     WidgetCandidate,
     estimate_renders_independent,
@@ -302,6 +306,13 @@ class Preprocessor:
         self._write_defaults(docs_dir)
 
         file_entries = _iter_file_entries(self.book.toc)
+
+        # Sweep orphan precompute temp dirs from previous interrupted runs
+        # (Ctrl-C, watcher restart, OOM). They live alongside the notebook
+        # so the precompute pipeline can resolve sibling-module imports;
+        # the trade-off is they leak when the marimo subprocess is killed.
+        for content_dir in {(self.book_dir / e.file).parent for e in file_entries}:
+            cleanup_orphan_precompute_dirs(content_dir)
         md_basenames = {_doc_relpath_for(e.file).with_suffix("").name for e in file_entries}
 
         cache = BuildCache(self.book_dir, self.book, force_rebuild=self.rebuild)

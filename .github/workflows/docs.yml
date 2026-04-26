@@ -35,6 +35,8 @@ jobs:
         run: sudo apt-get update -y && sudo apt-get install -y libcairo2 libpango-1.0-0 libpangocairo-1.0-0
       - name: Install marimo-book + extras for docs build
         run: pip install -e '.[linkcheck,social,autorefs,pdf]'
+      - name: Install demo notebook deps (drawdata used by anywidget_demo.py)
+        run: pip install drawdata anywidget
       - name: Build docs
         run: marimo-book build -b docs/book.yml --strict
       - uses: actions/upload-pages-artifact@v3

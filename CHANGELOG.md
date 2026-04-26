@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Added — joint multi-widget + multi-line widget calls
+
+- **Joint multi-widget precompute (cross-product).** Widgets that share
+  downstream cells now precompute together via the cartesian product of
+  their values. Each joint group emits a single
+  `<script class="marimo-book-precompute-group">` metadata + lookup
+  table block keyed by `JSON.stringify([v1, v2, ...])`. The JS shim
+  reads every widget in the group on each input event, constructs the
+  combo key, and swaps cells together. Bounded by
+  `max_combinations_per_page` — a 9-widget group with 5 values each is
+  1.95M combos and trips the cap; 2-widget groups with ~10 values each
+  fit comfortably.
+- Connected-components grouping (`_group_widgets_by_downstream`):
+  union-find pass over the cell→widget map. Independent widgets stay
+  in singleton groups (existing behaviour); widgets sharing any
+  downstream cell get unioned into one joint group.
+- **Multi-line widget call substitution.** Widget calls spanning
+  multiple lines (the dartbrains pattern: `mo.ui.slider(\n    start=0,
+  \n    stop=10,\n    step=1,\n)`) now substitute correctly. The
+  splice replaces the entire `(start_line, col)`–`(end_line, end_col)`
+  range with the unparsed call expression — multi-line call collapses
+  to one line in the temp source consumed by `marimo export` (never
+  shown to the user).
+
+### Added — multi-widget independent precompute (1/2)
 
 - **Multi-widget independent precompute.** Lifts the v0.1.0a5
   single-widget-per-page restriction. Pages with N discrete widgets

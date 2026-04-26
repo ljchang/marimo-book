@@ -33,6 +33,7 @@ Design summary:
 from __future__ import annotations
 
 import ast
+import itertools
 import json
 import time
 from dataclasses import dataclass, field
@@ -326,9 +327,12 @@ def substitute_widget_value(source: str, candidate: WidgetCandidate, new_value: 
     using AST line/column offsets so the rest of the file (comments,
     decorators, ``__generated_with`` magic) is preserved verbatim.
 
-    Raises ``WidgetSubstitutionError`` for multi-line widget calls (out
-    of scope for v1) or when the call at ``candidate.line`` no longer
-    matches a recognised widget.
+    Both single-line and multi-line widget calls are supported: the
+    splice replaces the entire byte range from ``(start_line, col_offset)``
+    to ``(end_line, end_col_offset)`` with the freshly-unparsed call
+    expression. Multi-line calls collapse to a single line in the
+    rewritten temp source — that's fine since the temp source is consumed
+    only by ``marimo export`` and is never shown to the user.
     """
     try:
         tree = ast.parse(source)
@@ -339,11 +343,8 @@ def substitute_widget_value(source: str, candidate: WidgetCandidate, new_value: 
     if target is None:
         raise WidgetSubstitutionError(f"no recognised widget call found at line {candidate.line}")
 
-    if target.end_lineno is not None and target.end_lineno != target.lineno:
-        raise WidgetSubstitutionError(
-            "multi-line widget calls are not supported in v1; "
-            "rewrite the widget assignment as a single line"
-        )
+    if target.col_offset is None or target.end_col_offset is None or target.end_lineno is None:
+        raise WidgetSubstitutionError("AST node missing line/column offsets")
 
     value_node = ast.parse(repr(new_value), mode="eval").body
     replaced = False
@@ -358,12 +359,20 @@ def substitute_widget_value(source: str, candidate: WidgetCandidate, new_value: 
     new_call_src = ast.unparse(target)
 
     lines = source.split("\n")
-    start_line_idx = target.lineno - 1
-    line = lines[start_line_idx]
-    if target.col_offset is None or target.end_col_offset is None:
-        raise WidgetSubstitutionError("AST node missing column offsets")
-    rebuilt = line[: target.col_offset] + new_call_src + line[target.end_col_offset :]
-    lines[start_line_idx] = rebuilt
+    start_idx = target.lineno - 1
+    end_idx = target.end_lineno - 1
+
+    if start_idx == end_idx:
+        # Single-line call: surgical char-level replace within the line.
+        line = lines[start_idx]
+        lines[start_idx] = line[: target.col_offset] + new_call_src + line[target.end_col_offset :]
+    else:
+        # Multi-line call: keep everything before the call on the start line
+        # and everything after the call on the end line; collapse the call
+        # span itself onto one line.
+        head = lines[start_idx][: target.col_offset]
+        tail = lines[end_idx][target.end_col_offset :]
+        lines[start_idx : end_idx + 1] = [head + new_call_src + tail]
     return "\n".join(lines)
 
 
@@ -407,6 +416,7 @@ def precompute_page(
     *,
     max_seconds: float,
     max_bytes: int,
+    max_combinations: int,
     sandbox: bool = False,
 ) -> PrecomputeResult:
     """Re-export a notebook once per (widget, value), return the staged body.
@@ -528,13 +538,35 @@ def precompute_page(
             skip_reason=skip_reason,
         )
 
-    # Disjointness check across widgets. Joint widgets (shared downstream
-    # cells) need cross-product semantics — deferred to a future pass.
-    seen: set[int] = set()
-    cell_to_widget: dict[int, str] = {}
-    for candidate, _, downstream in per_widget:
-        overlap = downstream & seen
-        if overlap:
+    cfg_max_combinations = max_combinations
+
+    # Group widgets by overlapping downstream — each connected component
+    # of the "shares-cells" graph is one precompute group. Singletons get
+    # the existing independent treatment; joint groups need cross-product
+    # enumeration capped by max_combinations_per_page.
+    groups = _group_widgets_by_downstream(per_widget)
+
+    # Joint groups need re-rendering across the cartesian product. Time + bytes
+    # caps already-projected values are upper bounds for independent; for joint
+    # we re-check inside the cross-product loop.
+    independent_groups: list[tuple[WidgetCandidate, dict[str, dict[int, str]], set[int]]] = []
+    joint_groups: list[tuple[list[tuple[WidgetCandidate, set[int]]], list[int]]] = []
+    for group in groups:
+        if len(group) == 1:
+            candidate, deltas, downstream = group[0]
+            independent_groups.append((candidate, deltas, downstream))
+        else:
+            members = [(c, downstream) for c, _, downstream in group]
+            joint_groups.append((members, sorted({idx for _, _, ds in group for idx in ds})))
+
+    # Cross-product execution for each joint group.
+    joint_results: list[tuple[list[WidgetCandidate], dict[str, dict[int, str]], set[int]]] = []
+    for members_with_ds, _ in joint_groups:
+        members = [c for c, _ in members_with_ds]
+        cross_size = 1
+        for c in members:
+            cross_size *= max(1, len(c.values))
+        if cross_size > cfg_max_combinations:
             return PrecomputeResult(
                 body=static_body,
                 widget_html="",
@@ -543,26 +575,98 @@ def precompute_page(
                 seconds_total=time.monotonic() - t0,
                 skipped=True,
                 skip_reason=(
-                    f"widgets share downstream cells "
-                    f"({sorted(overlap)}); joint multi-widget precompute "
-                    f"is deferred. Rendered static."
+                    f"joint widget group ({', '.join(c.var_name for c in members)}) "
+                    f"has {cross_size} combinations, exceeding "
+                    f"max_combinations_per_page ({cfg_max_combinations}); "
+                    f"rendered static."
                 ),
             )
-        seen.update(downstream)
+
+        joint_table: dict[str, dict[int, str]] = {}
+        joint_downstream: set[int] = set()
+        defaults = tuple(c.default for c in members)
+
+        for combo in itertools.product(*[c.values for c in members]):
+            if combo == defaults:
+                continue  # base render covers this case
+            rewritten = source
+            failed = False
+            for c, val in zip(members, combo, strict=True):
+                try:
+                    rewritten = substitute_widget_value(rewritten, c, val)
+                except WidgetSubstitutionError:
+                    failed = True
+                    break
+            if failed:
+                continue
+            try:
+                export = export_notebook_with_overrides(
+                    py_path, rewritten_source=rewritten, sandbox=sandbox
+                )
+                segments = cells_to_markdown_segments(export)
+            except Exception:  # noqa: BLE001
+                continue
+            delta = {idx: html for idx, html in segments if base_by_idx.get(idx) != html}
+            if not delta:
+                continue
+            joint_table[_combo_key(combo)] = delta
+            joint_downstream.update(delta)
+            bytes_so_far += sum(len(v) for v in delta.values())
+            if bytes_so_far > max_bytes:
+                return PrecomputeResult(
+                    body=static_body,
+                    widget_html="",
+                    reactive_cell_indices=[],
+                    bytes_total=bytes_so_far,
+                    seconds_total=time.monotonic() - t0,
+                    skipped=True,
+                    skip_reason=(
+                        f"lookup table reached {bytes_so_far:,} bytes, exceeding "
+                        f"max_bytes_per_page ({max_bytes:,}); rendered static."
+                    ),
+                )
+        if joint_downstream:
+            joint_results.append((members, joint_table, joint_downstream))
+
+    # Build the body.
+    cell_to_widget: dict[int, str] = {}
+    cell_to_group: dict[int, int] = {}
+    for candidate, _, downstream in independent_groups:
         for idx in downstream:
             cell_to_widget[idx] = candidate.var_name
+    for group_idx, (_members, _, downstream) in enumerate(joint_results):
+        for idx in downstream:
+            cell_to_group[idx] = group_idx
 
-    # All disjoint — assemble the staged body.
-    body = _join_for_page(_wrap_reactive_segments_multi(base_segments, cell_to_widget))
-    body += "\n\n" + "\n".join(
-        _embed_metadata(candidate, deltas) for candidate, deltas, _ in per_widget
+    if not independent_groups and not joint_results:
+        return PrecomputeResult(
+            body=static_body,
+            widget_html="",
+            reactive_cell_indices=[],
+            seconds_total=time.monotonic() - t0,
+        )
+
+    body = _join_for_page(
+        _wrap_reactive_segments_grouped(base_segments, cell_to_widget, cell_to_group)
     )
-    widget_html = _build_controls_panel([candidate for candidate, _, _ in per_widget])
+    metadata_blocks = [
+        _embed_metadata(candidate, deltas) for candidate, deltas, _ in independent_groups
+    ]
+    metadata_blocks.extend(
+        _embed_group_metadata(group_idx, members, table)
+        for group_idx, (members, table, _) in enumerate(joint_results)
+    )
+    body += "\n\n" + "\n".join(metadata_blocks)
+
+    all_widgets: list[WidgetCandidate] = [c for c, _, _ in independent_groups]
+    for members, _, _ in joint_results:
+        all_widgets.extend(members)
+    widget_html = _build_controls_panel_grouped(independent_groups, joint_results)
 
     return PrecomputeResult(
         body=body,
         widget_html=widget_html,
-        reactive_cell_indices=sorted(seen),
+        reactive_cell_indices=sorted(set(cell_to_widget) | set(cell_to_group)),
         bytes_total=bytes_so_far,
         seconds_total=time.monotonic() - t0,
     )
@@ -577,6 +681,45 @@ def _join_for_page(segments: list[tuple[int, str]]) -> str:
 
     joined = "\n\n".join(body.strip("\n") for _, body in segments if body.strip())
     return re.sub(r"\n{3,}", "\n\n", joined) + "\n"
+
+
+def _group_widgets_by_downstream(
+    per_widget: list[tuple[WidgetCandidate, dict[str, dict[int, str]], set[int]]],
+) -> list[list[tuple[WidgetCandidate, dict[str, dict[int, str]], set[int]]]]:
+    """Connected-components of widgets that share at least one downstream cell.
+
+    A union-find pass over the cell→widget map: any two widgets whose
+    downstream sets overlap end up in the same group. Singleton groups
+    pass through as-is.
+    """
+    n = len(per_widget)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if per_widget[i][2] & per_widget[j][2]:
+                union(i, j)
+
+    buckets: dict[int, list[int]] = {}
+    for i in range(n):
+        buckets.setdefault(find(i), []).append(i)
+    return [[per_widget[i] for i in indices] for indices in buckets.values()]
+
+
+def _combo_key(values: tuple) -> str:
+    """Stable string key for a multi-widget combination."""
+    return json.dumps([_jsonable(v) for v in values])
 
 
 def _wrap_reactive_segments_multi(
@@ -630,6 +773,103 @@ def _embed_metadata(candidate: WidgetCandidate, by_value: dict[str, dict[int, st
         + "</script>"
     )
     return widget_block + "\n" + table_block
+
+
+def _wrap_reactive_segments_grouped(
+    segments: list[tuple[int, str]],
+    cell_to_widget: dict[int, str],
+    cell_to_group: dict[int, int],
+) -> list[tuple[int, str]]:
+    """Wrap reactive cells; either widget-tagged (independent) or group-tagged (joint)."""
+    out: list[tuple[int, str]] = []
+    for idx, body in segments:
+        if idx in cell_to_widget:
+            wrapped = (
+                f'<div class="marimo-book-precompute-cell" '
+                f'data-precompute-cell="{idx}" '
+                f'data-precompute-widget="{_html_escape(cell_to_widget[idx])}" '
+                f'markdown="1">\n\n'
+                f"{body}\n\n"
+                f"</div>"
+            )
+            out.append((idx, wrapped))
+        elif idx in cell_to_group:
+            wrapped = (
+                f'<div class="marimo-book-precompute-cell" '
+                f'data-precompute-cell="{idx}" '
+                f'data-precompute-group="g{cell_to_group[idx]}" '
+                f'markdown="1">\n\n'
+                f"{body}\n\n"
+                f"</div>"
+            )
+            out.append((idx, wrapped))
+        else:
+            out.append((idx, body))
+    return out
+
+
+def _embed_group_metadata(
+    group_idx: int, members: list[WidgetCandidate], table: dict[str, dict[int, str]]
+) -> str:
+    """Joint-group metadata + lookup table.
+
+    The widgets are listed in the order their values were used to build
+    the combo key (positional). The JS shim reads the same order from
+    every control mount belonging to this group and constructs the key
+    via JSON.stringify(values_array).
+    """
+    group_attr = f'data-precompute-group="g{group_idx}"'
+    payload = {
+        "group_id": f"g{group_idx}",
+        "widgets": [
+            {
+                "var_name": c.var_name,
+                "kind": c.kind,
+                "values": [_jsonable(v) for v in c.values],
+                "default": _jsonable(c.default),
+            }
+            for c in members
+        ],
+    }
+    meta_block = (
+        f'<script type="application/json" class="marimo-book-precompute-group" {group_attr}>'
+        + json.dumps(payload, separators=(",", ":"))
+        + "</script>"
+    )
+    table_block = (
+        f'<script type="application/json" class="marimo-book-precompute-table" {group_attr}>'
+        + json.dumps(table, separators=(",", ":"))
+        + "</script>"
+    )
+    return meta_block + "\n" + table_block
+
+
+def _build_controls_panel_grouped(
+    independent_groups: list[tuple[WidgetCandidate, dict, set[int]]],
+    joint_groups: list[tuple[list[WidgetCandidate], dict, set[int]]],
+) -> str:
+    """Combined controls panel with one mount per widget.
+
+    Independent widgets get the existing ``data-precompute-widget=...``
+    mount. Joint-group members get ``data-precompute-group=g<i>``
+    mounts; the JS shim treats them as a unit.
+    """
+    if not independent_groups and not joint_groups:
+        return ""
+    mounts: list[str] = []
+    for c, _, _ in independent_groups:
+        mounts.append(
+            f'<div class="marimo-book-precompute-control" '
+            f'data-precompute-widget="{_html_escape(c.var_name)}"></div>'
+        )
+    for group_idx, (members, _, _) in enumerate(joint_groups):
+        for c in members:
+            mounts.append(
+                f'<div class="marimo-book-precompute-control" '
+                f'data-precompute-group="g{group_idx}" '
+                f'data-precompute-widget="{_html_escape(c.var_name)}"></div>'
+            )
+    return '<div class="marimo-book-precompute-controls">' + "".join(mounts) + "</div>"
 
 
 def _build_controls_panel(candidates: list[WidgetCandidate]) -> str:

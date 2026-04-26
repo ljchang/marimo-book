@@ -90,9 +90,10 @@ install it (the docs job needs every extra the docs site uses).
 | `check_external_links: true` | `htmlproofer` validates external URLs at build (slow; CI-only) | `marimo-book[linkcheck]` |
 | `include_changelog: true` | Preprocessor copies `CHANGELOG.md` from book root (or its parent) into the staged tree and appends a "Changelog" entry to the nav | None |
 | `pdf_export: true` | `mkdocs-with-pdf` renders the whole book to `_site/pdf/book.pdf` via WeasyPrint and adds a "Download PDF" link to the footer | `marimo-book[pdf]` (same cairo/pango system deps as `[social]`) |
-| `precompute.enabled: true` | Detects discrete `mo.ui.*` widgets (`slider` with `steps=` or explicit `step=`, `dropdown`, `switch`, `checkbox`, `radio`), re-exports the notebook per value, ships a JSON lookup table embedded in the page; JS shim swaps reactive cells on widget input. Caps in `precompute.{max_values_per_widget, max_combinations_per_page, max_seconds_per_page, max_bytes_per_page}`. v1 = single-widget pages only; multi-widget pages render static with a warning. **Will be a no-op for WASM-rendered pages when v0.2 lands** — gate point is in `Preprocessor.build()`. | None |
+| `precompute.enabled: true` | Detects discrete `mo.ui.*` widgets, re-exports per value, ships a JSON lookup table embedded in the page; JS shim swaps reactive cells on widget input. Caps in `precompute.{max_values_per_widget, max_combinations_per_page, max_seconds_per_page, max_bytes_per_page}`. Multi-widget independent + joint cross-products both supported (since v0.1.0a6). Auto-no-op on WASM pages. | None |
+| `defaults.mode: wasm` (or per-entry `mode: wasm`) | Page rendered via `MarimoIslandGenerator`. Marimo's runtime + Pyodide load in the browser; cells become natively reactive, continuous sliders work, no precompute caps. Heavy first paint (~30 MB Pyodide download, cached after first visit). Per-page opt-in is the recommended pattern — leave most pages static for fast loads, enable wasm only on chapters that need full interactivity. | None (CDN bundle from jsdelivr by default) |
 
-All six are off by default in `marimo-book new` scaffolds.
+All seven are off by default in `marimo-book new` scaffolds.
 
 ## Theme + CSS
 

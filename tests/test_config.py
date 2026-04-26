@@ -77,13 +77,39 @@ def test_launch_buttons_defaults() -> None:
     assert b.launch_buttons.wasm is False  # v0.2
 
 
-def test_defaults_mode_static_only_in_v01() -> None:
-    # Only "static" is accepted in v0.1; v0.2 will add "wasm" and "hybrid".
+def test_defaults_mode_static_or_wasm() -> None:
+    """v0.2 added wasm; static stays the default."""
     b = Book.model_validate({"title": "T", "toc": [{"file": "a.md"}]})
     assert b.defaults.mode == "static"
 
+    b_wasm = Book.model_validate(
+        {"title": "T", "toc": [{"file": "a.md"}], "defaults": {"mode": "wasm"}}
+    )
+    assert b_wasm.defaults.mode == "wasm"
+
+    # ``hybrid`` is reserved on the roadmap but not yet a valid value.
     with pytest.raises(ValidationError):
-        Book.model_validate({"title": "T", "toc": [{"file": "a.md"}], "defaults": {"mode": "wasm"}})
+        Book.model_validate(
+            {"title": "T", "toc": [{"file": "a.md"}], "defaults": {"mode": "hybrid"}}
+        )
+
+
+def test_file_entry_per_page_mode_override() -> None:
+    """Per-entry ``mode`` overrides the book-wide default."""
+    b = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [
+                {"file": "a.py"},
+                {"file": "b.py", "mode": "wasm"},
+            ],
+        }
+    )
+    a, b_entry = b.toc[0], b.toc[1]
+    assert a.effective_mode("static") == "static"
+    assert b_entry.effective_mode("static") == "wasm"
+    # When the book default is wasm, an unset entry follows it.
+    assert a.effective_mode("wasm") == "wasm"
 
 
 def test_toc_entry_must_pick_one_shape() -> None:

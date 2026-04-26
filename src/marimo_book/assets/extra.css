@@ -331,6 +331,36 @@ pre.marimo-error {
 /* Marimo callouts come through as .admonition with an extra marker class;
    no overrides needed — Material styles them. */
 
+/* --- WASM (marimo islands) integration ----------------------------------- */
+/* Override marimo's island runtime styling so it matches the book theme.
+   Marimo ships its own font stack (Lora / PT Sans / Fira Mono) and color
+   tokens; we override with our Geist + zinc palette via the `.marimo`
+   namespace. Pixel-perfect match isn't the goal; "doesn't look alien" is. */
+
+.marimo,
+marimo-island,
+marimo-cell-output {
+  font-family: var(--md-text-font), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.marimo code,
+.marimo pre,
+marimo-cell-output code,
+marimo-cell-output pre {
+  font-family: var(--md-code-font), ui-monospace, "SF Mono", Menlo, monospace;
+}
+/* Marimo's per-cell wrappers shouldn't add their own borders/padding
+   inside our content area. */
+marimo-island {
+  display: block;
+  margin: 0.75rem 0;
+}
+/* Hide marimo's loading spinner cell — it lives in the page until the
+   runtime boots, then disappears. Our cells are already visible by
+   default (server-rendered placeholder text), so the spinner is noise. */
+marimo-island[data-cell-id]:first-of-type marimo-cell-output svg.animate-spin {
+  display: none;
+}
+
 /* --- Static reactivity (precompute) -------------------------------------- */
 /* Renders for the input control + the cell-swap target. Kept minimal; sits
    inline in the page just above the first reactive cell. */

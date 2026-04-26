@@ -159,7 +159,13 @@ class Dependencies(BaseModel):
 class Defaults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["static"] = "static"  # v0.2 adds "wasm", "hybrid"
+    # ``static``  — server-rendered cell outputs (the original mode).
+    # ``wasm``    — page is rendered via marimo's islands runtime in
+    #               the browser. Pyodide loads at first paint; cells
+    #               become live and reactive without a server. Heavy
+    #               (~2 MB JS + ~30 MB Pyodide on first load); use
+    #               selectively per page rather than book-wide.
+    mode: Literal["static", "wasm"] = "static"
     hide_author_line: bool = True
     show_source_link: bool = True
     # The first code cell in a marimo notebook is, by convention, the setup /
@@ -179,8 +185,16 @@ class FileEntry(BaseModel):
 
     file: Path
     title: str | None = None
-    mode: Literal["static"] = "static"  # v0.2 adds "wasm", "hybrid"
+    # Per-entry override. ``None`` = follow ``book.defaults.mode``. Setting
+    # ``mode: wasm`` on a single ``.py`` entry routes that page through the
+    # islands renderer while every other page stays static. Markdown pages
+    # ignore this field.
+    mode: Literal["static", "wasm"] | None = None
     hidden: bool = False
+
+    def effective_mode(self, default_mode: str) -> str:
+        """Resolve this entry's render mode against the book-wide default."""
+        return self.mode or default_mode
 
 
 class UrlEntry(BaseModel):

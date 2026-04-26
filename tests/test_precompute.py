@@ -70,6 +70,29 @@ def test_slider_zero_step_skipped() -> None:
     assert _scan("s = mo.ui.slider(0, 10, step=0)") == []
 
 
+def test_slider_with_all_kwargs() -> None:
+    """marimo's recommended style: `slider(start=A, stop=B, step=N)`."""
+    cands = _scan("s = mo.ui.slider(start=0, stop=10, step=2)")
+    assert len(cands) == 1
+    assert cands[0].values == [0, 2, 4, 6, 8, 10]
+
+
+def test_slider_all_kwargs_no_step_is_continuous() -> None:
+    assert _scan("s = mo.ui.slider(start=0, stop=10)") == []
+
+
+def test_slider_all_kwargs_with_value_default() -> None:
+    cands = _scan("s = mo.ui.slider(start=0, stop=4, step=1, value=2)")
+    assert cands[0].values == [0, 1, 2, 3, 4]
+    assert cands[0].default == 2
+
+
+def test_slider_kwargs_with_extra_marimo_kwargs() -> None:
+    """dartbrains-style: includes label, value, etc. We ignore the extras."""
+    cands = _scan('s = mo.ui.slider(start=-15, stop=15, step=5, value=0, label="Translate X")')
+    assert cands[0].values == [-15, -10, -5, 0, 5, 10, 15]
+
+
 # --- dropdown --------------------------------------------------------------
 
 

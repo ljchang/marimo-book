@@ -164,31 +164,24 @@ def _slider_values(args: list[ast.expr], kwargs: dict[str, ast.expr]) -> list[An
 
     Recognised forms (all with literal numeric arguments):
 
-    - ``mo.ui.slider(steps=[a, b, c, ...])``   — explicit list
-    - ``mo.ui.slider(start, stop, step=N)``    — explicit step kwarg
-    - ``mo.ui.slider(start, stop, step)``      — three positional args
+    - ``mo.ui.slider(steps=[a, b, c, ...])``         — explicit list
+    - ``mo.ui.slider(start, stop, step=N)``          — start/stop positional, step kwarg
+    - ``mo.ui.slider(start, stop, step)``            — three positional args
+    - ``mo.ui.slider(start=A, stop=B, step=N)``      — all kwargs (marimo's recommended style)
 
-    Everything else (``mo.ui.slider(start, stop)`` with no step) is
-    continuous and skipped.
+    Everything else (``mo.ui.slider(start, stop)`` with no step,
+    ``mo.ui.slider(start=A, stop=B)`` with no step) is continuous and
+    skipped.
     """
     if "steps" in kwargs:
         return _list_kwarg(kwargs, "steps")
 
-    # Need start, stop, AND step (positional or kwarg).
-    if len(args) >= 3:
-        start, stop, step = (
-            _literal_or_none(args[0]),
-            _literal_or_none(args[1]),
-            _literal_or_none(args[2]),
-        )
-    elif len(args) == 2 and "step" in kwargs:
-        start, stop, step = (
-            _literal_or_none(args[0]),
-            _literal_or_none(args[1]),
-            _literal_or_none(kwargs["step"]),
-        )
-    else:
+    # Resolve start/stop/step from any combination of positional + kwarg.
+    # marimo's signature is `slider(start=None, stop=None, step=None, ...)`.
+    raw = _resolve_slider_bounds(args, kwargs)
+    if raw is None:
         return None  # continuous — opt out
+    start, stop, step = raw
 
     if not all(isinstance(v, (int, float)) for v in (start, stop, step)):
         return None
@@ -197,6 +190,27 @@ def _slider_values(args: list[ast.expr], kwargs: dict[str, ast.expr]) -> list[An
 
     # Inclusive of stop, like marimo's slider semantics.
     return _arange_inclusive(start, stop, step)
+
+
+def _resolve_slider_bounds(
+    args: list[ast.expr], kwargs: dict[str, ast.expr]
+) -> tuple[Any, Any, Any] | None:
+    """Return ``(start, stop, step)`` literals from any arg arrangement, or None."""
+    # Positional args fill start/stop/step in order.
+    positional = [_literal_or_none(a) for a in args[:3]]
+    # Kwargs override / fill in the gaps.
+    start = positional[0] if len(positional) >= 1 else None
+    stop = positional[1] if len(positional) >= 2 else None
+    step = positional[2] if len(positional) >= 3 else None
+    if "start" in kwargs:
+        start = _literal_or_none(kwargs["start"])
+    if "stop" in kwargs:
+        stop = _literal_or_none(kwargs["stop"])
+    if "step" in kwargs:
+        step = _literal_or_none(kwargs["step"])
+    if start is None or stop is None or step is None:
+        return None
+    return start, stop, step
 
 
 def _arange_inclusive(start: float, stop: float, step: float) -> list[Any]:

@@ -430,6 +430,7 @@ class Preprocessor:
             kept,
             max_seconds=float(cfg.max_seconds_per_page),
             max_bytes=cfg.max_bytes_per_page,
+            max_combinations=cfg.max_combinations_per_page,
             sandbox=self.sandbox,
         )
         if result.skipped:

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from marimo_book.transforms.precompute import (
     WidgetCandidate,
-    WidgetSubstitutionError,
     estimate_combinations,
     page_excluded,
     scan_widgets,
@@ -232,15 +231,36 @@ def test_substitute_switch_with_bool() -> None:
     assert "value=True" in out
 
 
-def test_substitute_raises_on_multi_line_call() -> None:
+def test_substitute_handles_multi_line_call() -> None:
+    """v2: multi-line widget calls are now supported via line-range splice."""
     src = "slider = mo.ui.slider(\n    steps=[0, 1, 5, 10],\n)"
     cand = _single_cand(src)
-    try:
-        substitute_widget_value(src, cand, 5)
-    except WidgetSubstitutionError:
-        pass
-    else:
-        raise AssertionError("expected WidgetSubstitutionError on multi-line call")
+    out = substitute_widget_value(src, cand, 5)
+    assert "value=5" in out
+    # The original kwargs survive (steps list).
+    assert "[0, 1, 5, 10]" in out
+    # The result parses cleanly as Python.
+    import ast as _ast
+
+    _ast.parse(out)
+
+
+def test_substitute_multi_line_preserves_surrounding_lines() -> None:
+    src = (
+        "x = 1\n"
+        "slider = mo.ui.slider(\n"
+        "    start=0,\n"
+        "    stop=10,\n"
+        "    step=2,\n"
+        "    label='hi',\n"
+        ")\n"
+        "y = 2\n"
+    )
+    cand = _single_cand(src)
+    out = substitute_widget_value(src, cand, 4)
+    assert "value=4" in out
+    assert out.startswith("x = 1\n")
+    assert out.rstrip().endswith("y = 2")
 
 
 def test_substitute_only_touches_target_call() -> None:
@@ -328,12 +348,11 @@ def test_preview_widget_over_max_values_skipped_with_warning(tmp_path: Path) -> 
     assert any("max_values_per_widget" in w for w in report.warnings)
 
 
-def test_preview_page_with_joint_widgets_falls_back_to_static(tmp_path: Path) -> None:
-    """Widgets that share a downstream cell cannot be precomputed independently.
+def test_precompute_joint_widgets_via_cross_product(tmp_path: Path) -> None:
+    """Widgets that share a downstream cell now cross-product together.
 
-    The disjointness check fires AFTER probe-rendering, so we need a real
-    notebook with a cell that reads from BOTH widgets. The whole page
-    falls back to static and a warning explains why.
+    Two sliders driving the same cell → joint group; lookup table is
+    keyed by ``[a_value, b_value]`` JSON arrays.
     """
     content = tmp_path / "content"
     content.mkdir()
@@ -372,9 +391,18 @@ def test_preview_page_with_joint_widgets_falls_back_to_static(tmp_path: Path) ->
     )
 
     report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
-    assert report.widgets_precomputed == 0
-    assert report.widgets_skipped == 2
-    assert any("share downstream cells" in w for w in report.warnings)
+    assert report.widgets_precomputed == 2, report.warnings
+    assert report.widgets_skipped == 0
+    assert not report.errors
+
+    staged = (tmp_path / "_site_src" / "docs" / "demo.md").read_text(encoding="utf-8")
+    # Joint group emits a single group metadata + lookup-table block.
+    assert 'class="marimo-book-precompute-group"' in staged
+    assert 'data-precompute-group="g0"' in staged
+    # Both controls point at the same group.
+    assert staged.count('data-precompute-group="g0"') >= 3  # 2 controls + group meta + table
+    # Combo keys are JSON arrays of values.
+    assert '"[2,10]"' in staged or '"[2, 10]"' in staged
 
 
 def test_preview_single_widget_over_renders_cap_skips(tmp_path: Path) -> None:
@@ -442,6 +470,49 @@ def test_precompute_end_to_end_emits_lookup_table(tmp_path: Path) -> None:
     # Lookup keys are JSON-stringified slider values; default (1) is omitted.
     assert '"2"' in staged
     assert '"3"' in staged
+
+
+def test_precompute_joint_group_over_combinations_cap_skips(tmp_path: Path) -> None:
+    """A joint group whose cartesian product exceeds the cap is rendered static."""
+    content = tmp_path / "content"
+    content.mkdir()
+    nb = content / "demo.py"
+    nb.write_text(
+        "import marimo\n\n"
+        "__generated_with = '0.23.3'\n"
+        "app = marimo.App()\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import marimo as mo\n"
+        "    return (mo,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    a = mo.ui.slider(steps=[1, 2, 3, 4, 5])\n"
+        "    return (a,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    b = mo.ui.slider(steps=[10, 20, 30, 40, 50])\n"
+        "    return (b,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _(mo, a, b):\n"
+        "    mo.md(f'a={a.value} b={b.value}')\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
+    )
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            # 5 × 5 = 25 combos; cap at 10 → joint group skipped.
+            "precompute": {"enabled": True, "max_combinations_per_page": 10},
+            "toc": [{"file": "content/demo.py"}],
+        }
+    )
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 0
+    assert any("max_combinations_per_page" in w for w in report.warnings)
 
 
 def test_precompute_two_independent_widgets(tmp_path: Path) -> None:

@@ -252,13 +252,92 @@
     controlEl.setAttribute("data-mb-precompute-init", "1");
   }
 
-  function initPrecomputeOnce(scope) {
-    // Find every widget mount on the page and init each independently.
-    const mounts = scope.querySelectorAll(
-      ".marimo-book-precompute-control:not([data-mb-precompute-init])[data-precompute-widget]"
+  function initPrecomputeForGroup(scope, groupId) {
+    const sel = `[data-precompute-group="${CSS.escape(groupId)}"]`;
+    const metaEl = scope.querySelector("script.marimo-book-precompute-group" + sel);
+    const tableEl = scope.querySelector("script.marimo-book-precompute-table" + sel);
+    if (!metaEl || !tableEl) return;
+
+    let meta, table;
+    try {
+      meta = JSON.parse(metaEl.textContent || "{}");
+      table = JSON.parse(tableEl.textContent || "{}");
+    } catch (err) {
+      console.error("[marimo-book] precompute group JSON parse failed for " + groupId, err);
+      return;
+    }
+
+    // Build a control for each widget in the group; controls all share
+    // an applyValue function that reads every widget's current value
+    // and constructs the combo key.
+    const widgets = meta.widgets || [];
+    const builders = [];
+    for (const widgetMeta of widgets) {
+      const built = buildControl(widgetMeta);
+      if (!built) return; // unsupported widget kind in group; bail entire group
+      builders.push(built);
+    }
+
+    const cells = scope.querySelectorAll(
+      `[data-precompute-cell]${sel}`
     );
-    mounts.forEach((el) => {
+    const baseSnapshot = {};
+    cells.forEach((el) => {
+      const idx = el.getAttribute("data-precompute-cell");
+      baseSnapshot[idx] = el.innerHTML;
+    });
+
+    function applyValue() {
+      const values = builders.map((b) => b.getValue());
+      const key = JSON.stringify(values);
+      const delta = table[key] || {};
+      cells.forEach((el) => {
+        const idx = el.getAttribute("data-precompute-cell");
+        const html = Object.prototype.hasOwnProperty.call(delta, idx)
+          ? delta[idx]
+          : baseSnapshot[idx];
+        if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+      });
+      builders.forEach((b) => {
+        if (typeof b.syncLabel === "function") b.syncLabel();
+      });
+    }
+
+    // Mount each control in its own .marimo-book-precompute-control div
+    // (matched by group + widget name), and bind events.
+    widgets.forEach((widgetMeta, i) => {
+      const built = builders[i];
+      const controlEl = scope.querySelector(
+        `.marimo-book-precompute-control${sel}[data-precompute-widget="${CSS.escape(widgetMeta.var_name)}"]`
+      );
+      if (!controlEl || controlEl.getAttribute("data-mb-precompute-init")) return;
+      built.input.addEventListener("input", applyValue);
+      built.input.addEventListener("change", applyValue);
+      controlEl.appendChild(built.wrap);
+      controlEl.setAttribute("data-mb-precompute-init", "1");
+    });
+  }
+
+  function initPrecomputeOnce(scope) {
+    // Independent (per-widget) mounts.
+    const widgetMounts = scope.querySelectorAll(
+      ".marimo-book-precompute-control:not([data-mb-precompute-init])[data-precompute-widget]:not([data-precompute-group])"
+    );
+    widgetMounts.forEach((el) => {
       initPrecomputeForWidget(scope, el.getAttribute("data-precompute-widget"));
+    });
+
+    // Joint-group mounts. Init each group once even though multiple
+    // controls share its group ID.
+    const seen = new Set();
+    const groupMounts = scope.querySelectorAll(
+      ".marimo-book-precompute-control:not([data-mb-precompute-init])[data-precompute-group]"
+    );
+    groupMounts.forEach((el) => {
+      const gid = el.getAttribute("data-precompute-group");
+      if (seen.has(gid)) return;
+      seen.add(gid);
+      initPrecomputeForGroup(scope, gid);
     });
   }
 

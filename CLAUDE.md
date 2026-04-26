@@ -95,6 +95,17 @@ install it (the docs job needs every extra the docs site uses).
 
 All seven are off by default in `marimo-book new` scaffolds.
 
+### Custom domain (CNAME)
+
+Drop a `CNAME` file at the book root (next to `book.yml`) containing
+the apex domain (e.g. `marimobook.org`). The preprocessor copies it
+into the staged docs tree so mkdocs ships it as `_site/CNAME` —
+GitHub Pages then keeps the custom-domain setting on every redeploy.
+DNS still has to be configured at the registrar (four `A` records on
+the apex pointing at GitHub's Pages IPs, plus a `www` `CNAME` →
+`<user>.github.io`). The `marimo-book` self-hosted docs use this
+pattern for `marimobook.org` (see `docs/CNAME`).
+
 ## Theme + CSS
 
 Default styling lives in `src/marimo_book/assets/extra.css` —

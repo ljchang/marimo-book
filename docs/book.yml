@@ -13,7 +13,7 @@ copyright: "2026"
 license: MIT
 repo: https://github.com/ljchang/marimo-book
 branch: main
-url: https://ljchang.github.io/marimo-book/
+url: https://marimobook.org/
 
 theme:
   palette:
@@ -69,6 +69,7 @@ toc:
       - file: content/precompute_demo.py
       - file: content/wasm_demo.py
         mode: wasm
+      - file: content/anywidget_demo.py
       - file: content/dependencies.md
       - file: content/widgets.md
 

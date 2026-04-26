@@ -347,12 +347,21 @@
     initPrecomputeOnce(scope);
   }
 
-  if (typeof document$ !== "undefined" && document$.subscribe) {
-    // Material for MkDocs instant-navigation: re-init after each load.
-    document$.subscribe(() => bootAll(document));
-  } else if (document.readyState === "loading") {
+  // Boot chain: belt-and-suspenders so we run on direct page loads AND
+  // on Material's instant-navigation swaps. All boot work is idempotent
+  // (guarded by `:not([data-mb-precompute-init])` and `:not([data-mb-hydrated])`
+  // so multiple calls are safe). This matters because Material's
+  // `document$` is a Subject — subscribers added AFTER its initial
+  // emission miss the initial document. Our `defer` script can race
+  // that emission depending on script-tag ordering, so we always boot
+  // once via DOMContentLoaded / immediate, AND ALSO subscribe to
+  // document$ for instant-nav.
+  if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => bootAll(document));
   } else {
     bootAll(document);
+  }
+  if (typeof document$ !== "undefined" && document$.subscribe) {
+    document$.subscribe(() => bootAll(document));
   }
 })();

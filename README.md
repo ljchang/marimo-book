@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/marimo-book.svg)](https://pypi.org/project/marimo-book/)
 [![CI](https://github.com/ljchang/marimo-book/actions/workflows/ci.yml/badge.svg)](https://github.com/ljchang/marimo-book/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://ljchang.github.io/marimo-book/)
+[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://marimobook.org/)
 
 Build clean, searchable static books from [marimo](https://marimo.io)
 notebooks and Markdown files.

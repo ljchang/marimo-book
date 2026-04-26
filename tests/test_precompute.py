@@ -328,28 +328,59 @@ def test_preview_widget_over_max_values_skipped_with_warning(tmp_path: Path) -> 
     assert any("max_values_per_widget" in w for w in report.warnings)
 
 
-def test_preview_page_with_multiple_widgets_falls_back_to_static(tmp_path: Path) -> None:
-    """v1 only supports single-widget pages; multi-widget = render static."""
-    book = _book_with_widget_notebook(
-        tmp_path,
-        source="\n    ".join(
-            [
-                "a = mo.ui.slider(steps=[0, 1])",
-                "b = mo.ui.slider(steps=[0, 1])",
-            ]
-        ),
+def test_preview_page_with_joint_widgets_falls_back_to_static(tmp_path: Path) -> None:
+    """Widgets that share a downstream cell cannot be precomputed independently.
+
+    The disjointness check fires AFTER probe-rendering, so we need a real
+    notebook with a cell that reads from BOTH widgets. The whole page
+    falls back to static and a warning explains why.
+    """
+    content = tmp_path / "content"
+    content.mkdir()
+    nb = content / "demo.py"
+    nb.write_text(
+        "import marimo\n\n"
+        "__generated_with = '0.23.3'\n"
+        "app = marimo.App()\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import marimo as mo\n"
+        "    return (mo,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    a = mo.ui.slider(steps=[1, 2])\n"
+        "    return (a,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    b = mo.ui.slider(steps=[10, 20])\n"
+        "    return (b,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _(mo, a, b):\n"
+        # Cell reads from BOTH widgets — joint downstream.
+        "    mo.md(f'a={a.value} b={b.value}')\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
     )
-    book = _enable_precompute(book)
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "precompute": {"enabled": True},
+            "toc": [{"file": "content/demo.py"}],
+        }
+    )
 
     report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
     assert report.widgets_precomputed == 0
     assert report.widgets_skipped == 2
-    assert any("single-widget pages only" in w for w in report.warnings)
+    assert any("share downstream cells" in w for w in report.warnings)
 
 
-def test_preview_single_widget_over_max_combinations_skips(tmp_path: Path) -> None:
-    """A single widget whose value count exceeds the combinations cap."""
-    # 20 values on a 10-cap, with the widget cap raised so that's not what trips.
+def test_preview_single_widget_over_renders_cap_skips(tmp_path: Path) -> None:
+    """A widget whose value count would push total renders past the cap."""
+    # 20 values → 20 renders, on a 10-cap, with the widget cap raised so
+    # that's not what trips.
     big = ", ".join(str(i) for i in range(20))
     book = _book_with_widget_notebook(tmp_path, source=f"slider = mo.ui.slider(steps=[{big}])")
     book = _enable_precompute(book, max_values_per_widget=50, max_combinations_per_page=10)
@@ -404,13 +435,72 @@ def test_precompute_end_to_end_emits_lookup_table(tmp_path: Path) -> None:
 
     staged = (tmp_path / "_site_src" / "docs" / "demo.md").read_text(encoding="utf-8")
     assert 'class="marimo-book-precompute-control"' in staged
-    assert 'data-precompute-var="n"' in staged
+    assert 'data-precompute-widget="n"' in staged
     assert "data-precompute-cell=" in staged
     assert 'class="marimo-book-precompute-widget"' in staged
     assert 'class="marimo-book-precompute-table"' in staged
     # Lookup keys are JSON-stringified slider values; default (1) is omitted.
     assert '"2"' in staged
     assert '"3"' in staged
+
+
+def test_precompute_two_independent_widgets(tmp_path: Path) -> None:
+    """Two widgets controlling disjoint cells both precompute on one page."""
+    content = tmp_path / "content"
+    content.mkdir()
+    nb = content / "demo.py"
+    nb.write_text(
+        "import marimo\n\n"
+        "__generated_with = '0.23.3'\n"
+        "app = marimo.App()\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import marimo as mo\n"
+        "    return (mo,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    a = mo.ui.slider(steps=[1, 2])\n"
+        "    return (a,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _(mo, a):\n"
+        # Cell A: depends on `a` only.
+        "    mo.md(f'A is {a.value}')\n"
+        "    return\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    b = mo.ui.dropdown(options=['x', 'y'])\n"
+        "    return (b,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _(mo, b):\n"
+        # Cell B: depends on `b` only.
+        "    mo.md(f'B is {b.value}')\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
+    )
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "precompute": {"enabled": True},
+            "toc": [{"file": "content/demo.py"}],
+        }
+    )
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 2, report.warnings
+    assert report.widgets_skipped == 0
+    assert not report.errors
+
+    staged = (tmp_path / "_site_src" / "docs" / "demo.md").read_text(encoding="utf-8")
+    # Both widgets get a control mount.
+    assert 'data-precompute-widget="a"' in staged
+    assert 'data-precompute-widget="b"' in staged
+    # Both widgets have their own metadata + lookup-table script.
+    assert staged.count('class="marimo-book-precompute-widget"') == 2
+    assert staged.count('class="marimo-book-precompute-table"') == 2
+    # Reactive cells tagged with the widget that drives them.
+    assert "data-precompute-cell=" in staged
 
 
 def test_preview_excluded_page_is_silent(tmp_path: Path) -> None:

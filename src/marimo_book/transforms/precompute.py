@@ -280,11 +280,29 @@ def _safe_first(values: list[Any]) -> Any:
 
 
 def estimate_combinations(candidates: list[WidgetCandidate]) -> int:
-    """Cartesian product size across candidates. Used for cap checks."""
+    """Cartesian product size across candidates.
+
+    Accurate for the joint-precompute case (deferred to a future pass)
+    where widgets share downstream cells and need cross-product
+    enumeration. For the v1 independent case, use
+    :func:`estimate_renders_independent` instead — independent widgets
+    cost sum-of-values, not product.
+    """
     n = 1
     for c in candidates:
         n *= max(1, len(c.values))
     return n
+
+
+def estimate_renders_independent(candidates: list[WidgetCandidate]) -> int:
+    """Total notebook re-exports needed to precompute N independent widgets.
+
+    Each widget runs once per non-default value (others stay at defaults),
+    plus one base render shared across all widgets. So the cost is
+    ``1 + sum(values_i - 1)`` not the cartesian product. This is the
+    realistic upper bound for v1's independent-widgets pass.
+    """
+    return 1 + sum(max(0, len(c.values) - 1) for c in candidates)
 
 
 def page_excluded(book_relative_path: Path | str, exclude_pages: list[str]) -> bool:
@@ -385,28 +403,36 @@ class PrecomputeResult:
 
 def precompute_page(
     py_path: Path,
-    candidate: WidgetCandidate,
+    candidates: list[WidgetCandidate],
     *,
     max_seconds: float,
     max_bytes: int,
     sandbox: bool = False,
 ) -> PrecomputeResult:
-    """Re-export a notebook once per widget value, return the staged body.
+    """Re-export a notebook once per (widget, value), return the staged body.
 
-    v1 scope: a single widget per page. The orchestrator:
+    Handles 1..N widgets per page. For multiple widgets, each is precomputed
+    independently (other widgets stay at their source-defined defaults).
+    Downstream cells must be **disjoint** across widgets — joint precompute
+    (widgets sharing downstream cells) is deferred to a future pass and
+    causes the whole page to render static with a warning.
 
-    1. Renders the default-value version (also our static fallback).
-    2. Times the first export and projects the total cost; aborts and
-       falls back to static if it would exceed ``max_seconds``.
-    3. Re-exports once per non-default value, captures cell-by-cell
-       output, and accumulates a ``{value: {cell_idx: html}}`` lookup
-       table. Aborts when accumulated bytes would exceed ``max_bytes``.
-    4. Wraps cells whose output differs from the base in
-       ``<div data-precompute-cell="N">…</div>`` so the JS shim can
-       target them, and embeds the lookup table + widget metadata as
-       ``<script type="application/json">`` blocks.
-    5. Builds the input control HTML for the widget — injected at the
-       top of the page by the preprocessor.
+    Pipeline:
+
+    1. Render the default-value version (also our static fallback).
+    2. Project total cost across all widget×value renders; abort if it
+       would exceed ``max_seconds``.
+    3. For each widget, re-export once per non-default value and diff
+       against base; accumulate ``{value_key: {cell_idx: html}}`` table
+       and the union of cell indices that changed (its "downstream set").
+    4. Verify downstream sets are disjoint across widgets; if any two
+       widgets share a downstream cell, fail the whole page.
+    5. Wrap each reactive cell with the controlling widget's name; embed
+       per-widget metadata + lookup-table script blocks; build per-widget
+       input controls.
+
+    Pass a single-element list for the original single-widget case;
+    behaviour matches the v0.1.0a5 release.
     """
     t0 = time.monotonic()
     source = py_path.read_text(encoding="utf-8")
@@ -414,11 +440,12 @@ def precompute_page(
     base_export = export_notebook(py_path, sandbox=sandbox)
     base_segments = cells_to_markdown_segments(base_export)
     base_seconds = time.monotonic() - t0
+    base_by_idx = {idx: html for idx, html in base_segments}
 
     static_body = _join_for_page(base_segments)
 
-    n_other = max(0, len(candidate.values) - 1)
-    projected = base_seconds * (1 + n_other)
+    total_extra = sum(max(0, len(c.values) - 1) for c in candidates)
+    projected = base_seconds * (1 + total_extra)
     if projected > max_seconds:
         return PrecomputeResult(
             body=static_body,
@@ -427,39 +454,87 @@ def precompute_page(
             seconds_total=base_seconds,
             skipped=True,
             skip_reason=(
-                f"projected runtime ({projected:.1f}s × {1 + n_other} renders) exceeds "
+                f"projected runtime ({projected:.1f}s × {1 + total_extra} renders) exceeds "
                 f"max_seconds_per_page ({max_seconds:.0f}s); rendered static."
             ),
         )
 
-    base_by_idx = {idx: html for idx, html in base_segments}
-    by_value: dict[str, dict[int, str]] = {}
+    # Per widget: build deltas + downstream cell set.
+    per_widget: list[tuple[WidgetCandidate, dict[str, dict[int, str]], set[int]]] = []
     bytes_so_far = 0
+    substitution_failures: list[str] = []  # collected for the result.skip_reason
+    for candidate in candidates:
+        deltas: dict[str, dict[int, str]] = {}
+        downstream: set[int] = set()
+        substitution_failed = False
+        for value in candidate.values:
+            if value == candidate.default:
+                continue
+            try:
+                rewritten = substitute_widget_value(source, candidate, value)
+            except WidgetSubstitutionError as exc:
+                # Substitution can fail for multi-line calls or other AST
+                # surgery edge cases. Record once per widget so the author
+                # gets a clear signal instead of silent failure.
+                if not substitution_failed:
+                    substitution_failures.append(
+                        f"{candidate.var_name} (line {candidate.line}): {exc}"
+                    )
+                    substitution_failed = True
+                continue
+            try:
+                export = export_notebook_with_overrides(
+                    py_path, rewritten_source=rewritten, sandbox=sandbox
+                )
+                segments = cells_to_markdown_segments(export)
+            except Exception:  # noqa: BLE001 — keep the build alive on a single bad value
+                continue
+            delta = {idx: html for idx, html in segments if base_by_idx.get(idx) != html}
+            if not delta:
+                continue
+            deltas[_value_to_key(value)] = delta
+            downstream.update(delta)
+            bytes_so_far += sum(len(v) for v in delta.values())
+            if bytes_so_far > max_bytes:
+                return PrecomputeResult(
+                    body=static_body,
+                    widget_html="",
+                    reactive_cell_indices=[],
+                    bytes_total=bytes_so_far,
+                    seconds_total=time.monotonic() - t0,
+                    skipped=True,
+                    skip_reason=(
+                        f"lookup table reached {bytes_so_far:,} bytes, exceeding "
+                        f"max_bytes_per_page ({max_bytes:,}); rendered static."
+                    ),
+                )
+        if downstream:
+            per_widget.append((candidate, deltas, downstream))
 
-    for value in candidate.values:
-        if value == candidate.default:
-            continue
-        try:
-            rewritten = substitute_widget_value(source, candidate, value)
-        except WidgetSubstitutionError:
-            continue
-        try:
-            export = export_notebook_with_overrides(
-                py_path, rewritten_source=rewritten, sandbox=sandbox
+    if not per_widget:
+        # No widget actually affects any cell — render static. Surface
+        # substitution failures so the author isn't left guessing.
+        skip_reason = None
+        if substitution_failures:
+            skip_reason = "no widgets could be precomputed; substitution failed for: " + "; ".join(
+                substitution_failures
             )
-            segments = cells_to_markdown_segments(export)
-        except Exception:  # noqa: BLE001 — keep the build alive on a single bad value
-            continue
+        return PrecomputeResult(
+            body=static_body,
+            widget_html="",
+            reactive_cell_indices=[],
+            seconds_total=time.monotonic() - t0,
+            skipped=bool(skip_reason),
+            skip_reason=skip_reason,
+        )
 
-        delta: dict[int, str] = {}
-        for idx, html in segments:
-            if base_by_idx.get(idx) != html:
-                delta[idx] = html
-        if not delta:
-            continue
-        by_value[_value_to_key(value)] = delta
-        bytes_so_far += sum(len(v) for v in delta.values())
-        if bytes_so_far > max_bytes:
+    # Disjointness check across widgets. Joint widgets (shared downstream
+    # cells) need cross-product semantics — deferred to a future pass.
+    seen: set[int] = set()
+    cell_to_widget: dict[int, str] = {}
+    for candidate, _, downstream in per_widget:
+        overlap = downstream & seen
+        if overlap:
             return PrecomputeResult(
                 body=static_body,
                 widget_html="",
@@ -468,29 +543,26 @@ def precompute_page(
                 seconds_total=time.monotonic() - t0,
                 skipped=True,
                 skip_reason=(
-                    f"lookup table reached {bytes_so_far:,} bytes, exceeding "
-                    f"max_bytes_per_page ({max_bytes:,}); rendered static."
+                    f"widgets share downstream cells "
+                    f"({sorted(overlap)}); joint multi-widget precompute "
+                    f"is deferred. Rendered static."
                 ),
             )
+        seen.update(downstream)
+        for idx in downstream:
+            cell_to_widget[idx] = candidate.var_name
 
-    reactive_indices = sorted({idx for delta in by_value.values() for idx in delta})
+    # All disjoint — assemble the staged body.
+    body = _join_for_page(_wrap_reactive_segments_multi(base_segments, cell_to_widget))
+    body += "\n\n" + "\n".join(
+        _embed_metadata(candidate, deltas) for candidate, deltas, _ in per_widget
+    )
+    widget_html = _build_controls_panel([candidate for candidate, _, _ in per_widget])
 
-    if not reactive_indices:
-        # Nothing depends on the widget — render static, no JS needed.
-        return PrecomputeResult(
-            body=static_body,
-            widget_html="",
-            reactive_cell_indices=[],
-            seconds_total=time.monotonic() - t0,
-        )
-
-    body = _join_for_page(_wrap_reactive_segments(base_segments, reactive_indices))
-    body += "\n\n" + _embed_metadata(candidate, by_value)
-    widget_html = _build_widget_control(candidate)
     return PrecomputeResult(
         body=body,
         widget_html=widget_html,
-        reactive_cell_indices=reactive_indices,
+        reactive_cell_indices=sorted(seen),
         bytes_total=bytes_so_far,
         seconds_total=time.monotonic() - t0,
     )
@@ -507,17 +579,23 @@ def _join_for_page(segments: list[tuple[int, str]]) -> str:
     return re.sub(r"\n{3,}", "\n\n", joined) + "\n"
 
 
-def _wrap_reactive_segments(
-    segments: list[tuple[int, str]], reactive_indices: list[int]
+def _wrap_reactive_segments_multi(
+    segments: list[tuple[int, str]], cell_to_widget: dict[int, str]
 ) -> list[tuple[int, str]]:
-    """Wrap each reactive cell's body in a JS-targetable div."""
-    reactive = set(reactive_indices)
+    """Wrap each reactive cell's body, tagged with the widget that drives it.
+
+    The widget tag (``data-precompute-widget="varname"``) lets the JS
+    shim limit cell swaps to cells controlled by the changed widget,
+    leaving cells controlled by other widgets in their current state.
+    """
     out: list[tuple[int, str]] = []
     for idx, body in segments:
-        if idx in reactive:
+        if idx in cell_to_widget:
             wrapped = (
                 f'<div class="marimo-book-precompute-cell" '
-                f'data-precompute-cell="{idx}" markdown="1">\n\n'
+                f'data-precompute-cell="{idx}" '
+                f'data-precompute-widget="{_html_escape(cell_to_widget[idx])}" '
+                f'markdown="1">\n\n'
                 f"{body}\n\n"
                 f"</div>"
             )
@@ -528,7 +606,13 @@ def _wrap_reactive_segments(
 
 
 def _embed_metadata(candidate: WidgetCandidate, by_value: dict[str, dict[int, str]]) -> str:
-    """Emit ``<script type="application/json">`` blocks the JS shim reads."""
+    """Emit ``<script type="application/json">`` blocks the JS shim reads.
+
+    Both the widget-metadata block and the lookup-table block carry a
+    ``data-precompute-widget="varname"`` attribute so the shim can pair
+    them with the matching control on multi-widget pages.
+    """
+    var_attr = f'data-precompute-widget="{_html_escape(candidate.var_name)}"'
     widget_meta = {
         "var_name": candidate.var_name,
         "kind": candidate.kind,
@@ -536,31 +620,34 @@ def _embed_metadata(candidate: WidgetCandidate, by_value: dict[str, dict[int, st
         "default": _jsonable(candidate.default),
     }
     widget_block = (
-        '<script type="application/json" class="marimo-book-precompute-widget">'
+        f'<script type="application/json" class="marimo-book-precompute-widget" {var_attr}>'
         + json.dumps(widget_meta, separators=(",", ":"))
         + "</script>"
     )
     table_block = (
-        '<script type="application/json" class="marimo-book-precompute-table">'
+        f'<script type="application/json" class="marimo-book-precompute-table" {var_attr}>'
         + json.dumps(by_value, separators=(",", ":"))
         + "</script>"
     )
     return widget_block + "\n" + table_block
 
 
-def _build_widget_control(candidate: WidgetCandidate) -> str:
-    """HTML for the input control placed at the top of the page.
+def _build_controls_panel(candidates: list[WidgetCandidate]) -> str:
+    """HTML for the input controls, one mount per widget.
 
-    The JS shim discovers this element via class, reads the widget
-    metadata script, and binds events. We only emit the visible markup
-    here — bindings happen at runtime so static viewers (no JS) still
-    see a labelled control instead of a broken slider.
+    Each mount is empty — the JS shim discovers it via the
+    ``data-precompute-widget`` attribute, locates the matching metadata
+    + lookup-table scripts, and renders the appropriate control inside.
+    Renders the panel only if there's at least one candidate.
     """
-    return (
-        '<div class="marimo-book-precompute-control" '
-        f'data-precompute-var="{_html_escape(candidate.var_name)}">'
-        f"</div>"
-    )
+    if not candidates:
+        return ""
+    mounts = [
+        f'<div class="marimo-book-precompute-control" '
+        f'data-precompute-widget="{_html_escape(c.var_name)}"></div>'
+        for c in candidates
+    ]
+    return '<div class="marimo-book-precompute-controls">' + "".join(mounts) + "</div>"
 
 
 def _value_to_key(value: Any) -> str:

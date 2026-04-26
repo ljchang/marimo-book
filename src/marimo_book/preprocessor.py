@@ -37,7 +37,7 @@ from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import cells_to_markdown, export_notebook
 from .transforms.precompute import (
     WidgetCandidate,
-    estimate_combinations,
+    estimate_renders_independent,
     page_excluded,
     precompute_page,
     scan_widgets,
@@ -376,11 +376,10 @@ class Preprocessor:
     ) -> None:
         """Detect widget candidates, apply caps, run the per-value re-export.
 
-        v1 only handles single-widget pages; multi-widget pages render
-        every widget static with a warning so the lookup table doesn't
-        explode on combinatorial cross-products. Per-value re-execution
-        happens in :func:`precompute_page` and the result body is
-        spliced into the already-staged page.
+        Handles 1..N widgets per page. Each widget is precomputed
+        independently; when widgets have disjoint downstream cells they
+        coexist on one page. Joint widgets (sharing a downstream cell)
+        still cause the page to render static — that's the next pass.
         """
         cfg = self.book.precompute
         if page_excluded(entry.file, cfg.exclude_pages):
@@ -410,39 +409,35 @@ class Preprocessor:
         if not kept:
             return
 
-        # v1 only handles single-widget pages; multi-widget = static + warning.
-        if len(kept) > 1:
+        # Page-wide cap. For v1 (independent widgets), realistic cost
+        # is ``1 + sum(values_i - 1)`` — sum, not cartesian product —
+        # because each widget runs independently with others at default.
+        # The legacy ``max_combinations_per_page`` name still fits the
+        # joint-cross-product case (deferred), and we use it as the bound
+        # on total renders here.
+        renders = estimate_renders_independent(kept)
+        if renders > cfg.max_combinations_per_page:
             report.warnings.append(
-                f"{entry.file}: {len(kept)} precomputable widgets found; "
-                "v1 supports single-widget pages only. All rendered static."
-            )
-            report.widgets_skipped += len(kept)
-            return
-
-        combos = estimate_combinations(kept)
-        if combos > cfg.max_combinations_per_page:
-            report.warnings.append(
-                f"{entry.file}: widget generates {combos} combinations, "
-                f"exceeding max_combinations_per_page "
+                f"{entry.file}: precompute would need {renders} re-exports across "
+                f"{len(kept)} widgets, exceeding max_combinations_per_page "
                 f"({cfg.max_combinations_per_page}); rendered static."
             )
             report.widgets_skipped += len(kept)
             return
 
-        candidate = kept[0]
         result = precompute_page(
             src_abs,
-            candidate,
+            kept,
             max_seconds=float(cfg.max_seconds_per_page),
             max_bytes=cfg.max_bytes_per_page,
             sandbox=self.sandbox,
         )
         if result.skipped:
             report.warnings.append(f"{entry.file}: {result.skip_reason}")
-            report.widgets_skipped += 1
+            report.widgets_skipped += len(kept)
             return
         if not result.reactive_cell_indices:
-            return  # widget exists but no downstream cells changed; static is fine
+            return  # widgets exist but no downstream cells changed; static is fine
 
         out_rel = _doc_relpath_for(entry.file)
         staged_path = docs_dir / out_rel
@@ -450,7 +445,7 @@ class Preprocessor:
             return
         original = staged_path.read_text(encoding="utf-8")
         staged_path.write_text(_splice_precomputed_body(original, result), encoding="utf-8")
-        report.widgets_precomputed += 1
+        report.widgets_precomputed += len(kept)
 
     def _stage_changelog(self, docs_dir: Path) -> bool:
         """Copy ``CHANGELOG.md`` into the staged tree.

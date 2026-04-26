@@ -200,35 +200,32 @@
     return null;
   }
 
-  function initPrecomputeOnce(scope) {
-    const widgetEl = scope.querySelector(
-      "script.marimo-book-precompute-widget:not([data-mb-precompute-init])"
-    );
-    if (!widgetEl) return;
-    const tableEl = scope.querySelector(
-      "script.marimo-book-precompute-table:not([data-mb-precompute-init])"
-    );
-    if (!tableEl) return;
-    const controlEl = scope.querySelector(
-      ".marimo-book-precompute-control:not([data-mb-precompute-init])"
-    );
-    if (!controlEl) return;
+  function initPrecomputeForWidget(scope, varName) {
+    const sel = `[data-precompute-widget="${CSS.escape(varName)}"]`;
+    const widgetEl = scope.querySelector("script.marimo-book-precompute-widget" + sel);
+    const tableEl = scope.querySelector("script.marimo-book-precompute-table" + sel);
+    const controlEl = scope.querySelector(".marimo-book-precompute-control" + sel);
+    if (!widgetEl || !tableEl || !controlEl) return;
+    if (controlEl.getAttribute("data-mb-precompute-init")) return;
 
     let widget, table;
     try {
       widget = JSON.parse(widgetEl.textContent || "{}");
       table = JSON.parse(tableEl.textContent || "{}");
     } catch (err) {
-      console.error("[marimo-book] precompute JSON parse failed", err);
+      console.error("[marimo-book] precompute JSON parse failed for " + varName, err);
       return;
     }
 
     const built = buildControl(widget);
     if (!built) return;
 
-    // Snapshot the initial (default-value) HTML of every reactive cell so
-    // we can restore it when the user returns to the default value.
-    const cells = scope.querySelectorAll("[data-precompute-cell]");
+    // Snapshot the initial (default-value) HTML of cells controlled by THIS
+    // widget. Cells controlled by other widgets are left alone — that's
+    // how independent multi-widget pages avoid stomping on each other.
+    const cells = scope.querySelectorAll(
+      `[data-precompute-cell]${sel}`
+    );
     const baseSnapshot = {};
     cells.forEach((el) => {
       const idx = el.getAttribute("data-precompute-cell");
@@ -241,7 +238,9 @@
       const delta = table[key] || {};
       cells.forEach((el) => {
         const idx = el.getAttribute("data-precompute-cell");
-        const html = Object.prototype.hasOwnProperty.call(delta, idx) ? delta[idx] : baseSnapshot[idx];
+        const html = Object.prototype.hasOwnProperty.call(delta, idx)
+          ? delta[idx]
+          : baseSnapshot[idx];
         if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
       });
       if (typeof built.syncLabel === "function") built.syncLabel();
@@ -250,10 +249,17 @@
     built.input.addEventListener("input", applyValue);
     built.input.addEventListener("change", applyValue);
     controlEl.appendChild(built.wrap);
-
-    widgetEl.setAttribute("data-mb-precompute-init", "1");
-    tableEl.setAttribute("data-mb-precompute-init", "1");
     controlEl.setAttribute("data-mb-precompute-init", "1");
+  }
+
+  function initPrecomputeOnce(scope) {
+    // Find every widget mount on the page and init each independently.
+    const mounts = scope.querySelectorAll(
+      ".marimo-book-precompute-control:not([data-mb-precompute-init])[data-precompute-widget]"
+    );
+    mounts.forEach((el) => {
+      initPrecomputeForWidget(scope, el.getAttribute("data-precompute-widget"));
+    });
   }
 
   function bootAll(root) {

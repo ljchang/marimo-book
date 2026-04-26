@@ -5,6 +5,57 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Multi-widget independent precompute.** Lifts the v0.1.0a5
+  single-widget-per-page restriction. Pages with N discrete widgets
+  whose downstream cells are **disjoint** now precompute each widget
+  independently. Each widget gets its own input control + lookup
+  table, and the JS shim limits cell swaps to the widget that drives
+  them. Joint widgets (sharing a downstream cell) still cause the
+  whole page to render static with a clear "joint multi-widget
+  precompute is deferred" warning.
+- AST scanner now recognises `mo.ui.slider(start=A, stop=B, step=N)`
+  with all-kwargs form (marimo's recommended style and what dartbrains
+  uses everywhere). Continues to recognise positional and
+  start/stop-positional + step-kwarg forms.
+- New `estimate_renders_independent()` helper sums per-widget renders
+  (1 + sum(values_i - 1)) instead of the cartesian product. The
+  preprocessor uses this against `max_combinations_per_page` so the
+  cap reflects realistic v1 cost — independent multi-widget pages no
+  longer trip an astronomical cross-product number.
+- Substitution failures (e.g. multi-line widget call definitions)
+  surface as a clear `BuildReport.warnings` entry instead of
+  silently skipping. Authors get told which widget couldn't be
+  precomputed and why.
+
+### Changed
+
+- `precompute_page()` signature: takes `candidates: list[WidgetCandidate]`
+  instead of a single candidate. Single-widget callers pass a
+  one-element list; behaviour matches v0.1.0a5 for the 1-widget case.
+- Per-widget script blocks (`<script class="marimo-book-precompute-widget">`,
+  `<script class="marimo-book-precompute-table">`) and control mounts
+  (`<div class="marimo-book-precompute-control">`) now carry a
+  `data-precompute-widget="varname"` attribute used to pair them on
+  multi-widget pages.
+- Reactive cells gain a `data-precompute-widget="varname"` attribute
+  alongside `data-precompute-cell="N"` so the JS shim limits swaps
+  to cells controlled by the changed widget.
+
+### Validated on dartbrains
+
+Cache (v0.1.0a4) gives a **31× speedup** on dartbrains warm rebuild
+(107s cold → 3.4s warm; 20 notebooks all cache-hit). Multi-widget
+independent works on simple cases; on dartbrains specifically, 4 of
+4 widget-heavy chapters either trip the disjointness check (joint
+widgets, deferred to v2) or have value counts above the default cap.
+The unlock for dartbrains will be **joint multi-widget cross-products**
+(deferred), and **multi-line widget call support** for chapters like
+ICA.
+
 ## [0.1.0a5] — 2026-04-25
 
 Static reactivity for marimo's discrete UI widgets ships in two

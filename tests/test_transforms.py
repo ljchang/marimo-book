@@ -8,6 +8,7 @@ from marimo_book.config import Book
 from marimo_book.launch_buttons import render_button_row
 from marimo_book.transforms.callouts import render_callout_html
 from marimo_book.transforms.marimo_export import (
+    _render_mime_bundle,
     cells_to_markdown,
     export_notebook,
 )
@@ -94,3 +95,26 @@ def test_simple_notebook_renders_expected_sections() -> None:
     assert "admonition info marimo-book-callout" in md  # callout translated
     # The hidden import cell should not leak into the output.
     assert "import marimo as mo" not in md
+
+
+def test_anywidget_escaped_under_text_markdown_routes_to_html() -> None:
+    """Regression: marimo export sometimes downgrades anywidget HTML to a
+    text/markdown bundle with the <marimo-anywidget> tag fully escaped.
+    The mime-bundle picker must detect that, unescape, and run the
+    rewriter so the static mount div is emitted."""
+    bundle = {
+        "text/markdown": (
+            "&lt;marimo-anywidget data-initial-value=&#x27;{&amp;quot;model_id"
+            "&amp;quot;:&amp;quot;abc&amp;quot;}&#x27; "
+            "data-js-url=&#x27;&amp;quot;data:text/javascript;base64,QQ==&amp;quot;&#x27;"
+            "&gt;&lt;/marimo-anywidget&gt;"
+        ),
+    }
+    out = _render_mime_bundle(
+        bundle,
+        cell_source="canvas = mo.ui.anywidget(ScatterWidget(height=320))",
+    )
+    assert 'class="marimo-book-anywidget"' in out
+    assert "&lt;marimo-anywidget" not in out
+    # Literal kwarg from cell source seeds initial state.
+    assert '"height": 320' in out

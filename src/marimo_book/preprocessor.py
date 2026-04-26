@@ -371,6 +371,13 @@ class Preprocessor:
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
+        # Copy a top-level CNAME file (single line: the apex domain) if the
+        # author supplied one. mkdocs treats unknown files in docs_dir as
+        # static assets and ships them to site_dir, so GitHub Pages keeps
+        # the custom-domain setting on every redeploy.
+        cname_src = self.book_dir / "CNAME"
+        if cname_src.exists() and cname_src.is_file():
+            shutil.copy2(cname_src, docs_dir / "CNAME")
 
     def _run_precompute(
         self,

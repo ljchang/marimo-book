@@ -300,6 +300,16 @@ def _render_mime_bundle(
         )
     if "text/markdown" in data:
         md = _as_str(data["text/markdown"]).strip()
+        # `marimo export ipynb` sometimes downgrades an anywidget mime
+        # bundle to text/markdown with the <marimo-anywidget> tag fully
+        # HTML-escaped (`&lt;marimo-anywidget ...`). Detect that and
+        # route through the HTML path so the rewriter can mount it.
+        if md.startswith(("&lt;marimo-anywidget", "&lt;marimo-ui-element")):
+            return _render_html_output(
+                html.unescape(md),
+                cell_source=cell_source,
+                widget_defaults=widget_defaults,
+            )
         return md
     for mime in ("image/png", "image/jpeg"):
         if mime in data:

@@ -5,6 +5,49 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-04-26
+
+Patch release: two render-path bug fixes plus a working drawdata
+anywidget demo on the docs site, and a top-level `CNAME` convention
+so the docs site can ship under a custom domain.
+
+### Fixed
+
+- **Anywidget render under `text/markdown` mime.** `marimo export
+  ipynb` sometimes downgrades an anywidget HTML bundle to a
+  `text/markdown` blob with the `<marimo-anywidget>` tag fully
+  HTML-escaped (`&lt;marimo-anywidget`). The mime-bundle picker now
+  detects that, unescapes, and routes through the existing rewriter
+  so the static mount `<div>` is emitted. Without this, anywidgets
+  authored via third-party libraries like
+  [drawdata](https://github.com/koaning/drawdata) would render as
+  visible escaped HTML text instead of the live widget.
+- **Precompute slider boot race.** Material's `document$` is an
+  RxJS `Subject` (not a `BehaviorSubject`) — subscribers added after
+  its initial emission miss it. Combined with the `defer`'d shim
+  script tag, direct page loads occasionally raced past the initial
+  `document$` event, leaving the precompute control mount empty (and
+  hidden by `:empty { display: none }` CSS, so invisible to authors).
+  Boot is now belt-and-suspenders: run once via `DOMContentLoaded` /
+  immediate, *and* subscribe to `document$` for instant-nav swaps.
+  All boot work is idempotent.
+
+### Added
+
+- **Top-level `CNAME` convention.** Drop a `CNAME` file at the book
+  root next to `book.yml`; the preprocessor copies it into the
+  staged docs tree so mkdocs ships it as `_site/CNAME`. GitHub Pages
+  preserves the custom-domain setting on every redeploy.
+- **drawdata anywidget demo** in the docs site
+  (`Authoring → Anywidget demo: drawdata`) — a live click-to-draw
+  scatter canvas that proves the static anywidget pipeline renders
+  third-party widgets correctly.
+
+### Changed
+
+- `marimobook.org` is the canonical docs URL (was
+  `ljchang.github.io/marimo-book/`).
+
 ## [0.1.0] — 2026-04-26
 
 **First stable release.** marimo-book is suitable for real production

@@ -42,6 +42,7 @@ from .transforms.precompute import (
     precompute_page,
     scan_widgets,
 )
+from .transforms.wasm import render_wasm_page
 
 # Directories and glob patterns of assets we copy verbatim when present.
 _ASSET_DIRS: tuple[str, ...] = ("images", "Code", "data")
@@ -330,10 +331,14 @@ class Preprocessor:
 
                 # Static-reactivity precompute: scan widgets, apply caps,
                 # re-export per value, splice the lookup table into the
-                # staged page so the JS shim can swap reactive cells.
-                # TODO(v0.2): gate on `book.defaults.mode == "static"` once
-                # WASM render mode lands — WASM pages don't need this.
-                if entry.file.suffix == ".py" and self.book.precompute.enabled:
+                # staged page so the JS shim can swap reactive cells. WASM
+                # pages get native reactivity from marimo's runtime in the
+                # browser, so precompute is a no-op for them.
+                if (
+                    entry.file.suffix == ".py"
+                    and self.book.precompute.enabled
+                    and entry.effective_mode(self.book.defaults.mode) == "static"
+                ):
                     self._run_precompute(entry, src_abs, docs_dir, report)
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
@@ -529,16 +534,30 @@ def stage_page(
 
     buttons = render_button_row(book, Path(entry.file))
 
+    mode = entry.effective_mode(book.defaults.mode)
     if src_abs.suffix == ".py":
-        body = _render_marimo(src_abs, book, sandbox=sandbox)
+        if mode == "wasm":
+            # WASM-mode pages bypass our static cell rendering. Marimo's
+            # islands runtime takes over in the browser; the body we
+            # write here contains marimo's CDN-loaded scripts + the
+            # ``<marimo-island>`` web components for each cell.
+            body = render_wasm_page(src_abs)
+            apply_rewrites = False
+        else:
+            body = _render_marimo(src_abs, book, sandbox=sandbox)
+            apply_rewrites = True
     elif src_abs.suffix == ".md":
         body = _render_markdown(src_abs)
+        apply_rewrites = True
     else:
         raise ValueError(f"Unsupported file type for TOC entry: {entry.file}")
 
-    # Link-rewrites run after both render paths so in-notebook prose and
-    # hand-authored Markdown get the same treatment.
-    body = apply_link_rewrites(body, md_basenames=md_basenames)
+    # Link-rewrites run after both static render paths so in-notebook
+    # prose and hand-authored Markdown get the same treatment. WASM
+    # pages skip rewrites: the body is marimo's own HTML, not our
+    # Markdown — there's nothing for our rewriter to safely touch.
+    if apply_rewrites:
+        body = apply_link_rewrites(body, md_basenames=md_basenames)
 
     full = _compose_page(buttons, body)
     dst.write_text(full, encoding="utf-8")

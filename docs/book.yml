@@ -67,6 +67,8 @@ toc:
       - file: content/authoring.md
       - file: content/example.py
       - file: content/precompute_demo.py
+      - file: content/wasm_demo.py
+        mode: wasm
       - file: content/dependencies.md
       - file: content/widgets.md
 

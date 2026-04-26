@@ -5,6 +5,46 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — WASM render mode (per-page opt-in)
+
+- **`mode: wasm`** as a per-entry override in `book.yml` TOC entries.
+  When set, the page is rendered through marimo's
+  `MarimoIslandGenerator` instead of our static `cells_to_markdown`
+  pipeline. Marimo's runtime + Pyodide load in the browser at first
+  paint; cells become natively reactive, no precompute caps apply,
+  continuous sliders work as you'd expect from a real notebook.
+- `book.defaults.mode` is now widened to `Literal["static", "wasm"]`
+  for whole-book defaults; `wasm` per-entry override coexists.
+- `Book` config gains `FileEntry.effective_mode(default)` helper that
+  resolves the per-entry override against the book-wide default.
+- New module `src/marimo_book/transforms/wasm.py` with
+  `render_wasm_page()` — invokes `MarimoIslandGenerator.from_file()`,
+  awaits `build()`, returns `render_head() + render_body(style="")`
+  ready to splice into the staged page. Per-page head injection (no
+  global `extra_javascript` pollution).
+- Static reactivity (`precompute.enabled`) is automatically a no-op
+  for WASM pages — marimo's runtime handles reactivity natively, so
+  there's no point in our build-time precompute pipeline.
+- New CSS in `assets/extra.css` overriding marimo island fonts to
+  Geist (matches our static theme), suppressing per-island margins,
+  hiding marimo's loading spinner. Phase 1 styling — pixel-perfect
+  match is a polish pass.
+- New live demo chapter `docs/content/wasm_demo.py` configured with
+  `mode: wasm` in the docs site TOC. Demonstrates a continuous
+  `mo.ui.slider(1, 100)` driving live Python computation in the
+  browser — the same widget call would render as static-only on a
+  non-WASM page (no precompute candidate without an explicit step).
+
+### Asset hosting
+
+Marimo islands runtime + style are loaded from jsdelivr CDN by default
+(matches what `MarimoIslandGenerator.render_head()` emits and what we
+already do for Google Fonts + MathJax). Pyodide loads on demand from
+its own CDN inside marimo's bundle. Self-hosting is on the roadmap
+for the privacy-conscious / offline case but not yet implemented.
+
 ## [0.1.0a6] — 2026-04-26
 
 Multi-widget reactivity + dartbrains-driven fixes. Static reactivity

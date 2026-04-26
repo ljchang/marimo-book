@@ -25,6 +25,7 @@ import base64
 import html
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -124,6 +125,25 @@ def export_notebook_with_overrides(
         tmp_in = Path(tmp_dir) / py_path.name
         tmp_in.write_text(rewritten_source, encoding="utf-8")
         return export_notebook(tmp_in, include_outputs=include_outputs, sandbox=sandbox)
+
+
+def cleanup_orphan_precompute_dirs(content_dir: Path) -> int:
+    """Remove leaked ``marimo_book_precompute_*`` dirs in ``content_dir``.
+
+    These are created by :func:`export_notebook_with_overrides` and removed
+    by its ``TemporaryDirectory`` context manager on normal exit. If the
+    process is interrupted mid-precompute (Ctrl-C, watcher restart, OOM)
+    the dir leaks and pollutes the source tree. Called from the
+    preprocessor before each build.
+    """
+    if not content_dir.is_dir():
+        return 0
+    removed = 0
+    for child in content_dir.iterdir():
+        if child.is_dir() and child.name.startswith("marimo_book_precompute_"):
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+    return removed
 
 
 def cells_to_markdown(

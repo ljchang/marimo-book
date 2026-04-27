@@ -112,6 +112,18 @@ def test_simple_notebook_renders_expected_sections() -> None:
     assert "import marimo as mo" not in md
 
 
+def test_plotly_rewrap_emits_static_mount() -> None:
+    """`<marimo-plotly data-figure='{json}'>` rewraps to a div the JS
+    shim picks up to hydrate via Plotly.js."""
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    raw = "<marimo-plotly data-figure='{&quot;data&quot;:[],&quot;layout&quot;:{}}' data-config='{}'></marimo-plotly>"
+    out = rewrite_anywidget_html(raw)
+    assert 'class="marimo-book-plotly"' in out
+    assert "marimo-plotly" not in out.replace("marimo-book-plotly", "")  # no original tag left
+    assert "data-figure=" in out
+
+
 def test_anywidget_escaped_under_text_markdown_routes_to_html() -> None:
     """Regression: marimo export sometimes downgrades anywidget HTML to a
     text/markdown bundle with the <marimo-anywidget> tag fully escaped.

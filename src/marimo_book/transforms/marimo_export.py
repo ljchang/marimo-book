@@ -324,7 +324,13 @@ def _render_mime_bundle(
         # bundle to text/markdown with the <marimo-anywidget> tag fully
         # HTML-escaped (`&lt;marimo-anywidget ...`). Detect that and
         # route through the HTML path so the rewriter can mount it.
-        if md.startswith(("&lt;marimo-anywidget", "&lt;marimo-ui-element")):
+        # Same trick for any marimo custom element that arrived escaped:
+        # <marimo-slider>, <marimo-switch>, etc. Without this, the raw
+        # tag leaks into the page as visible escaped text. The HTML path
+        # routes through `rewrite_anywidget_html` which strips standalone
+        # controls (they have no static analog and are typically replaced
+        # by precompute control mounts elsewhere on the page).
+        if md.startswith(_ESCAPED_MARIMO_PREFIXES):
             return _render_html_output(
                 html.unescape(md),
                 cell_source=cell_source,
@@ -396,6 +402,29 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _strip_ansi(s: str) -> str:
     return _ANSI_RE.sub("", s)
+
+
+# Marimo custom-element tags that may arrive HTML-escaped under a
+# text/markdown mime bundle. We treat any of them as "this is really
+# HTML, not markdown" and route through the rewriter (which strips
+# standalone controls and rewraps anywidgets). Mirrors
+# anywidgets._STANDALONE_CONTROLS plus the marimo-anywidget /
+# marimo-ui-element wrappers handled originally.
+_ESCAPED_MARIMO_PREFIXES: tuple[str, ...] = (
+    "&lt;marimo-anywidget",
+    "&lt;marimo-ui-element",
+    "&lt;marimo-plotly",
+    "&lt;marimo-slider",
+    "&lt;marimo-switch",
+    "&lt;marimo-dropdown",
+    "&lt;marimo-radio",
+    "&lt;marimo-number",
+    "&lt;marimo-text",
+    "&lt;marimo-button",
+    "&lt;marimo-checkbox",
+    "&lt;marimo-multiselect",
+    "&lt;marimo-form",
+)
 
 
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/=\s]+$")

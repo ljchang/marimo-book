@@ -59,7 +59,11 @@ def rewrite_anywidget_html(
     3. Anything marimo itself inlined into ``data-initial-value`` (rare for
        static exports — usually just a ``model_id`` reference)
     """
-    if "marimo-anywidget" not in raw_html and "marimo-ui-element" not in raw_html:
+    if (
+        "marimo-anywidget" not in raw_html
+        and "marimo-ui-element" not in raw_html
+        and "marimo-plotly" not in raw_html
+    ):
         return raw_html
 
     soup = BeautifulSoup(raw_html, "lxml")
@@ -75,11 +79,16 @@ def rewrite_anywidget_html(
     for node in list(soup.find_all("marimo-anywidget")):
         _rewrap_anywidget(node, soup, seeded_state)
 
-    # Pass 2: unwrap or drop <marimo-ui-element> wrappers.
+    # Pass 2: rewrap <marimo-plotly data-figure='{json}'> → mount div.
+    # The marimo_book.js shim loads Plotly.js on first hit and renders.
+    for node in list(soup.find_all("marimo-plotly")):
+        _rewrap_plotly(node, soup)
+
+    # Pass 3: unwrap or drop <marimo-ui-element> wrappers.
     for wrapper in list(soup.find_all("marimo-ui-element")):
         _handle_ui_wrapper(wrapper)
 
-    # Pass 3: drop any remaining standalone control elements that slipped
+    # Pass 4: drop any remaining standalone control elements that slipped
     # past (e.g. <marimo-slider> appearing at top level outside a wrapper).
     for ctrl_name in _STANDALONE_CONTROLS:
         for node in list(soup.find_all(ctrl_name)):
@@ -128,6 +137,24 @@ def _rewrap_anywidget(
         div["data-initial-value"] = json.dumps(merged)
     for child in list(node.children):
         div.append(child.extract())
+    node.replace_with(div)
+
+
+def _rewrap_plotly(node: Tag, soup: BeautifulSoup) -> None:
+    """Convert ``<marimo-plotly data-figure='{json}'>`` into a static mount.
+
+    Marimo serialises a Plotly figure as a custom element with the entire
+    figure spec inlined as a JSON string on ``data-figure``. Our static
+    site has no marimo runtime, so we rewrap as
+    ``<div class="marimo-book-plotly" data-figure='{json}'>`` and let the
+    :file:`marimo_book.js` shim fetch Plotly.js from a CDN on first hit
+    and call ``Plotly.newPlot`` per mount.
+    """
+    div = soup.new_tag("div", attrs={"class": "marimo-book-plotly"})
+    for attr in ("data-figure", "data-config"):
+        val = node.get(attr)
+        if val is not None:
+            div[attr] = val
     node.replace_with(div)
 
 
@@ -237,7 +264,7 @@ def _handle_ui_wrapper(wrapper: Tag) -> None:
     """
     descendants = list(wrapper.find_all(True))
     has_mount = any(
-        d.name == "div" and "marimo-book-anywidget" in (d.get("class") or []) for d in descendants
+        d.name == "div" and (set(d.get("class") or []) & _MOUNT_CLASSES) for d in descendants
     )
     non_control_descendants = [d for d in descendants if d.name not in _STANDALONE_CONTROLS]
     if has_mount or non_control_descendants:
@@ -249,7 +276,12 @@ def _handle_ui_wrapper(wrapper: Tag) -> None:
 # --- module-level convenience -----------------------------------------------
 
 
-_ANYWIDGET_SENTINEL = re.compile(r"<marimo-(anywidget|ui-element)\b", re.IGNORECASE)
+# Mount-class names emitted by `_rewrap_anywidget` and `_rewrap_plotly`;
+# `_handle_ui_wrapper` checks for these to decide whether to unwrap or
+# decompose a `<marimo-ui-element>` parent.
+_MOUNT_CLASSES = frozenset({"marimo-book-anywidget", "marimo-book-plotly"})
+
+_ANYWIDGET_SENTINEL = re.compile(r"<marimo-(anywidget|ui-element|plotly)\b", re.IGNORECASE)
 
 
 def contains_anywidget(raw_html: str) -> bool:

@@ -221,22 +221,42 @@ def _splice_precomputed_body(original_page: str, result) -> str:
     """Replace the staged page's body with the precomputed version.
 
     The original page is ``<launch buttons block>\\n\\n<body>``. We
-    preserve the launch-button row verbatim, inject the widget control
-    after it, and replace the body with ``result.body`` (which already
-    contains the cell wrappers + embedded lookup-table script blocks).
+    preserve the launch-button row verbatim and splice ``result.body``
+    (which already contains the cell wrappers + embedded lookup-table
+    script blocks) in place of the body.
 
-    If the page has no launch-button block (``repo`` not set in
-    ``book.yml``), we just prepend the widget control to the body.
+    The widget control row mounts inline, immediately above the first
+    reactive cell — putting the slider next to the content it controls
+    instead of stranded at the top of the page. If the body has no
+    reactive-cell marker (shouldn't happen for a precomputed page, but
+    defensive), we fall back to top-of-body placement.
     """
     marker_open = '<div class="marimo-book-buttons">'
     marker_close = "</div>"
+    body = _splice_controls_inline(result.body, result.widget_html)
     if marker_open in original_page:
         head_end = original_page.index(marker_open)
-        # Find the matching close — launch buttons render is one flat div.
         close_at = original_page.index(marker_close, head_end) + len(marker_close)
         head = original_page[:close_at]
-        return head + "\n\n" + result.widget_html + "\n\n" + result.body
-    return result.widget_html + "\n\n" + result.body
+        return head + "\n\n" + body
+    return body
+
+
+def _splice_controls_inline(body: str, widget_html: str) -> str:
+    """Insert the widget controls just before the first reactive cell.
+
+    The body is a Markdown blob with ``<div class="marimo-book-precompute-cell"
+    data-precompute-cell="N" …>`` markers around each cell whose output
+    depends on a widget. Placing controls there keeps the slider visually
+    adjacent to the brain plot / table / chart it drives.
+    """
+    if not widget_html:
+        return body
+    needle = '<div class="marimo-book-precompute-cell"'
+    pos = body.find(needle)
+    if pos == -1:
+        return widget_html + "\n\n" + body
+    return body[:pos] + widget_html + "\n\n" + body[pos:]
 
 
 def _file_sha256(path: Path) -> str:

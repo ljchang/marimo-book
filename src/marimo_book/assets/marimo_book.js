@@ -392,11 +392,58 @@
     }
   }
 
+  // Plotly hydration. Marimo emits `<marimo-plotly data-figure='{json}'>`
+  // for each figure; we rewrap it as `<div class="marimo-book-plotly">`
+  // server-side. This shim loads Plotly.js once on first encounter, then
+  // calls `Plotly.newPlot` per mount. Idempotent via [data-mb-plotly].
+  let _plotlyLoading = null;
+  function loadPlotly() {
+    if (window.Plotly) return Promise.resolve(window.Plotly);
+    if (_plotlyLoading) return _plotlyLoading;
+    _plotlyLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js";
+      s.crossOrigin = "anonymous";
+      s.onload = () => resolve(window.Plotly);
+      s.onerror = () => reject(new Error("Failed to load Plotly.js"));
+      document.head.appendChild(s);
+    });
+    return _plotlyLoading;
+  }
+
+  function hydratePlotly(scope) {
+    const mounts = scope.querySelectorAll(".marimo-book-plotly:not([data-mb-plotly])");
+    if (!mounts.length) return;
+    loadPlotly().then((Plotly) => {
+      mounts.forEach((mount) => {
+        if (mount.hasAttribute("data-mb-plotly")) return;
+        mount.setAttribute("data-mb-plotly", "");
+        let figure;
+        try {
+          figure = JSON.parse(mount.getAttribute("data-figure") || "{}");
+        } catch (e) {
+          console.warn("marimo-book: bad plotly data-figure", e);
+          return;
+        }
+        let config = {};
+        try {
+          config = JSON.parse(mount.getAttribute("data-config") || "{}");
+        } catch (e) {
+          // ignore — empty config is fine
+        }
+        const layout = figure.layout || {};
+        const responsive = { responsive: true, displaylogo: false, ...config };
+        Plotly.newPlot(mount, figure.data || [], layout, responsive);
+      });
+    }).catch((e) => console.warn("marimo-book: plotly hydration failed", e));
+  }
+
   function bootAll(root) {
     const scope = root || document;
     hydrateAll(scope);
     initPrecomputeOnce(scope);
     mountHeaderButtons(scope);
+    hydratePlotly(scope);
   }
 
   // Boot chain: belt-and-suspenders so we run on direct page loads AND

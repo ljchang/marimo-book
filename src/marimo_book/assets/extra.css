@@ -382,6 +382,15 @@
   height: auto;
 }
 
+/* Plotly mount. The marimo_book.js shim hydrates Plotly.js into this
+ * container; before hydration the div is empty (no flash of escaped
+ * data-figure JSON) thanks to the Material default code-block escaping. */
+.marimo-book-plotly {
+  width: 100%;
+  margin: 0.75rem 0;
+  min-height: 320px;  /* reserve space so layout doesn't jump on hydrate */
+}
+
 /* Marimo plain text / stream outputs rendered as <pre>. */
 pre.marimo-book-output-text {
   background: var(--md-code-bg-color, #f5f5f5);

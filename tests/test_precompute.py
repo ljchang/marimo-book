@@ -582,3 +582,106 @@ def test_preview_excluded_page_is_silent(tmp_path: Path) -> None:
     assert report.widgets_precomputed == 0
     assert report.widgets_skipped == 0
     assert not report.warnings
+
+
+def test_split_extension_list_separates_strings_and_dicts() -> None:
+    """The mkdocs-style mixed list flattens to Python-Markdown's two-arg shape."""
+    from marimo_book.transforms.precompute import _split_extension_list
+
+    names, configs = _split_extension_list(
+        [
+            "tables",
+            "md_in_html",
+            {"toc": {"permalink": True}},
+            {"pymdownx.highlight": {"line_spans": "__span"}},
+            {"pymdownx.betterem": {}},  # empty config dict — name kept, no config entry
+        ]
+    )
+    assert names == [
+        "tables",
+        "md_in_html",
+        "toc",
+        "pymdownx.highlight",
+        "pymdownx.betterem",
+    ]
+    assert configs == {
+        "toc": {"permalink": True},
+        "pymdownx.highlight": {"line_spans": "__span"},
+    }
+
+
+def test_precompute_lookup_table_values_are_rendered_html(tmp_path: Path) -> None:
+    """Per-value lookup-table cells must contain HTML, not raw markdown.
+
+    Regression test: the JS shim does ``el.innerHTML = delta[idx]``, so if
+    the table stored markdown source the page would show ``\\`\\`\\`python
+    …\\`\\`\\``` and ``| Scale | Value |`` literally when the user dragged
+    the slider off its default value. We render each delta to HTML at build
+    time using mkdocs's extension list so the swap produces correctly-styled
+    cells that match the default-value cells mkdocs renders into the body.
+    """
+    import json
+    import re
+
+    content = tmp_path / "content"
+    content.mkdir()
+    nb = content / "demo.py"
+    # Cell 2 emits a fenced code block + a markdown table — both pieces
+    # whose markdown→HTML rendering is structurally distinct from the
+    # markdown source (no false positives via substring overlap).
+    nb.write_text(
+        "import marimo\n\n"
+        "__generated_with = '0.23.3'\n"
+        "app = marimo.App()\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import marimo as mo\n"
+        "    return (mo,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    n = mo.ui.slider(steps=[1, 2, 3])\n"
+        "    return (n,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _(mo, n):\n"
+        "    mo.md(f'| Scale | Value |\\n|---|---|\\n| n | **{n.value}** |')\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
+    )
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "precompute": {"enabled": True},
+            "toc": [{"file": "content/demo.py"}],
+        }
+    )
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 1, report.warnings
+
+    staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+    match = re.search(
+        r'<script type="application/json" class="marimo-book-precompute-table"[^>]*>'
+        r"(.*?)</script>",
+        staged,
+        re.DOTALL,
+    )
+    assert match is not None, "lookup-table script not emitted"
+    table = json.loads(match.group(1))
+    # Values 2 and 3 are non-default; both should be HTML.
+    assert {"2", "3"}.issubset(table.keys()), table.keys()
+    for value_key, delta in table.items():
+        joined = "\n".join(delta.values())
+        # The slider cell (a fenced code block) renders via pymdownx.highlight.
+        assert 'class="language-python highlight"' in joined, (
+            f"value {value_key}: code block cell didn't render to highlight HTML, got: {joined!r}"
+        )
+        # The downstream cell (a markdown table) renders via the tables ext.
+        assert "<table>" in joined, (
+            f"value {value_key}: table cell didn't render to <table>, got: {joined!r}"
+        )
+        # Raw markdown table syntax must not survive into the lookup table.
+        assert "|---|" not in joined, (
+            f"value {value_key} still contains raw markdown table delimiters"
+        )

@@ -81,7 +81,7 @@ def _build_config(
         *extra_javascript,
     ]
 
-    cfg["markdown_extensions"] = _markdown_extensions()
+    cfg["markdown_extensions"] = markdown_extensions()
 
     # Plugins: mkdocs's default is just `search`. Opt-in plugins require
     # matching ``marimo-book[...]`` extras; mkdocs fails fast with a clear
@@ -197,7 +197,15 @@ def _theme_block(book: Book) -> dict[str, Any]:
     return theme
 
 
-def _markdown_extensions() -> list:
+def markdown_extensions() -> list:
+    """Markdown-extension list mkdocs receives.
+
+    Public so other build-time stages (e.g. precompute lookup-table
+    rendering) can build a Python-Markdown instance with the same
+    extensions and produce HTML that matches what mkdocs emits for the
+    page body. Order matters — extensions stack onto Python-Markdown's
+    pipeline in this order.
+    """
     return [
         "abbr",
         "admonition",

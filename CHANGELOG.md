@@ -5,6 +5,24 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Static reactivity demo: cell content rendered as raw markdown when
+  the slider was moved off its default value.** The precompute lookup
+  table embedded in each page stored marimo's markdown export of each
+  cell, but the JS shim sets `el.innerHTML = delta[idx]` directly —
+  pasting raw markdown into the DOM. The default-value cells looked
+  correct because they live in the page body and pass through mkdocs;
+  every other value's cells came out as ` ```python … ``` ` and
+  `| Scale | Value | |---|---| …`. The preprocessor now pre-renders
+  each delta to HTML at build time using the same Python-Markdown
+  extension list mkdocs is configured with, so the lookup-table values
+  match what mkdocs emits for the body. Latent since precompute first
+  shipped; only obvious after 0.1.2's inline-controls placement
+  (#19) put the slider next to the cells it drives.
+
 ## [0.1.2] — 2026-04-27
 
 Patch release: Jupyter-Book-style sidebar logo, header launch buttons

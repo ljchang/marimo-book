@@ -46,6 +46,55 @@ from .marimo_export import (
     export_notebook_with_overrides,
 )
 
+
+def _split_extension_list(exts: list) -> tuple[list[str], dict[str, dict]]:
+    """Flatten mkdocs's mixed extension list into Python-Markdown's shape.
+
+    mkdocs accepts a list mixing bare strings and ``{name: {…cfg}}`` dicts;
+    Python-Markdown wants ``extensions=[names…]`` plus a separate
+    ``extension_configs={name: {…}}`` mapping.
+    """
+    names: list[str] = []
+    configs: dict[str, dict] = {}
+    for ext in exts:
+        if isinstance(ext, str):
+            names.append(ext)
+        elif isinstance(ext, dict):
+            for name, cfg in ext.items():
+                names.append(name)
+                if cfg:
+                    configs[name] = cfg
+    return names, configs
+
+
+def _make_md_renderer():
+    """Build a Python-Markdown instance using mkdocs's extension list.
+
+    Used to pre-render precompute-lookup-table delta values to HTML at
+    build time, so the JS shim's ``el.innerHTML = delta[idx]`` produces
+    correctly-styled cells (matching what mkdocs emits for the default
+    value's content in the page body).
+
+    Reuse across delta renders within a page; call ``.reset()`` between
+    ``convert()`` calls so stateful extensions (footnotes, toc) don't
+    accumulate.
+    """
+    import markdown as _md
+
+    from marimo_book.shell import markdown_extensions
+
+    names, configs = _split_extension_list(markdown_extensions())
+    return _md.Markdown(extensions=names, extension_configs=configs)
+
+
+def _render_segments_to_html(md_renderer, segments_dict: dict[int, str]) -> dict[int, str]:
+    out: dict[int, str] = {}
+    for idx, body in segments_dict.items():
+        md_renderer.reset()
+        out[idx] = md_renderer.convert(body)
+    return out
+
+
 # marimo widget call patterns we recognise. Keys are the dotted attribute
 # path; values name the discovery strategy used to extract value sets.
 _WIDGET_KIND_BY_ATTR: dict[str, str] = {
@@ -470,6 +519,13 @@ def precompute_page(
         )
 
     # Per widget: build deltas + downstream cell set.
+    #
+    # Each delta is rendered through Python-Markdown to HTML before being
+    # stored, so the lookup-table JSON the JS shim consumes via
+    # ``el.innerHTML = delta[idx]`` produces correctly-styled cells. The
+    # default-value cell content stays untouched — mkdocs renders it as
+    # part of the page body.
+    md_renderer = _make_md_renderer()
     per_widget: list[tuple[WidgetCandidate, dict[str, dict[int, str]], set[int]]] = []
     bytes_so_far = 0
     substitution_failures: list[str] = []  # collected for the result.skip_reason
@@ -499,9 +555,10 @@ def precompute_page(
                 segments = cells_to_markdown_segments(export)
             except Exception:  # noqa: BLE001 — keep the build alive on a single bad value
                 continue
-            delta = {idx: html for idx, html in segments if base_by_idx.get(idx) != html}
-            if not delta:
+            delta_md = {idx: body for idx, body in segments if base_by_idx.get(idx) != body}
+            if not delta_md:
                 continue
+            delta = _render_segments_to_html(md_renderer, delta_md)
             deltas[_value_to_key(value)] = delta
             downstream.update(delta)
             bytes_so_far += sum(len(v) for v in delta.values())
@@ -606,9 +663,10 @@ def precompute_page(
                 segments = cells_to_markdown_segments(export)
             except Exception:  # noqa: BLE001
                 continue
-            delta = {idx: html for idx, html in segments if base_by_idx.get(idx) != html}
-            if not delta:
+            delta_md = {idx: body for idx, body in segments if base_by_idx.get(idx) != body}
+            if not delta_md:
                 continue
+            delta = _render_segments_to_html(md_renderer, delta_md)
             joint_table[_combo_key(combo)] = delta
             joint_downstream.update(delta)
             bytes_so_far += sum(len(v) for v in delta.values())

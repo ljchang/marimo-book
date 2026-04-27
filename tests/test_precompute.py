@@ -574,6 +574,114 @@ def test_precompute_two_independent_widgets(tmp_path: Path) -> None:
     assert "data-precompute-cell=" in staged
 
 
+def test_diff_key_strips_stream_stderr_blocks() -> None:
+    """``_diff_key`` removes ``<pre class="marimo-stream-stderr">…</pre>`` from
+    cell bodies before comparing them, so non-deterministic warning text
+    doesn't masquerade as a slider-driven output change.
+    """
+    from marimo_book.transforms.precompute import _diff_key
+
+    body_a = (
+        "```python\n"
+        "data = load(...)\n"
+        "```\n"
+        '<pre class="marimo-stream-stderr">/runner/.venv/.../UserWarning: foo\n</pre>\n'
+        "<div>hello</div>"
+    )
+    body_b = (
+        "```python\n"
+        "data = load(...)\n"
+        "```\n"
+        '<pre class="marimo-stream-stderr">/runner/.venv/.../UserWarning: bar\n</pre>\n'
+        "<div>hello</div>"
+    )
+    assert _diff_key(body_a) == _diff_key(body_b)
+    # And the result really has the stderr block stripped:
+    assert "marimo-stream-stderr" not in _diff_key(body_a)
+    assert "<div>hello</div>" in _diff_key(body_a)
+
+
+def test_precompute_ignores_stderr_only_changes(tmp_path: Path) -> None:
+    """Cells whose only difference across re-exports is non-deterministic
+    stderr (warnings, runner-specific paths) must NOT be flagged as
+    downstream of the precomputed widget.
+
+    Reproduces the dartbrains ICA issue: data-load and persistent_cache
+    cells emitted nltools UserWarnings with run-specific text. The diff
+    detector treated each cell's body byte-for-byte and falsely tagged
+    every upstream cell as ``data-precompute-cell``, so the slider
+    mounted inline with the wrong cell.
+    """
+    content = tmp_path / "content"
+    content.mkdir()
+    nb = content / "demo.py"
+    # Cell that emits a randomized warning to stderr each export — exactly
+    # the non-determinism scenario the diff key normalization is supposed
+    # to neutralize.
+    nb.write_text(
+        "import marimo\n\n"
+        "__generated_with = '0.23.3'\n"
+        "app = marimo.App()\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import marimo as mo\n"
+        "    return (mo,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import sys, random\n"
+        # Different stderr on each subprocess run: simulates a warning
+        # whose body varies across exports.\n"
+        "    sys.stderr.write(f'noise-{random.randint(0, 10**9)}\\n')\n"
+        "    sys.stderr.flush()\n"
+        "    return\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    n = mo.ui.slider(steps=[1, 2, 3])\n"
+        "    return (n,)\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _(mo, n):\n"
+        "    mo.md(f'value is {n.value}')\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
+    )
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "precompute": {"enabled": True},
+            "toc": [{"file": "content/demo.py"}],
+        }
+    )
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 1, report.warnings
+    assert not report.errors
+
+    staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+    # Two cells flagged: the slider widget itself (its rendered HTML
+    # changes with each value substitution) and the `mo.md(...)` cell that
+    # consumes `n.value`. The noise cell — which only differs in its
+    # stderr content across re-exports — must NOT be flagged.
+    assert staged.count("data-precompute-cell=") == 2
+    # The noise cell's stderr text appears in the page body (default value
+    # rendered statically) but is not wrapped as reactive.
+    assert "noise-" in staged
+    # The reactive cell wrappers do NOT include the noise cell. Concretely,
+    # walk the page and verify each `data-precompute-cell` block contains
+    # either a `<marimo-slider>` element or the `value is <N>` text — not
+    # a `noise-...` line.
+    import re as _re
+
+    cells_flagged = _re.findall(
+        r'<div class="marimo-book-precompute-cell"[^>]*>(.*?)</div>',
+        staged,
+        flags=_re.DOTALL,
+    )
+    for body in cells_flagged:
+        assert "noise-" not in body, "noise stderr cell should not be wrapped reactive"
+
+
 def test_preview_excluded_page_is_silent(tmp_path: Path) -> None:
     book = _book_with_widget_notebook(tmp_path, source="slider = mo.ui.slider(steps=[0, 1, 5, 10])")
     book = _enable_precompute(book, exclude_pages=["content/demo.py"])

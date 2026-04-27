@@ -35,6 +35,7 @@ from __future__ import annotations
 import ast
 import itertools
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,34 @@ from .marimo_export import (
     export_notebook,
     export_notebook_with_overrides,
 )
+
+# Stream-stderr blocks are stripped from the diff key (NOT from the stored
+# body). Reason: warnings are routinely non-deterministic across
+# re-exports — they include runner-specific file paths, cache-state-
+# dependent text, and Python's internal warning-dedup behavior fires
+# differently per process. Comparing them byte-for-byte caused upstream
+# cells (data load, persistent_cache wrappers) to be falsely flagged as
+# downstream of a precomputed widget, which then placed the slider mount
+# inline with the wrong cell. See the dartbrains ICA chapter for the
+# motivating case.
+# Note: the class attribute is multi-valued
+# (``"marimo-book-output-text marimo-stream-stderr"``), so the pattern
+# accepts any class string that *contains* ``marimo-stream-stderr``.
+_STDERR_BLOCK_RE = re.compile(
+    r'<pre[^>]*class="[^"]*\bmarimo-stream-stderr\b[^"]*"[^>]*>.*?</pre>\n*',
+    flags=re.DOTALL,
+)
+
+
+def _diff_key(body: str) -> str:
+    """Return a normalized cell body for downstream-detection comparison.
+
+    Strips stream-stderr blocks. Whitespace is left alone — Markdown
+    rendering is whitespace-sensitive in spots (fenced code blocks,
+    indented contexts), and we don't want to mask legitimate output
+    differences.
+    """
+    return _STDERR_BLOCK_RE.sub("", body)
 
 
 def _split_extension_list(exts: list) -> tuple[list[str], dict[str, dict]]:
@@ -500,7 +529,7 @@ def precompute_page(
     base_export = export_notebook(py_path, sandbox=sandbox, suppress_warnings=suppress_warnings)
     base_segments = cells_to_markdown_segments(base_export)
     base_seconds = time.monotonic() - t0
-    base_by_idx = {idx: html for idx, html in base_segments}
+    base_diff_key_by_idx = {idx: _diff_key(html) for idx, html in base_segments}
 
     static_body = _join_for_page(base_segments)
 
@@ -559,7 +588,11 @@ def precompute_page(
                 segments = cells_to_markdown_segments(export)
             except Exception:  # noqa: BLE001 — keep the build alive on a single bad value
                 continue
-            delta_md = {idx: body for idx, body in segments if base_by_idx.get(idx) != body}
+            delta_md = {
+                idx: body
+                for idx, body in segments
+                if base_diff_key_by_idx.get(idx) != _diff_key(body)
+            }
             if not delta_md:
                 continue
             delta = _render_segments_to_html(md_renderer, delta_md)
@@ -670,7 +703,11 @@ def precompute_page(
                 segments = cells_to_markdown_segments(export)
             except Exception:  # noqa: BLE001
                 continue
-            delta_md = {idx: body for idx, body in segments if base_by_idx.get(idx) != body}
+            delta_md = {
+                idx: body
+                for idx, body in segments
+                if base_diff_key_by_idx.get(idx) != _diff_key(body)
+            }
             if not delta_md:
                 continue
             delta = _render_segments_to_html(md_renderer, delta_md)

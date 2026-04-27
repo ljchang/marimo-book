@@ -35,9 +35,28 @@ Or if you're using `sandbox` mode, add a `uv` install step and pass
 
 ## Custom domain
 
-Put your domain in a `CNAME` file at the repo root. GitHub Pages picks
-it up automatically. Add a DNS CNAME record (or A records for an apex
-domain) pointing at `<your-username>.github.io`.
+Drop a `CNAME` file at your **book root** (next to `book.yml`) with a
+single line containing your apex domain — e.g.:
+
+```
+mybook.org
+```
+
+The preprocessor copies it into the staged docs tree on every build,
+so mkdocs ships it as `_site/CNAME`. GitHub Pages reads that file on
+each redeploy and keeps the custom-domain setting wired up.
+
+DNS at your registrar:
+
+- **Apex** (`mybook.org`) — four `A` records pointing at GitHub Pages:
+  `185.199.108.153`, `185.199.109.153`, `185.199.110.153`,
+  `185.199.111.153`.
+- **`www`** subdomain — one `CNAME` → `<your-username>.github.io`.
+
+Then in repo Settings → Pages, set Custom domain to `mybook.org`. Once
+GitHub provisions the Let's Encrypt cert (a few minutes after DNS
+verifies), tick "Enforce HTTPS". The marimo-book docs site uses this
+exact setup at [marimobook.org](https://marimobook.org/).
 
 ## Netlify
 

@@ -126,7 +126,8 @@ Each author supports `name` (required), `orcid`, `affiliation`, and
 |---|---|---|---|
 | `logo` | path | `None` | Relative to book root; copied into `images/` |
 | `favicon` | path | `None` | Relative to book root |
-| `theme.palette.primary` | hex color | Material default | Top bar + links |
+| `logo_placement` | `header` \| `sidebar` | `header` | `sidebar` puts a large logo above the left nav (Jupyter-Book chrome) |
+| `theme.palette.primary` | hex color | Material default | Top bar + links. Applied to *both* schemes (light + dark) |
 | `theme.palette.accent` | hex color | Material default | Highlights + active states |
 | `theme.font.text` | Google Font name | `Roboto` | Body font |
 | `theme.font.code` | Google Font name | `Roboto Mono` | Code font |
@@ -141,6 +142,10 @@ one that also applies to `.md` pages.
 - `download` — "Download .py" button (raw `.py` source).
 - `colab` / `binder` — reserved flags, no-op in v0.1.
 - `wasm` — reserved for v0.2.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `placement` | `header` \| `page` | `header` | `header` mounts icon-only buttons in Material's top bar; `page` keeps the legacy text-button row above each chapter title |
 
 ### Dependencies
 
@@ -176,9 +181,20 @@ clutter the rendered page. Set to `false` if you want the setup visible.
 Three shapes, inferred from which key is present:
 
 - `file: path` — a local `.md` or marimo `.py`, rendered as a page.
-  Optional `title:` overrides the first `#` heading in the file.
+  Optional `title:` overrides the first `#` heading in the file. Optional
+  `mode: wasm` opts that page into [WASM render mode][wasm].
 - `url: URL` (+ `title:`) — external link in the sidebar.
-- `section: name` + `children: [...]` — a nested group. Recursive.
+- `section: name` + `children: [...]` — a nested group. Recursive. An
+  empty section (`children:` blank or omitted) is silently dropped from
+  the nav, so you can stub out future groups without breaking the build.
+
+**The first `file:` entry becomes the home page.** Whatever it is —
+`content/intro.md`, `content/welcome.py`, anything — gets staged as
+`index.md` in the docs tree, so mkdocs serves it at `/`. This means the
+header logo's "back to home" link works without any extra configuration,
+and you don't need to know about the mkdocs `index.md` convention.
+
+[wasm]: building.md#wasm-render-mode
 
 ### Shell
 

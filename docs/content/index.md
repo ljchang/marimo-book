@@ -27,18 +27,29 @@ multi-chapter book from marimo notebooks. Your options were roughly:
   per-notebook experience; you can't stitch a set of chapters into a
   browsable book with a sidebar.
 - **WASM export** — `marimo export html-wasm` makes a notebook fully
-  interactive in a browser via Pyodide, but pyodide is still `wasm32`,
-  which caps memory at 2 GB and excludes many scientific-Python packages
-  like `nibabel`, `nilearn`, and `statsmodels`. Most non-trivial data
-  science books can't run in WASM.
+  interactive in a browser via Pyodide, but pyodide is `wasm32` (2 GB
+  memory cap) and missing many scientific-Python packages like
+  `nibabel`, `nilearn`, and `statsmodels`. Most non-trivial data
+  science books can't run end-to-end in WASM.
 
 `marimo-book` sits in the gap. It produces a **statically-rendered book**
 (every cell's output is baked at build time, so readers see real results
 without needing a Python kernel), with a per-chapter *"Open in molab"*
-button for readers who want to run and modify the code live. Anywidgets
-continue to work interactively on the static page via a small runtime
-shim, and heavy chapters that can't run in WASM render fine as static
-figures with a one-click escape hatch to molab.
+button for readers who want to run and modify the code live. Three
+reactivity tiers per page, author chooses:
+
+- **Static** (default) — server-rendered cell outputs. Instant first
+  paint, works offline, smallest bundle.
+- **Static + precompute** — discrete `mo.ui` widgets re-execute each
+  value at build time and ship a JSON lookup table; a JS shim swaps
+  the visible cells on input. Real-feeling interactivity, no kernel.
+- **WASM** (`mode: wasm` per page) — heavy chapters opt in to
+  marimo's island runtime; cells run natively in the browser via
+  Pyodide for full continuous reactivity.
+
+Anywidgets continue to work interactively on static pages via a small
+runtime shim. Plotly figures hydrate on first encounter via lazy CDN
+load.
 
 ## What it's not
 
@@ -54,15 +65,18 @@ figures with a one-click escape hatch to molab.
 
 ## Status
 
-Alpha (v0.1.0a1). Usable end-to-end — the tool is actively building a
-real course site ([dartbrains](https://github.com/ljchang/dartbrains))
-— but the `book.yml` schema may still change between minor versions
-before v1.0. Pin the exact version in your project until we signal
-stability.
+Stable, on PyPI as
+[`marimo-book`](https://pypi.org/project/marimo-book/). The current
+release is **v0.1.2** and the `book.yml` schema is **frozen within
+the 0.1.x series** — fields can be added (additive, backward-compatible)
+but no field will be removed or have its meaning changed without a
+major version bump.
 
-See the [roadmap](roadmap.md) for what's coming next, including WASM
-rendering, [zensical](https://zensical.org) migration, and citation
-support.
+Real-world usage: the tool is actively building a 30-chapter course site
+([dartbrains](https://github.com/ljchang/dartbrains)) plus this book
+itself. See the [roadmap](roadmap.md) for what's next, including
+subgraph re-execution for precompute and the
+[zensical](https://zensical.org) migration.
 
 ## Credits
 

@@ -86,6 +86,41 @@ in an animation loop."**
   re-runs the shim on every page load. For state that needs to
   persist, store it in `localStorage` from inside your widget's JS.
 
+## Plotly figures
+
+Plotly figures (anything that produces a `plotly.graph_objects.Figure`,
+including `make_subplots`, `px.scatter`, etc.) render fully interactive
+on static pages — zoom, pan, hover, the whole toolbar.
+
+The pipeline:
+
+1. Marimo's exporter emits each figure as
+   `<marimo-plotly data-figure='{json}' data-config='{json}'>` with the
+   complete figure spec inlined.
+2. The preprocessor rewraps it as
+   `<div class="marimo-book-plotly" data-figure='{json}'>`.
+3. On page load, `marimo_book.js` lazy-loads Plotly.js from jsdelivr
+   (cached after first chapter that has a chart) and calls
+   `Plotly.newPlot(mount, data, layout, config)` per mount.
+
+No kernel, no extra setup. Just write the figure as you would in any
+marimo notebook and it renders as the static last expression of its
+cell.
+
+```python
+@app.cell(hide_code=True)
+def _(go, x, y):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=x, y=y, mode='lines'))
+    fig.update_layout(title="My chart", height=400)
+    fig
+    return
+```
+
+CSS reserves a 320 px slot before hydration so the page doesn't jump
+when Plotly mounts. If your chart needs more space, set
+`fig.update_layout(height=...)` — the Plotly height wins.
+
 ## Elements we strip
 
 Marimo's `<marimo-ui-element>` wrappers around standalone controls —
@@ -93,7 +128,10 @@ Marimo's `<marimo-ui-element>` wrappers around standalone controls —
 `<marimo-radio>`, `<marimo-number>`, `<marimo-button>` — require a
 running kernel to be meaningful. `marimo-book` strips them at preprocess
 time. For static pages, use an anywidget that includes its controls
-inside the widget itself.
+inside the widget itself, opt the page into
+[`mode: wasm`](building.md#wasm-render-mode), or rely on
+[`precompute.enabled`](building.md#static-reactivity) for
+discrete-value sliders.
 
 ## Example: dartbrains widgets
 

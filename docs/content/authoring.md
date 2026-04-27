@@ -261,6 +261,35 @@ Every `.py` page gets an "Open in molab" launch button (configurable in
 `book.yml`) so readers can pop into a fully reactive marimo session for
 any chapter they want to modify.
 
+### Caching slow cells (`mo.persistent_cache`)
+
+For cells that take more than a few seconds to run (large simulations,
+ICA decompositions, big bootstraps), wrap the expensive computation in
+[`mo.persistent_cache`](https://docs.marimo.io/api/caching/) so the
+result lives on disk across builds. The first build pays the cost
+once; every subsequent build (including CI, if you commit the cache
+directory) is essentially instant.
+
+```python
+@app.cell
+def _(SimulateGrid, mo):
+    with mo.persistent_cache("fpr_sweep"):
+        simulation = SimulateGrid(grid_width=100, n_subjects=20)
+        simulation.run_multiple_simulations(threshold=0.05, n_simulations=100)
+    simulation.plot()  # cheap; runs every build
+    return
+```
+
+The cache lives at `__marimo__/cache/<cache_name>/` next to the
+notebook. Hash invalidation is automatic: edit any input variable in
+the cell and the cache for that key is rebuilt on the next run.
+
+If a cell is *so* slow that even the first build is impractical
+(massive parameter sweeps, multi-hour fits), fall back to
+`@app.cell(disabled=True)` — marimo skips the cell during static
+export but it stays runnable in `marimo edit`. Use this sparingly; the
+chapter will show no output for that cell.
+
 ## Live example
 
 [The next page](example.md) *is* a real marimo notebook, rendered by

@@ -5,6 +5,73 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-04-27
+
+Patch release: Jupyter-Book-style sidebar logo, header launch buttons
+with icons, automatic `index.md` promotion so the home page just works,
+Plotly figure hydration, and a handful of related rendering fixes.
+
+### Added
+
+- **`logo_placement: sidebar`** in `book.yml` — renders the logo as a
+  prominent banner above the left nav (Jupyter-Book chrome) instead of
+  the small Material header icon. Default stays `header`. CSS lives in
+  a separate stylesheet that's only emitted when the flag is set.
+- **Header launch buttons** (default). The molab / GitHub / Download
+  row now mounts in Material's top header bar as icon-only buttons via
+  a small JS shim, with a screen-reader-only label. The legacy
+  `placement: page` mode is still available for the over-the-title row.
+- **Plotly hydration**. Marimo emits each plotly figure as a custom
+  `<marimo-plotly>` element with the figure spec inlined as JSON. The
+  preprocessor now rewraps as `<div class="marimo-book-plotly">` and
+  `marimo_book.js` lazy-loads Plotly.js from jsdelivr on first encounter
+  to render fully interactive charts (zoom / pan / hover).
+- **Auto-promote first TOC entry to `index.md`**. Without this, mkdocs
+  serves nothing at the site root; the header logo's `/` link 404'd.
+  Authors don't need to know about the convention — whatever entry is
+  first in the TOC becomes the home page transparently.
+- **Empty-section tolerance**. Sections with `children: null` (or no
+  children) no longer trip pydantic; they're silently dropped from the
+  nav so authors can stub out placeholders mid-draft.
+
+### Fixed
+
+- **Sidebar logo overlap** with the chapter list when scrolled. The
+  Material default sticky title had no background; chapters scrolled
+  *behind* the logo. Now opaque + capped at 96 px with `z-index: 1`.
+- **Dark-mode primary turning violet** despite a green `book.yml`
+  palette. `_inject_palette` now writes the user's primary/accent into
+  *both* schemes with `!important`; extra.css's defaults drop the
+  `!important` so the user palette wins.
+- **Header / sidebar logo alignment**: 1.1 rem left padding so the
+  sidebar logo sits at the same x as the header's site title (within
+  ~2 px).
+- **Escaped `<marimo-*>` element leaks**. `marimo export ipynb`
+  sometimes emits anywidget / plotly / slider tags HTML-escaped under a
+  text/markdown mime; the preprocessor now detects the broader prefix
+  list and routes through the rewriter so the raw escaped tag never
+  leaks as visible text.
+- **Inline precompute controls**. The widget control mount used to
+  splice at the top of the page body, often far from the cells it
+  drove (e.g. ICA's brain-plot slider was hundreds of px above the
+  brain plot). Now lands immediately above the first reactive cell.
+- **Orphan precompute temp dirs**. The precompute pipeline's
+  `TemporaryDirectory(dir=py_path.parent)` leaks `marimo_book_precompute_*`
+  directories when the marimo subprocess is interrupted (Ctrl-C,
+  watcher restart, OOM). Added `cleanup_orphan_precompute_dirs` that
+  sweeps these at the start of every build.
+- **Drawdata anywidget demo on the docs site** rendered as a
+  `ModuleNotFoundError` because CI didn't have `drawdata` installed.
+  Added the install step to the docs workflow.
+
+### Changed
+
+- **Material's GitHub source widget** (the version + stars + forks
+  card next to `repo_url`) is hidden via CSS — redundant with the new
+  GitHub icon button. `repo_url` is still set in `mkdocs.yml` so
+  per-page "Edit on GitHub" links work.
+- Removed Material's separate Print button (Cmd-P is universal).
+
 ## [0.1.1] — 2026-04-26
 
 Patch release: two render-path bug fixes plus a working drawdata

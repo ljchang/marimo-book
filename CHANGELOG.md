@@ -5,6 +5,33 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`defaults.suppress_warnings`** flag in `book.yml`. When `true`, the
+  preprocessor runs `marimo export` with `PYTHONWARNINGS=ignore` so
+  third-party library warnings (numpy, pandas, deprecation notices,
+  etc.) don't surface as visible stderr blocks in cell output. Off by
+  default so existing books don't lose visible warnings unexpectedly.
+  Useful for tutorial books that import scientific libraries whose
+  routine warnings distract from the lesson.
+- **Tuning-caps section** in `Building → Static reactivity` docs.
+  Documents how to interpret the build report's `widgets_skipped`
+  warning and which `precompute.max_*` cap to bump for common
+  patterns (heavy imports, large per-render HTML, joint groups).
+
+### Fixed
+
+- **DataFrame tables rendered with browser-default styling.** The
+  prose-table CSS rule was scoped to `table:not([class])`, which
+  silently missed pandas tables (they ship with `class="dataframe"`)
+  and any marimo cell-output table. Tables under
+  `.marimo-book-output` and `table.dataframe` now get the same
+  hairline border + zebra striping + padding treatment as prose
+  tables, plus a subtle treatment for the empty index-column header
+  pandas emits.
+
 ## [0.1.3] — 2026-04-27
 
 ### Fixed

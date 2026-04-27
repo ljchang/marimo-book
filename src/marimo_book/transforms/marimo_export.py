@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -54,12 +55,17 @@ def export_notebook(
     *,
     include_outputs: bool = True,
     sandbox: bool = False,
+    suppress_warnings: bool = False,
 ) -> ExportedNotebook:
     """Run ``marimo export ipynb`` and return the parsed notebook JSON.
 
     ``sandbox=True`` passes ``--sandbox`` to marimo, which reads the
     notebook's PEP 723 inline metadata and runs the export in an isolated
     ``uv run --isolated`` environment. Requires ``uv`` on PATH.
+
+    ``suppress_warnings=True`` sets ``PYTHONWARNINGS=ignore`` in the export
+    subprocess's environment so library warnings don't bleed into cell
+    stderr (and from there into the rendered page).
     """
     py_path = Path(py_path)
     cmd = [
@@ -76,6 +82,8 @@ def export_notebook(
     if sandbox:
         cmd.append("--sandbox")
 
+    env = {**os.environ, "PYTHONWARNINGS": "ignore"} if suppress_warnings else None
+
     # Route the temp .ipynb through a system temp dir so `marimo-book serve`'s
     # watcher can never see creates/deletes happening in the source tree.
     # Marimo uses the ``.py``'s own path as the working directory for cell
@@ -84,7 +92,7 @@ def export_notebook(
     with tempfile.TemporaryDirectory(prefix="marimo_book_") as tmp_dir:
         tmp_out = Path(tmp_dir) / f"{py_path.stem}.ipynb"
         cmd.extend(["-o", str(tmp_out)])
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
         # marimo exits non-zero when *some* cells fail to execute but still
         # produces a valid ipynb with error outputs. We accept that case
         # because the preprocessor then emits the error cell visibly.
@@ -106,6 +114,7 @@ def export_notebook_with_overrides(
     rewritten_source: str,
     include_outputs: bool = True,
     sandbox: bool = False,
+    suppress_warnings: bool = False,
 ) -> ExportedNotebook:
     """Run ``marimo export`` against ``rewritten_source`` instead of the file.
 
@@ -124,7 +133,12 @@ def export_notebook_with_overrides(
     ) as tmp_dir:
         tmp_in = Path(tmp_dir) / py_path.name
         tmp_in.write_text(rewritten_source, encoding="utf-8")
-        return export_notebook(tmp_in, include_outputs=include_outputs, sandbox=sandbox)
+        return export_notebook(
+            tmp_in,
+            include_outputs=include_outputs,
+            sandbox=sandbox,
+            suppress_warnings=suppress_warnings,
+        )
 
 
 def cleanup_orphan_precompute_dirs(content_dir: Path) -> int:

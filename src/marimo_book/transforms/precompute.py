@@ -467,6 +467,7 @@ def precompute_page(
     max_bytes: int,
     max_combinations: int,
     sandbox: bool = False,
+    suppress_warnings: bool = False,
 ) -> PrecomputeResult:
     """Re-export a notebook once per (widget, value), return the staged body.
 
@@ -496,7 +497,7 @@ def precompute_page(
     t0 = time.monotonic()
     source = py_path.read_text(encoding="utf-8")
 
-    base_export = export_notebook(py_path, sandbox=sandbox)
+    base_export = export_notebook(py_path, sandbox=sandbox, suppress_warnings=suppress_warnings)
     base_segments = cells_to_markdown_segments(base_export)
     base_seconds = time.monotonic() - t0
     base_by_idx = {idx: html for idx, html in base_segments}
@@ -550,7 +551,10 @@ def precompute_page(
                 continue
             try:
                 export = export_notebook_with_overrides(
-                    py_path, rewritten_source=rewritten, sandbox=sandbox
+                    py_path,
+                    rewritten_source=rewritten,
+                    sandbox=sandbox,
+                    suppress_warnings=suppress_warnings,
                 )
                 segments = cells_to_markdown_segments(export)
             except Exception:  # noqa: BLE001 — keep the build alive on a single bad value
@@ -658,7 +662,10 @@ def precompute_page(
                 continue
             try:
                 export = export_notebook_with_overrides(
-                    py_path, rewritten_source=rewritten, sandbox=sandbox
+                    py_path,
+                    rewritten_source=rewritten,
+                    sandbox=sandbox,
+                    suppress_warnings=suppress_warnings,
                 )
                 segments = cells_to_markdown_segments(export)
             except Exception:  # noqa: BLE001

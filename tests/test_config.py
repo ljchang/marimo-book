@@ -115,3 +115,18 @@ def test_file_entry_per_page_mode_override() -> None:
 def test_toc_entry_must_pick_one_shape() -> None:
     with pytest.raises(ValidationError):
         Book.model_validate({"title": "T", "toc": [{"unknown_kind": "oops"}]})
+
+
+def test_defaults_suppress_warnings_round_trip() -> None:
+    """``defaults.suppress_warnings`` is False by default and accepts True."""
+    b = Book.model_validate({"title": "T", "toc": [{"file": "a.md"}]})
+    assert b.defaults.suppress_warnings is False
+
+    b_on = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "a.md"}],
+            "defaults": {"suppress_warnings": True},
+        }
+    )
+    assert b_on.defaults.suppress_warnings is True

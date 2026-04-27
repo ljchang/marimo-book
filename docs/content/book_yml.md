@@ -75,6 +75,7 @@ defaults:
   hide_author_line: true
   show_source_link: true
   hide_first_code_cell: true
+  suppress_warnings: false   # set true to hide library warnings in cell output
 
 # Table of contents (nested; sections, files, external URLs)
 toc:
@@ -171,10 +172,23 @@ Opt-in Plausible or Google Analytics. Injected via Material for MkDocs'
 
 ### Defaults
 
-Page-level rendering defaults. The most useful one today:
-`hide_first_code_cell: true` hides the first code cell of every marimo
-notebook (almost always `import marimo as mo` setup) so it doesn't
-clutter the rendered page. Set to `false` if you want the setup visible.
+Page-level rendering defaults.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `mode` | `static` \| `wasm` | `static` | Render mode for `.py` notebooks |
+| `hide_author_line` | bool | `true` | Hide the author byline rendered into each chapter |
+| `show_source_link` | bool | `true` | Show the source-link icon next to the title |
+| `hide_first_code_cell` | bool | `true` | Drop the conventional `import marimo as mo` setup cell |
+| `suppress_warnings` | bool | `false` | Run notebook export with `PYTHONWARNINGS=ignore` so library warnings don't surface as visible stderr blocks in the page |
+
+`suppress_warnings: true` is useful for tutorial books that import
+scientific libraries — numpy, pandas, scikit-learn, etc. routinely
+emit deprecation and conversion warnings that distract from the
+lesson. The flag suppresses warnings at the kernel level (not in
+post-processing), so they're never captured as cell stderr.
+Genuine errors still surface; only `warnings.warn(...)` output is
+silenced.
 
 ### TOC entries
 

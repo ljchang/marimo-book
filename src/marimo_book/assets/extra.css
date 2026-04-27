@@ -352,6 +352,15 @@
   border-color: transparent;
 }
 
+/* Hide Material's GitHub source widget (the version + stars + forks
+ * card it auto-renders next to repo_url). With our own GitHub icon
+ * in the header it'd be visual duplication; the widget's stats also
+ * lag behind reality and can mislead. We keep `repo_url` set in
+ * mkdocs.yml so per-page "Edit on GitHub" links still work. */
+.md-header__source {
+  display: none;
+}
+
 [data-md-color-scheme="slate"] .marimo-book-button {
   background: transparent;
   border-color: var(--md-default-fg-color--lightest);

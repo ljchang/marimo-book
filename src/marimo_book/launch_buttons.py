@@ -1,4 +1,4 @@
-"""Inject per-page launch buttons (molab, GitHub, download, print).
+"""Inject per-page launch buttons (molab, GitHub, download).
 
 The preprocessor calls :func:`render_button_row` with a ``book.yml`` config
 and the relative path of the source file inside the book (e.g.
@@ -64,18 +64,6 @@ def render_button_row(book: Book, source_file: Path) -> str:
                     icon=_ICON_DOWNLOAD,
                 )
             )
-
-    if book.launch_buttons.print:
-        # Print/Save-as-PDF: a button with `data-marimo-book-print` that
-        # marimo_book.js binds to window.print(). Browsers' print dialog
-        # offers "Save as PDF" so users get a per-page PDF without
-        # configuring mkdocs-with-pdf.
-        buttons.append(
-            _print_button(
-                "Print / save PDF",
-                "Print this chapter or save it as a PDF",
-            )
-        )
 
     if not buttons:
         return ""
@@ -155,22 +143,6 @@ def _button(
     return f"<a {' '.join(attrs)}>{inner}</a>"
 
 
-def _print_button(text: str, title: str) -> str:
-    """A button bound to window.print() by marimo_book.js."""
-    attrs = [
-        'class="marimo-book-button marimo-book-button-print"',
-        'href="#"',
-        'data-marimo-book-print',
-        f'title="{title}"',
-        f'aria-label="{title}"',
-    ]
-    inner = (
-        _ICON_PRINT
-        + f'<span class="marimo-book-button-label">{text}</span>'
-    )
-    return f"<a {' '.join(attrs)}>{inner}</a>"
-
-
 # --- Icons (Material Symbols, inlined as SVG) ---------------------------------
 
 _ICON_ROCKET = (
@@ -204,14 +176,5 @@ _ICON_DOWNLOAD = (
     '<svg class="marimo-book-button-icon" viewBox="0 0 24 24" '
     'aria-hidden="true" focusable="false">'
     '<path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/>'
-    "</svg>"
-)
-
-_ICON_PRINT = (
-    '<svg class="marimo-book-button-icon" viewBox="0 0 24 24" '
-    'aria-hidden="true" focusable="false">'
-    '<path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3'
-    "zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"
-    'm-1-9H6v4h12V3z"/>'
     "</svg>"
 )

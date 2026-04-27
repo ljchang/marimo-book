@@ -390,18 +390,6 @@
     } else {
       headerInner.appendChild(clone);
     }
-    // Bind print buttons inside the clone (the original was hidden, but
-    // bind there too in case some user keeps placement=page).
-    [scope, clone].forEach((root) => {
-      root.querySelectorAll("[data-marimo-book-print]:not([data-mb-print-bound])")
-        .forEach((a) => {
-          a.setAttribute("data-mb-print-bound", "");
-          a.addEventListener("click", (e) => {
-            e.preventDefault();
-            window.print();
-          });
-        });
-    });
   }
 
   function bootAll(root) {

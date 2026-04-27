@@ -79,31 +79,9 @@ def test_launch_buttons_markdown_file_only_github() -> None:
 
 
 def test_launch_buttons_disabled_when_repo_missing() -> None:
-    """Repo-derived buttons (molab/github/download) drop out without a repo;
-    the print button stays since it doesn't need a remote URL."""
     b = Book.model_validate({"title": "T", "toc": [{"file": "content/x.py"}]})
     row = render_button_row(b, Path("content/x.py"))
-    # Print button still present (it's local — window.print()).
-    assert "marimo-book-button-print" in row
-    # Repo-derived buttons absent.
-    assert "marimo-book-button-molab" not in row
-    assert "marimo-book-button-github" not in row
-    assert "marimo-book-button-download" not in row
-
-
-def test_launch_buttons_print_disabled_omits_button() -> None:
-    """Authors who don't want the print button can opt out."""
-    b = Book.model_validate(
-        {
-            "title": "T",
-            "launch_buttons": {"print": False},
-            "toc": [{"file": "content/x.py"}],
-        }
-    )
-    row = render_button_row(b, Path("content/x.py"))
-    assert "marimo-book-button-print" not in row
-    # And with no repo + no print → empty row.
-    assert row == ""
+    assert row == ""  # all three buttons need a repo URL → empty row
 
 
 def test_launch_buttons_emit_icons() -> None:

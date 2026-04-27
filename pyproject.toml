@@ -41,6 +41,13 @@ dependencies = [
     "nbformat>=5.0",
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
+    # Cross-reference resolution by heading text. Pure Python, ~150 KB,
+    # no system deps — the friction of remembering to `pip install
+    # 'marimo-book[autorefs]'` was tripping up enough users that we
+    # promoted it to a base dep. Books opt in per-book via
+    # `cross_references: true` in `book.yml`; if the flag is off, the
+    # plugin is loaded but no-ops.
+    "mkdocs-autorefs>=1.0",
     "pymdown-extensions>=10.7",
     "watchdog>=4.0",
 ]
@@ -62,13 +69,11 @@ linkcheck = [
 social = [
     "mkdocs-material[imaging]>=9.5",
 ]
-# Opt-in cross-reference resolution by heading text — the MkDocs analog
-# of MyST `{ref}`. Enable via `cross_references: true` in book.yml and
-# install this extra. Lets you write `[Heading text][]` and have it
-# resolve to whatever page contains that heading.
-autorefs = [
-    "mkdocs-autorefs>=1.0",
-]
+# Compatibility alias — `mkdocs-autorefs` is now a base dep
+# (cross_references works without an extra). This entry is kept so
+# `pip install 'marimo-book[autorefs]'` still succeeds for existing
+# install scripts; it's a no-op since the package is already installed.
+autorefs = []
 # Opt-in single-PDF export of the entire book. Enable via
 # `pdf_export: true` in book.yml and install this extra. Renders the
 # built site through WeasyPrint into a single PDF + adds a "Download

@@ -21,47 +21,48 @@ not a contract.
 - `sandbox` dependency mode (PEP 723 per-notebook isolation via `uv`)
 - MIT license; PyPI Trusted Publishing workflow
 
+## Shipped since v0.1
+
+- **WASM render mode** (v0.1.0) — per-page `mode: wasm` opts a chapter
+  into marimo's `MarimoIslandGenerator`. Cells run natively in the
+  browser via Pyodide; sliders are continuously reactive. See
+  [Building → WASM render mode](building.md#wasm-render-mode).
+- **Static reactivity for discrete widgets** (v0.1.0a5) —
+  `precompute.enabled: true` re-exports each chapter once per widget
+  value at build time and ships the lookup table inline. Sliders work
+  on truly static pages, no browser kernel.
+- **Incremental build cache** (v0.1.0a4) — content-hashed cache cuts
+  warm rebuilds from ~107 s to ~3.4 s on dartbrains-sized books.
+- **Sidebar logo placement** (v0.1.2) — `logo_placement: sidebar`
+  renders a Jupyter-Book-style banner above the left nav.
+- **Header launch buttons + Plotly hydration** (v0.1.2) — molab /
+  GitHub / Download as icon buttons in Material's top bar; Plotly
+  figures are fully interactive on static pages.
+
 ## Next up (v0.2, in planning)
 
-### WASM / hybrid render modes
+### Subgraph re-execution for precompute
 
-Enable per-chapter interactivity without requiring a marimo kernel.
-Three modes, per-entry selection in `book.yml`:
-
-```yaml
-toc:
-  - file: content/MR_Physics.py
-    mode: wasm      # runs reactively in-browser via Pyodide
-  - file: content/GLM.py
-    mode: hybrid    # static by default, "Run interactively" button swaps in WASM
-  - file: content/Preprocessing.py
-    mode: static    # current behaviour
-```
-
-Pyodide remains `wasm32` (2 GB memory cap, no `nibabel`/`nilearn`
-support), so WASM works best for lightweight pedagogical chapters
-(physics simulations, small-data demos). Heavy fMRI chapters stay
-`static` with a molab escape hatch.
+Today's precompute (Path X) re-runs the full notebook per widget
+value. Path Y would drive marimo's `App.embed()` / `_ast` API directly
+to execute *only the downstream subgraph*, often 10-100× faster.
+Critical for chapters with expensive setup cells (large data loads,
+ICA decompositions) where wrapping in `mo.persistent_cache` only
+helps so much.
 
 ### Dependency-graph-aware build cache
 
 Marimo already computes a reactive DAG per notebook. Emit a build
 manifest so `marimo-book build` re-executes *only the cells whose
-upstream dependencies changed*, not the whole notebook. This is our
-single biggest authoring-UX lever — today's full rebuild of a 30-page
-book can take a minute; a smart cache would bring incremental edits to
-under 1 s.
+upstream dependencies changed*, not the whole notebook. Today's
+chapter-level cache invalidates on any source-file change; a
+cell-level cache would let one-line prose edits skip re-execution
+entirely.
 
 ### Citation hover-cards
 
 BibTeX ingest + `[@key]` rendering with Material's card syntax showing
 authors, title, year, DOI on hover. Modern-doc-site parity.
-
-### "Open in marimo WASM" launch button
-
-Replaces Jupyter Book's Thebe integration with marimo's native WASM
-bundle. Zero-install, in-page interactivity from any static chapter
-that fits within Pyodide's constraints.
 
 ## Medium term (v0.3+)
 

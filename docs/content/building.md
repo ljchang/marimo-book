@@ -298,10 +298,10 @@ small JS shim swaps the affected cells when the reader interacts with
 the widget.
 
 **This is the kernel-free reactivity path for `defaults.mode: static`
-(the only mode in v0.1.x).** When v0.2 introduces WASM render mode,
-WASM-rendered pages will get native reactivity via Pyodide and this
-whole pipeline will be a no-op for them — the static fallback works
-the same way either side of that transition.
+(the default).** WASM-rendered pages get native reactivity via Pyodide
+and this whole pipeline is a no-op for them — the static fallback
+works the same way either side of that line. See
+[WASM render mode](#wasm-render-mode) below.
 
 ### Opt in via `book.yml`
 
@@ -368,9 +368,12 @@ wrote it — there's nothing marimo-book-specific in the `.py`.
 - Single-slider plot explorations with ≤50 values
 
 **Bad fit:**
-- Continuous sliders that need fine-grained interactivity (use WASM
-  mode in v0.2 when it lands, or link to a molab session)
-- Notebooks where every cell is expensive (build time × N values)
+- Continuous sliders that need fine-grained interactivity (use
+  [WASM mode](#wasm-render-mode))
+- Notebooks where every cell is expensive (build time × N values).
+  Wrap the expensive cell in
+  [`mo.persistent_cache`](authoring.md#caching-slow-cells-mopersistent_cache)
+  so subsequent precompute runs hit the cache.
 - Multi-widget cross-products with shared downstream cells (v2)
 
 ### Build cost
@@ -381,6 +384,56 @@ wrote it — there's nothing marimo-book-specific in the `.py`.
   after the first export and aborts if projected runtime exceeds.
 - **The build cache** (v0.1.0a4) interacts with precompute correctly:
   toggling `precompute.enabled` invalidates affected pages.
+
+## WASM render mode
+
+For pages that need *full* Python reactivity — continuous sliders,
+arbitrary user input, real downstream re-execution — opt in per page:
+
+```yaml
+toc:
+  - file: content/intro.py            # static (default)
+  - file: content/explorer.py         # full WASM
+    mode: wasm
+```
+
+Or for a whole book:
+
+```yaml
+defaults:
+  mode: wasm
+```
+
+**What it does.** The preprocessor routes the page through marimo's
+[`MarimoIslandGenerator`](https://docs.marimo.io/api/exporting/#marimo.MarimoIslandGenerator).
+At first paint the browser downloads marimo's frontend bundle (~5 MB
+gzipped, jsdelivr CDN) plus Pyodide (~30 MB, lazy). Cells then become
+natively reactive — sliders work continuously, every cell re-runs on
+input change, no precompute caps apply.
+
+**When to use.** Per-page opt-in is the recommended pattern: leave most
+chapters static for instant first paint, flip `mode: wasm` only on
+the few that genuinely need full reactivity.
+
+**When NOT to use.** Compute-heavy notebooks fare badly under WASM —
+joblib's parallel backend doesn't run efficiently in Pyodide, and big
+NumPy/Pandas/scientific stacks have slow first-import in the browser.
+For one-shot expensive computations,
+[`mo.persistent_cache`](authoring.md#caching-slow-cells-mopersistent_cache)
+on a static page is faster end-to-end.
+
+**Caveats.**
+- First page load is heavy (~30 MB Pyodide download, cached after).
+- Not every Python package is in Pyodide's package set — check
+  [pyodide.org/packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html).
+- File system access via relative paths needs care: marimo's
+  `__file__` and `mo.notebook_dir()` resolve to internal paths under
+  `MarimoIslandGenerator`. If a notebook does
+  `Path(__file__).parent / "data"` it won't find the file. Use a
+  cwd-walk pattern instead, or wait for
+  [marimo-team/marimo#9391](https://github.com/marimo-team/marimo/issues/9391).
+
+The `Authoring → WASM demo` page in this book is a working example.
 
 ## ePub / other formats?
 

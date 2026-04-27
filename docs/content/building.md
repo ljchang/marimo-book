@@ -385,6 +385,40 @@ wrote it — there's nothing marimo-book-specific in the `.py`.
 - **The build cache** (v0.1.0a4) interacts with precompute correctly:
   toggling `precompute.enabled` invalidates affected pages.
 
+### Tuning caps for heavy notebooks
+
+When a precompute opt-in page renders static instead of interactive
+(e.g. the slider control is missing from the published page), the
+build report's `warnings:` section will name the cap that tripped:
+
+```text
+content/ICA.py: projected runtime (72.0s × 10 renders) exceeds
+  max_seconds_per_page (60s); rendered static.
+```
+
+Common patterns and the cap to bump:
+
+| Symptom | Cap to raise |
+|---|---|
+| Notebook with expensive imports (nilearn, scikit-learn warm-up) | `max_seconds_per_page` |
+| Each render emits a large HTML blob (whole-brain plot, big DataFrame) | `max_bytes_per_page` |
+| Many widgets joint-grouped (cross-product blows up) | `max_combinations_per_page` |
+| Single widget has more than 50 values | `max_values_per_widget` |
+
+Concrete example for a neuroimaging tutorial whose ICA chapter
+takes ~7s per render and ships ~1 MB of brain HTML per value:
+
+```yaml
+precompute:
+  enabled: true
+  max_seconds_per_page: 600    # 10 minutes, room for 80 renders × 7s
+  max_bytes_per_page: 50000000 # 50 MB, room for ~25 brain images
+```
+
+Caps apply per-page, so bumping them globally only costs build
+time on pages that actually exceed the defaults — fast pages keep
+their fast budget.
+
 ## WASM render mode
 
 For pages that need *full* Python reactivity — continuous sliders,

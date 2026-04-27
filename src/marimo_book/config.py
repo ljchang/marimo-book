@@ -180,6 +180,11 @@ class Defaults(BaseModel):
     # ``hide_code=True``), but it's almost never part of the lesson. Drop it
     # unconditionally by default; authors can opt out per-book.
     hide_first_code_cell: bool = True
+    # When True, run ``marimo export`` with ``PYTHONWARNINGS=ignore`` so
+    # third-party library warnings (numpy, pandas, deprecation notices, etc.)
+    # don't surface as visible stderr blocks in the rendered page. Off by
+    # default so existing books don't lose visible warnings unexpectedly.
+    suppress_warnings: bool = False
 
 
 # --- TOC entries (discriminated union) ---------------------------------------

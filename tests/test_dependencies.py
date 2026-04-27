@@ -89,3 +89,31 @@ def test_export_notebook_passes_sandbox_flag(tmp_path: Path) -> None:
 
         marimo_export.export_notebook(fake_py, sandbox=False)
         assert "--sandbox" not in captured[-1]
+
+
+def test_export_notebook_threads_suppress_warnings_env(tmp_path: Path) -> None:
+    """``suppress_warnings=True`` sets PYTHONWARNINGS=ignore on the subprocess env."""
+    fake_py = tmp_path / "nb.py"
+    fake_py.write_text("import marimo\napp = marimo.App()\n")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    captured_envs: list[dict | None] = []
+
+    def fake_run(cmd, **kw):
+        captured_envs.append(kw.get("env"))
+        out_path = Path(cmd[cmd.index("-o") + 1])
+        out_path.write_text('{"cells": [], "metadata": {}}')
+        return _FakeResult()
+
+    with patch.object(marimo_export.subprocess, "run", side_effect=fake_run):
+        marimo_export.export_notebook(fake_py, suppress_warnings=True)
+        assert captured_envs[-1] is not None
+        assert captured_envs[-1].get("PYTHONWARNINGS") == "ignore"
+
+        marimo_export.export_notebook(fake_py, suppress_warnings=False)
+        # Default — let subprocess inherit the parent environment unchanged.
+        assert captured_envs[-1] is None

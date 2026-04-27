@@ -488,6 +488,7 @@ class Preprocessor:
             max_bytes=cfg.max_bytes_per_page,
             max_combinations=cfg.max_combinations_per_page,
             sandbox=self.sandbox,
+            suppress_warnings=self.book.defaults.suppress_warnings,
         )
         if result.skipped:
             report.warnings.append(f"{entry.file}: {result.skip_reason}")
@@ -625,7 +626,11 @@ def stage_page(
 
 
 def _render_marimo(src: Path, book: Book, *, sandbox: bool = False) -> str:
-    exp = export_notebook(src, sandbox=sandbox)
+    exp = export_notebook(
+        src,
+        sandbox=sandbox,
+        suppress_warnings=book.defaults.suppress_warnings,
+    )
     return cells_to_markdown(
         exp,
         hide_first_code_cell=book.defaults.hide_first_code_cell,

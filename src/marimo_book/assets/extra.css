@@ -263,6 +263,57 @@
   border-bottom: 1px solid var(--md-default-fg-color--lightest);
 }
 
+/* Pandas/marimo cell output tables. The :not([class]) rule above misses
+ * these because pandas attaches class="dataframe", and marimo-book wraps
+ * cell outputs in <div class="marimo-book-output">. Mirror the prose-table
+ * styling so DataFrames look at home in the book. */
+.md-typeset .marimo-book-output table,
+.md-typeset table.dataframe {
+  border-collapse: collapse;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 0.78rem;
+  margin: 0.5rem 0;
+}
+.md-typeset .marimo-book-output th,
+.md-typeset table.dataframe th {
+  background: var(--md-default-bg-color--light);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  border-right: 0;
+}
+.md-typeset .marimo-book-output td,
+.md-typeset table.dataframe td {
+  padding: 0.35rem 0.7rem;
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+  border-right: 0;
+}
+.md-typeset .marimo-book-output tr:nth-child(even) td,
+.md-typeset table.dataframe tbody tr:nth-child(even) td {
+  background: var(--md-default-bg-color--light);
+}
+/* Pandas emits an empty <th></th> for the index column header; keep it
+ * subtle rather than forcing it bold-and-bordered. */
+.md-typeset .marimo-book-output th:empty,
+.md-typeset table.dataframe th:empty {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+/* Numeric index column reads better right-aligned. Pandas writes it as
+ * <th> in <tbody>, so target both possibilities. */
+.md-typeset .marimo-book-output tbody th,
+.md-typeset table.dataframe tbody th {
+  background: transparent;
+  font-weight: 500;
+  color: var(--md-default-fg-color--light);
+  text-align: right;
+  padding: 0.35rem 0.7rem;
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+}
+
 /* --- marimo-book-specific elements (preserved) --------------------------- */
 
 /* Launch buttons. Two layouts:

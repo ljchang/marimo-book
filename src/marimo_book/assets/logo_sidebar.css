@@ -17,28 +17,26 @@
 
   /* Promote the nav drawer header (which holds the logo) into a visible
    * banner above the primary sidebar nav. Material hides this on desktop
-   * by default; we restore it as a vertical flex column so the logo
-   * sits above the site name (Jupyter-Book layout). */
+   * by default; we restore it as a centred container that shows only
+   * the logo image (the site name is already in the header bar — no
+   * point in repeating it here). */
   .md-sidebar--primary .md-nav--primary > .md-nav__title {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    padding: 1.25rem 0.75rem 0.75rem;
+    padding: 1.25rem 0.75rem 0.5rem;
     height: auto;
     background: none;
     box-shadow: none;
     cursor: default;
-    line-height: 1.2;
-    text-align: center;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--md-default-fg-color);
+    line-height: 1;
+    /* Collapse any direct text node (the site-name label that lives
+     * inside the <label> alongside the logo <a>) by zeroing the font;
+     * the logo image opts back in via its own font-size below. */
+    font-size: 0;
   }
 
-  /* Hide the drawer-only "back to top" / hamburger label children — only
-   * the logo and (optionally) the site title should appear in the banner. */
+  /* Hide the drawer-only "back to top" / hamburger label children. */
   .md-sidebar--primary .md-nav--primary > .md-nav__title > [for] {
     display: none;
   }

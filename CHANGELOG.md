@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-<<<<<<< HEAD
 - **Precompute slider mounted inline with the wrong cell when an
   upstream cell emitted non-deterministic stderr.** The downstream-
   detection diff in `precompute_page` compared cell bodies byte-for-
@@ -24,7 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as downstream. Stored cell bodies still keep their stderr — only
   the comparison key is normalized. Surfaced by the dartbrains ICA
   chapter.
-=======
 - **Anywidgets rendered empty on WASM-mode pages.** marimo's
   `MarimoIslandGenerator` runs under `ScriptRuntimeContext` which
   hardcodes `virtual_files_supported=False`, so every anywidget's
@@ -43,7 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shim doesn't round-trip widget state back to Pyodide — cells
   reading `widget.value` from an anywidget see the *initial* value;
   marimo's own `mo.ui.*` controls still round-trip normally.
->>>>>>> 39c7bd5 (Fix anywidgets rendering empty on WASM-mode pages)
+- **Math rendering racing instant-nav.** Material's `document$` is an
+  RxJS `Subject` (not BehaviorSubject) — every page swap (instant-nav
+  click) emits *before* `mathjax.js` subscribes, so MathJax silently
+  never typesets and arithmatex spans render as raw `\(...\)` /
+  `\[...\]` LaTeX text. Same bug class as the v0.1.1 precompute slider
+  boot race, fixed the same way: belt-and-suspenders typeset on
+  DOMContentLoaded *and* every `document$` emission, both idempotent.
 
 ## [0.1.4] — 2026-04-27
 

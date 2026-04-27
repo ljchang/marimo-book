@@ -57,8 +57,8 @@ analytics:
 # External-link check (opt-in, requires marimo-book[linkcheck])
 check_external_links: false
 
-# Cross-page heading references via mkdocs-autorefs (opt-in,
-# requires marimo-book[autorefs])
+# Cross-page heading references via mkdocs-autorefs (bundled with
+# marimo-book — no extra install needed; just flip this flag).
 cross_references: false
 
 # Auto-include CHANGELOG.md from the book root as a "Changelog" page
@@ -112,10 +112,11 @@ That's enough to build. Every other field uses a sensible default.
 | `title` | string | **required** | Shown in the header, browser tab, search index |
 | `description` | string | `None` | Used as `<meta>` description and search preview |
 | `authors[]` | list of `Author` | `[]` | See *Authors* below |
-| `copyright` | string | `None` | Footer copyright |
+| `copyright` | string | `None` | Footer copyright. HTML allowed — useful for funding lines + linked author names |
 | `license` | string | `None` | SPDX identifier (`MIT`, `CC-BY-SA-4.0`) |
 | `repo` | URL | `None` | Enables "Edit on GitHub" links + launch buttons |
 | `branch` | string | `main` | Branch that `repo` links target |
+| `url` | URL | `None` | Canonical site URL. Used for absolute links in OpenGraph cards and the search index |
 | `doi` | string | `None` | Renders as a badge on the landing page |
 
 Each author supports `name` (required), `orcid`, `affiliation`, and
@@ -168,7 +169,44 @@ override these defaults. See [Authoring → Anywidgets](widgets.md).
 ### Analytics
 
 Opt-in Plausible or Google Analytics. Injected via Material for MkDocs'
-`extra.analytics` block.
+`extra.analytics` block; Material auto-injects the gtag.js / Plausible
+script on every page.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `analytics.provider` | `plausible` \| `google` \| `none` | `none` | Off by default. Both providers live in the Material analytics integration |
+| `analytics.property` | string | `None` | GA4 Measurement ID (`G-XXXXXXXXXX`) for Google, or domain (`yoursite.org`) for Plausible. Universal Analytics IDs (`UA-...`) are not supported — Google retired UA on 2023-07-01 |
+
+```yaml
+analytics:
+  provider: google
+  property: G-XXXXXXXXXX
+```
+
+### Static reactivity (`precompute`)
+
+Re-renders the notebook once per discrete-widget value at build time
+and ships a JSON lookup table the JS shim swaps on slider input. Off
+by default; opt in per book.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `precompute.enabled` | bool | `false` | Flip on to scan every `.py` page for `mo.ui.slider(steps=...)` / `mo.ui.dropdown` / `mo.ui.switch` / `mo.ui.radio` candidates |
+| `precompute.max_values_per_widget` | int | `50` | Skip a widget whose value set exceeds this. Cheap cap, checked before any execution |
+| `precompute.max_combinations_per_page` | int | `200` | Across all widgets on a page (cartesian product when multiple widgets share a downstream cell). Cheap cap |
+| `precompute.max_seconds_per_page` | int | `60` | Wall-clock budget per page. The orchestrator extrapolates from the first export and aborts if projected runtime exceeds. Bump to 600+ for heavy chapters (whole-brain decomposition, fMRI processing, etc.) |
+| `precompute.max_bytes_per_page` | int | `10485760` (10 MB) | Inline-table budget. Bump to 50 MB for chapters whose per-render output is large (e.g. inline brain HTML viewers) |
+| `precompute.exclude_pages[]` | list of paths | `[]` | Pages listed here render every widget as static even when the global flag is on |
+
+See [Building → Static reactivity](building.md#static-reactivity-precompute)
+for the full pipeline + tuning guide.
+
+### Bibliography
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `bibliography` | list of paths | `[]` | BibTeX files to load. Inline list shorthand also accepted (`bibliography: [refs.bib, more.bib]`) |
+| `cite_style` | `apa` \| `numbered` | `apa` | Citation rendering format |
 
 ### Defaults
 

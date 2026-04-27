@@ -37,8 +37,9 @@ dependencies:
 social_cards: true
 
 # Resolve cross-page heading references. Lets us write `[Anywidgets][]`
-# and have it auto-link to whatever page has that heading. Requires
-# `pip install 'marimo-book[autorefs]'`.
+# and have it auto-link to whatever page has that heading. As of
+# marimo-book 0.1.5 mkdocs-autorefs ships in the base install, so no
+# extra is needed — just flip this flag.
 cross_references: true
 
 # Auto-include the repo-root CHANGELOG.md as a "Changelog" page in the

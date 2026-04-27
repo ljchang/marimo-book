@@ -194,7 +194,7 @@ pip install 'marimo-book[social,autorefs,linkcheck,pdf]'
 | Flag | What it does | Extra |
 |---|---|---|
 | `social_cards: true` | Material's `social` plugin auto-generates per-page OpenGraph / Twitter card PNGs and injects the matching `<meta>` tags | `marimo-book[social]` (also needs system `libcairo2 libpango-1.0-0 libpangocairo-1.0-0`) |
-| `cross_references: true` | `mkdocs-autorefs` resolves `[Heading text][]` to whichever page contains that heading — the MkDocs analog of MyST `{ref}` | `marimo-book[autorefs]` |
+| `cross_references: true` | `mkdocs-autorefs` resolves `[Heading text][]` to whichever page contains that heading — the MkDocs analog of MyST `{ref}` | None — bundled with `marimo-book` |
 | `check_external_links: true` | `htmlproofer` HEAD-checks every `<a href>` and `<img src>` against the live web | `marimo-book[linkcheck]` |
 | `include_changelog: true` | Preprocessor copies `CHANGELOG.md` from the book root (or its parent) into the staged tree and appends a "Changelog" entry to the nav | None |
 | `pdf_export: true` | `mkdocs-with-pdf` renders the entire book through WeasyPrint into `_site/pdf/book.pdf` and adds a "Download PDF" link to the page footer | `marimo-book[pdf]` (also needs the cairo + pango system libs above) |

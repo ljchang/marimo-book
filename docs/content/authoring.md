@@ -187,7 +187,7 @@ The [Anywidgets][] page covers the JS shim in detail.
 
 The [Anywidgets][] page covers the JS shim in detail.
 
-This requires the optional plugin: `pip install 'marimo-book[autorefs]'`.
+No extra install needed — `mkdocs-autorefs` ships with `marimo-book` as of 0.1.5; just opt in per book via `cross_references: true` in `book.yml`.
 
 **Term tooltips.** Define an abbreviation once and it becomes a hover
 tooltip everywhere on the page:

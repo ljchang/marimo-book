@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`mkdocs-autorefs` is now a base dependency.** It used to live
+  behind `pip install 'marimo-book[autorefs]'`, which was a recurring
+  trip-up — books with `cross_references: true` in `book.yml` would
+  build fine on CI (where the extra was installed) and then silently
+  drop the cross-ref behavior locally. The package is small and pure
+  Python, so promoting it costs nothing. The `[autorefs]` extra is
+  kept as an empty alias so existing install scripts keep working.
+- **Docs TOC: `widgets.md` (the Anywidgets reference) now sits
+  immediately before the `anywidget_demo` page** under Authoring, so
+  reference docs and the live demo are next to each other.
+
 ### Fixed
 
 - **Precompute slider mounted inline with the wrong cell when an
@@ -48,6 +61,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `\[...\]` LaTeX text. Same bug class as the v0.1.1 precompute slider
   boot race, fixed the same way: belt-and-suspenders typeset on
   DOMContentLoaded *and* every `document$` emission, both idempotent.
+
+### Documentation
+
+- `book_yml.md` reference now covers the full schema: `analytics`
+  (provider + property), the complete `precompute` block (all five
+  caps + `exclude_pages`), `url` (canonical site URL), `bibliography`
+  + `cite_style`. Several fields were missing or sketched in
+  one-liners.
+- Drop the "requires `pip install 'marimo-book[autorefs]'`"
+  reminders now that the plugin ships in the base install.
 
 ## [0.1.4] — 2026-04-27
 

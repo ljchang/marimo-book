@@ -28,12 +28,15 @@
   --md-default-fg-color--lightest:    #27272a;  /* zinc 800 */
   --md-code-bg-color:                 #111113;
   --md-code-fg-color:                 #e4e4e7;
-  /* Lift primary/accent in dark mode (indigo 400 instead of 500) */
-  --md-primary-fg-color:              #818cf8 !important;
+  /* Default primary/accent for the marimo-book brand. No !important
+   * here — the preprocessor's `_inject_palette` writes the user's
+   * book.yml palette into both schemes with !important, and we want
+   * that to win. Authors who don't set a palette get this indigo. */
+  --md-primary-fg-color:              #818cf8;
   --md-accent-fg-color:               #818cf8;
   --md-accent-fg-color--transparent:  rgba(129, 140, 248, 0.12);
   --md-typeset-color:                 #e4e4e7;
-  --md-typeset-a-color:               #a5b4fc;  /* indigo 300 */
+  --md-typeset-a-color:               #a5b4fc;
 }
 
 /* --- Typography: lighter headers, generous line-height ------------------- */

@@ -627,12 +627,31 @@ def _doc_relpath_for(file_path: Path) -> Path:
 
 
 def _inject_palette(css: str, book: Book) -> str:
-    """Prepend CSS variable overrides for the book's palette."""
+    """Prepend CSS variable overrides for the book's palette.
+
+    Emits the same primary/accent values into both the light scheme
+    (``:root``) and the dark scheme (``[data-md-color-scheme="slate"]``)
+    using ``!important`` so the user's book.yml palette beats marimo-book's
+    own dark-scheme indigo defaults declared further down in extra.css.
+    """
     palette = book.theme.palette
-    lines = ["/* palette from book.yml */", ":root {"]
-    if palette.primary:
-        lines.append(f"  --md-primary-fg-color: {palette.primary};")
-    if palette.accent:
-        lines.append(f"  --md-accent-fg-color: {palette.accent};")
-    lines.append("}\n")
+    primary = palette.primary
+    accent = palette.accent
+    if not (primary or accent):
+        return css
+
+    def _block(selector: str) -> list[str]:
+        out = [selector + " {"]
+        if primary:
+            out.append(f"  --md-primary-fg-color: {primary} !important;")
+            out.append(f"  --md-typeset-a-color: {primary} !important;")
+        if accent:
+            out.append(f"  --md-accent-fg-color: {accent} !important;")
+        out.append("}")
+        return out
+
+    lines = ["/* palette from book.yml */"]
+    lines += _block(":root")
+    lines += _block('[data-md-color-scheme="slate"]')
+    lines.append("")
     return "\n".join(lines) + "\n" + css

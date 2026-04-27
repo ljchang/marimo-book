@@ -24,6 +24,32 @@ so Material's content area controls width.
 Static reactivity (``precompute.enabled``) is automatically a no-op
 for WASM-rendered pages: the preprocessor's ``_run_precompute`` is
 called only for static-mode entries.
+
+**Anywidget rewrite (the reason this module also imports
+:func:`rewrite_anywidget_html`).** ``MarimoIslandGenerator`` runs
+under marimo's ``ScriptRuntimeContext``, which hardcodes
+``virtual_files_supported=False`` — so every anywidget's ES module
+gets emitted as a ``data:text/javascript;base64,...`` URL. The
+marimo islands runtime then refuses to load those modules
+("Refusing to load anywidget module from untrusted URL"); only
+``@file/...`` URLs are trusted. Result: anywidgets render as empty
+in WASM-mode pages.
+
+We sidestep that by post-processing the islands body with the same
+:func:`rewrite_anywidget_html` we use in static mode — rewrapping
+``<marimo-anywidget>`` to ``<div class="marimo-book-anywidget">``,
+which our ``marimo_book.js`` shim hydrates by importing the data URL
+directly. The cells themselves still go through marimo's islands
+runtime + Pyodide for full Python reactivity; only the anywidget
+modules are mounted by the static shim.
+
+The trade-off: anywidget state set by the shim doesn't round-trip
+back to Pyodide (kernel can't see the in-browser model state), so
+cells that read ``widget.value`` after the user moves an anywidget
+slider see the *initial* value. For widgets driven by ``mo.ui.*``
+controls (which DO round-trip via marimo's runtime) full reactivity
+is preserved — only "anywidget reading anywidget" patterns are
+affected.
 """
 
 from __future__ import annotations
@@ -32,6 +58,8 @@ import asyncio
 from pathlib import Path
 
 from marimo import MarimoIslandGenerator
+
+from .anywidgets import rewrite_anywidget_html
 
 
 def render_wasm_page(py_path: Path, *, display_code: bool = False) -> str:
@@ -53,4 +81,11 @@ def render_wasm_page(py_path: Path, *, display_code: bool = False) -> str:
     asyncio.run(gen.build())
     head = gen.render_head()
     body = gen.render_body(style="")
+    # Re-target anywidgets to our static-shim mount form. See module docstring
+    # for the full rationale; in short, marimo's islands runtime won't load
+    # the data: URLs that ScriptRuntimeContext emits for anywidget modules.
+    # `keep_marimo_controls=True` because in WASM mode the islands runtime
+    # serves <marimo-slider>/<marimo-dropdown>/etc. as live, kernel-backed
+    # controls — they must NOT be stripped (only static export does that).
+    body = rewrite_anywidget_html(body, keep_marimo_controls=True)
     return head + "\n" + body

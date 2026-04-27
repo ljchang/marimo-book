@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<<<<<<< HEAD
 - **Precompute slider mounted inline with the wrong cell when an
   upstream cell emitted non-deterministic stderr.** The downstream-
   detection diff in `precompute_page` compared cell bodies byte-for-
@@ -23,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as downstream. Stored cell bodies still keep their stderr — only
   the comparison key is normalized. Surfaced by the dartbrains ICA
   chapter.
+=======
+- **Anywidgets rendered empty on WASM-mode pages.** marimo's
+  `MarimoIslandGenerator` runs under `ScriptRuntimeContext` which
+  hardcodes `virtual_files_supported=False`, so every anywidget's
+  ES module is emitted as a `data:text/javascript;base64,...` URL.
+  marimo's islands runtime then refuses to load these
+  ("Refusing to load anywidget module from untrusted URL") because
+  its trust check only accepts `@file/...` URLs. Result: every
+  anywidget on a WASM page disappeared from the DOM — completely
+  broken for books like dartbrains' MR_Physics chapter that ship
+  custom physics-simulation widgets. The WASM render path now
+  post-processes the islands body with the same anywidget rewrite
+  as static mode (with `keep_marimo_controls=True` so live
+  `<marimo-slider>` / `<marimo-dropdown>` / etc. continue to work
+  via marimo's runtime). Anywidget modules now hydrate via
+  `marimo_book.js`, which trusts data URLs by design. Caveat: the
+  shim doesn't round-trip widget state back to Pyodide — cells
+  reading `widget.value` from an anywidget see the *initial* value;
+  marimo's own `mo.ui.*` controls still round-trip normally.
+>>>>>>> 39c7bd5 (Fix anywidgets rendering empty on WASM-mode pages)
 
 ## [0.1.4] — 2026-04-27
 

@@ -8,9 +8,11 @@ exercises the marimo subprocess + asyncio path and takes a few seconds.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from marimo_book.config import Book
 from marimo_book.preprocessor import Preprocessor
+from marimo_book.transforms import wasm as wasm_module
 
 
 def _wasm_book(book_dir: Path) -> Book:
@@ -109,3 +111,63 @@ def test_static_page_unchanged_alongside_wasm_entry(tmp_path: Path) -> None:
 
     demo = (out_dir / "docs" / "demo.md").read_text(encoding="utf-8")
     assert "@marimo-team/islands" in demo
+
+
+def test_wasm_anywidgets_rewritten_to_static_mount(tmp_path: Path) -> None:
+    """Anywidgets in a WASM-mode page get rewrapped as static mounts.
+
+    Why: ``MarimoIslandGenerator`` runs under ``ScriptRuntimeContext``
+    which hardcodes ``virtual_files_supported=False``, so every
+    anywidget's ES module is emitted as a ``data:text/javascript;base64,…``
+    URL. Marimo's islands runtime explicitly refuses to load those
+    ("Refusing to load anywidget module from untrusted URL"), so
+    anywidgets render as empty in WASM-mode pages by default.
+
+    ``render_wasm_page`` post-processes the islands body with
+    ``rewrite_anywidget_html`` so anywidgets become
+    ``<div class="marimo-book-anywidget">`` mounts that
+    ``marimo_book.js`` hydrates by importing the data URL directly.
+    The cells themselves still go through marimo's runtime + Pyodide
+    for full Python reactivity; only the anywidget modules are
+    mounted by the static shim.
+    """
+    py_path = tmp_path / "demo.py"
+    py_path.write_text(
+        "import marimo\napp = marimo.App()\nif __name__ == '__main__': app.run()\n",
+        encoding="utf-8",
+    )
+
+    fake_body = (
+        '<marimo-island data-cell-id="abc">'
+        "<marimo-anywidget data-js-url='\"data:text/javascript;base64,Zm9vCg==\"'"
+        ' data-initial-value=\'{"model_id":"m1"}\' data-model-id="m1">'
+        "</marimo-anywidget>"
+        "</marimo-island>"
+    )
+
+    class _FakeGen:
+        @staticmethod
+        def from_file(path, *, display_code=False):  # noqa: ARG004
+            return _FakeGen()
+
+        async def build(self):
+            pass
+
+        def render_head(self):
+            return '<script src="https://example/islands.js"></script>'
+
+        def render_body(self, *, style=""):  # noqa: ARG002
+            return fake_body
+
+    with patch.object(wasm_module, "MarimoIslandGenerator", _FakeGen):
+        out = wasm_module.render_wasm_page(py_path)
+
+    # The original <marimo-anywidget> tag is gone; the static mount is in.
+    assert "<marimo-anywidget" not in out
+    assert 'class="marimo-book-anywidget"' in out
+    # The data URL is preserved on the new mount so the JS shim can import it.
+    assert "data-js-url" in out
+    assert "data:text/javascript;base64" in out
+    # The surrounding <marimo-island> wrapper stays — cells still go through
+    # marimo's islands runtime; only the anywidget child got rewrapped.
+    assert "<marimo-island" in out

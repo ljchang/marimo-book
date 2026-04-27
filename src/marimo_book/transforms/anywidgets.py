@@ -43,6 +43,7 @@ def rewrite_anywidget_html(
     *,
     cell_source: str | None = None,
     widget_defaults: dict | None = None,
+    keep_marimo_controls: bool = False,
 ) -> str:
     """Rewrite marimo custom elements for static rendering.
 
@@ -58,6 +59,13 @@ def rewrite_anywidget_html(
     2. Literal kwargs parsed out of ``cell_source`` by :mod:`ast`
     3. Anything marimo itself inlined into ``data-initial-value`` (rare for
        static exports — usually just a ``model_id`` reference)
+
+    ``keep_marimo_controls=True`` is set by the WASM render path: in that
+    mode marimo's own runtime serves ``<marimo-slider>`` /
+    ``<marimo-dropdown>`` etc. as live, kernel-backed controls — they
+    must NOT be stripped. We still rewrap anywidgets (because marimo's
+    runtime refuses to load anywidget modules from data URLs) but leave
+    every other custom element in place.
     """
     if (
         "marimo-anywidget" not in raw_html
@@ -84,15 +92,16 @@ def rewrite_anywidget_html(
     for node in list(soup.find_all("marimo-plotly")):
         _rewrap_plotly(node, soup)
 
-    # Pass 3: unwrap or drop <marimo-ui-element> wrappers.
-    for wrapper in list(soup.find_all("marimo-ui-element")):
-        _handle_ui_wrapper(wrapper)
+    if not keep_marimo_controls:
+        # Pass 3: unwrap or drop <marimo-ui-element> wrappers.
+        for wrapper in list(soup.find_all("marimo-ui-element")):
+            _handle_ui_wrapper(wrapper)
 
-    # Pass 4: drop any remaining standalone control elements that slipped
-    # past (e.g. <marimo-slider> appearing at top level outside a wrapper).
-    for ctrl_name in _STANDALONE_CONTROLS:
-        for node in list(soup.find_all(ctrl_name)):
-            node.decompose()
+        # Pass 4: drop any remaining standalone control elements that slipped
+        # past (e.g. <marimo-slider> appearing at top level outside a wrapper).
+        for ctrl_name in _STANDALONE_CONTROLS:
+            for node in list(soup.find_all(ctrl_name)):
+                node.decompose()
 
     # lxml wraps fragments in <html><body>; unwrap for return.
     body = soup.find("body")

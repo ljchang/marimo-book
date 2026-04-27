@@ -307,20 +307,29 @@ class Preprocessor:
 
         file_entries = _iter_file_entries(self.book.toc)
 
+        # The first TOC entry becomes the site's home page (rendered to
+        # docs/index.md). Without this, the header logo's "/" link 404s
+        # because mkdocs only treats files literally named index.md as
+        # the site root.
+        index_source = Path(file_entries[0].file) if file_entries else None
+
         # Sweep orphan precompute temp dirs from previous interrupted runs
         # (Ctrl-C, watcher restart, OOM). They live alongside the notebook
         # so the precompute pipeline can resolve sibling-module imports;
         # the trade-off is they leak when the marimo subprocess is killed.
         for content_dir in {(self.book_dir / e.file).parent for e in file_entries}:
             cleanup_orphan_precompute_dirs(content_dir)
-        md_basenames = {_doc_relpath_for(e.file).with_suffix("").name for e in file_entries}
+        md_basenames = {
+            _doc_relpath_for(e.file, index_source=index_source).with_suffix("").name
+            for e in file_entries
+        }
 
         cache = BuildCache(self.book_dir, self.book, force_rebuild=self.rebuild)
 
         for entry in file_entries:
             src_rel = str(entry.file)
             src_abs = (self.book_dir / entry.file).resolve()
-            out_rel = _doc_relpath_for(entry.file).as_posix()
+            out_rel = _doc_relpath_for(entry.file, index_source=index_source).as_posix()
             try:
                 # Notebook entries are the only ones worth caching: marimo
                 # export takes seconds-to-minutes, vs ~10 ms for Markdown.
@@ -334,6 +343,7 @@ class Preprocessor:
                         docs_dir,
                         md_basenames=md_basenames,
                         sandbox=self.sandbox,
+                        index_source=index_source,
                     )
                     if entry.file.suffix == ".py":
                         cache.record(src_rel, src_abs, out_rel)
@@ -350,7 +360,7 @@ class Preprocessor:
                     and self.book.precompute.enabled
                     and entry.effective_mode(self.book.defaults.mode) == "static"
                 ):
-                    self._run_precompute(entry, src_abs, docs_dir, report)
+                    self._run_precompute(entry, src_abs, docs_dir, report, index_source=index_source)
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
 
@@ -396,6 +406,7 @@ class Preprocessor:
         src_abs: Path,
         docs_dir: Path,
         report: BuildReport,
+        index_source: Path | None = None,
     ) -> None:
         """Detect widget candidates, apply caps, run the per-value re-export.
 
@@ -463,7 +474,7 @@ class Preprocessor:
         if not result.reactive_cell_indices:
             return  # widgets exist but no downstream cells changed; static is fine
 
-        out_rel = _doc_relpath_for(entry.file)
+        out_rel = _doc_relpath_for(entry.file, index_source=index_source)
         staged_path = docs_dir / out_rel
         if not staged_path.exists():
             return
@@ -548,13 +559,14 @@ def stage_page(
     *,
     md_basenames: set[str] | None = None,
     sandbox: bool = False,
+    index_source: Path | None = None,
 ) -> Path:
     """Render a single TOC entry into ``docs_dir`` and return the output path."""
     src_abs = (book_dir / entry.file).resolve()
     if not src_abs.exists():
         raise FileNotFoundError(f"TOC references missing file: {entry.file}")
 
-    rel_under_docs = _doc_relpath_for(entry.file)
+    rel_under_docs = _doc_relpath_for(entry.file, index_source=index_source)
     dst = docs_dir / rel_under_docs
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -609,14 +621,20 @@ def _compose_page(buttons: str, body: str) -> str:
     return body
 
 
-def _doc_relpath_for(file_path: Path) -> Path:
+def _doc_relpath_for(file_path: Path, *, index_source: Path | None = None) -> Path:
     """Map a TOC ``file:`` path to a path under ``docs/``.
 
     - Strip leading ``content/`` to keep URLs short (``/intro/`` not
       ``/content/intro/``).
     - Rewrite ``.py`` → ``.md`` so marimo notebooks land in docs_dir as the
       rendered markdown pages mkdocs expects.
+    - If ``index_source`` matches ``file_path``, return ``index.md`` so the
+      first TOC entry becomes the site's home page. mkdocs serves
+      ``docs/index.md`` as ``/index.html``, which is what the header logo
+      and bare-domain links resolve to.
     """
+    if index_source is not None and Path(file_path) == Path(index_source):
+        return Path("index.md")
     parts = file_path.parts
     if parts and parts[0] == _CONTENT_DIR:
         parts = parts[1:]

@@ -207,12 +207,23 @@ class UrlEntry(BaseModel):
 
 
 class SectionEntry(BaseModel):
-    """A grouping node. Recursive via ``children``."""
+    """A grouping node. Recursive via ``children``.
+
+    ``children`` accepts ``null`` / missing as an empty list so authors
+    can stub out empty sections (e.g. while drafting a TOC) without
+    tripping schema validation. Empty sections are skipped by the nav
+    builder so they don't render as headers with nothing under them.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     section: str
     children: list[TocEntry] = Field(default_factory=list)
+
+    @field_validator("children", mode="before")
+    @classmethod
+    def _coerce_none_children(cls, v: Any) -> Any:
+        return [] if v is None else v
 
 
 def _entry_discriminator(v: Any) -> str | None:

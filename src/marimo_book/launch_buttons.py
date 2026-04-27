@@ -136,10 +136,7 @@ def _button(
         attrs.append(f'title="{title}"')
     if download is not None:
         attrs.append(f'download="{download}"')
-    inner = (
-        icon
-        + f'<span class="marimo-book-button-label">{text}</span>'
-    )
+    inner = icon + f'<span class="marimo-book-button-label">{text}</span>'
     return f"<a {' '.join(attrs)}>{inner}</a>"
 
 

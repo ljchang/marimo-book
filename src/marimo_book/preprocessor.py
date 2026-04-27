@@ -360,7 +360,9 @@ class Preprocessor:
                     and self.book.precompute.enabled
                     and entry.effective_mode(self.book.defaults.mode) == "static"
                 ):
-                    self._run_precompute(entry, src_abs, docs_dir, report, index_source=index_source)
+                    self._run_precompute(
+                        entry, src_abs, docs_dir, report, index_source=index_source
+                    )
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
 

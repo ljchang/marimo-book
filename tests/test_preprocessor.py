@@ -173,9 +173,7 @@ def test_logo_placement_header_omits_sidebar_stylesheet(tmp_path: Path) -> None:
     """Default header placement should not stage or reference logo_sidebar.css."""
     _minimal_book(tmp_path)
     out_dir = tmp_path / "_site_src"
-    book = Book.model_validate(
-        {"title": "Test", "toc": [{"file": "content/intro.md"}]}
-    )
+    book = Book.model_validate({"title": "Test", "toc": [{"file": "content/intro.md"}]})
     Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
 
     assert not (out_dir / "docs" / "stylesheets" / "logo_sidebar.css").exists()

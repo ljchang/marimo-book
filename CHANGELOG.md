@@ -5,6 +5,25 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Precompute slider mounted inline with the wrong cell when an
+  upstream cell emitted non-deterministic stderr.** The downstream-
+  detection diff in `precompute_page` compared cell bodies byte-for-
+  byte, which falsely flagged data-load and `mo.persistent_cache`
+  cells as downstream of a precomputed widget when their captured
+  warning text varied across re-exports (runner-specific paths,
+  cache-state-dependent text, Python's per-process warning dedup).
+  The slider mount then anchored to the first such false-positive
+  and rendered far from the actual reactive output. The diff now
+  strips `<pre class="…marimo-stream-stderr…">…</pre>` blocks before
+  comparing, so only genuine display-output differences flag a cell
+  as downstream. Stored cell bodies still keep their stderr — only
+  the comparison key is normalized. Surfaced by the dartbrains ICA
+  chapter.
+
 ## [0.1.4] — 2026-04-27
 
 ### Added

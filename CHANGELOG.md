@@ -5,6 +5,22 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Math still didn't render after instant-nav** despite the v0.1.5
+  typeset-on-DOMContentLoaded fix. Real cause: `mathjax.js` was
+  unconditionally assigning `window.MathJax = {tex, options}`, which
+  Material's instant-nav re-executes on every page swap — overwriting
+  the already-initialized MathJax library state (typesetPromise,
+  startup, etc.) with a stub config object. The very first page
+  rendered because the library completed its typeset before the
+  clobber; every navigation after that left arithmatex spans as raw
+  `\(...\)` text because typesetPromise was gone. Wrap the assignment
+  in `if (!window.MathJax)` so the config is set once and the live
+  library is never overwritten.
+
 ## [0.1.5] — 2026-04-27
 
 ### Changed

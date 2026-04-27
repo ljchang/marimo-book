@@ -68,7 +68,10 @@ def _build_config(
         cfg["copyright"] = book.copyright
 
     cfg["theme"] = _theme_block(book)
-    cfg["extra_css"] = ["stylesheets/extra.css", *extra_css]
+    base_css = ["stylesheets/extra.css"]
+    if book.logo_placement == "sidebar":
+        base_css.append("stylesheets/logo_sidebar.css")
+    cfg["extra_css"] = [*base_css, *extra_css]
     cfg["extra_javascript"] = [
         "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
         "javascripts/mathjax.js",
@@ -226,33 +229,61 @@ def _markdown_extensions() -> list:
 
 
 def _nav_from_toc(toc: list) -> list:
-    """Translate a ``book.yml`` TOC into an mkdocs ``nav:`` list."""
-    return [_nav_entry(e) for e in toc if _nav_entry(e) is not None]
+    """Translate a ``book.yml`` TOC into an mkdocs ``nav:`` list.
+
+    The first FileEntry in the TOC is rewritten to ``index.md`` so its
+    page becomes the site root — the header logo's ``/`` link then
+    resolves to it instead of 404'ing on bare-domain visits.
+    """
+    index_source = _first_file_path(toc)
+    return [_nav_entry(e, index_source) for e in toc if _nav_entry(e, index_source) is not None]
 
 
-def _nav_entry(entry) -> dict | str | None:
+def _first_file_path(toc: list) -> Path | None:
+    """Walk the TOC and return the first non-hidden FileEntry's ``file``."""
+    for entry in toc:
+        if isinstance(entry, FileEntry) and not entry.hidden:
+            return Path(entry.file)
+        if isinstance(entry, SectionEntry):
+            child = _first_file_path(entry.children)
+            if child is not None:
+                return child
+    return None
+
+
+def _nav_entry(entry, index_source: Path | None = None) -> dict | str | None:
     if isinstance(entry, FileEntry):
         if entry.hidden:
             return None
-        url_path = _doc_path_for(entry.file)
+        url_path = _doc_path_for(entry.file, index_source=index_source)
         if entry.title:
             return {entry.title: url_path}
         return url_path
     if isinstance(entry, UrlEntry):
         return {entry.title: entry.url}
     if isinstance(entry, SectionEntry):
-        children = [c for c in (_nav_entry(c) for c in entry.children) if c is not None]
+        children = [
+            c for c in (_nav_entry(c, index_source) for c in entry.children) if c is not None
+        ]
+        # Empty sections (no children, or all children hidden) shouldn't
+        # show up in the nav as a label with nothing under it.
+        if not children:
+            return None
         return {entry.section: children}
     return None
 
 
-def _doc_path_for(file: Path) -> str:
+def _doc_path_for(file: Path, *, index_source: Path | None = None) -> str:
     """Return the relative path within ``docs_dir`` for a TOC entry.
 
     - ``content/intro.md`` → ``intro.md``
     - ``content/GLM.py`` → ``GLM.md`` (marimo notebooks render to markdown)
     - ``docs/glossary.md`` → ``docs/glossary.md``
+    - When ``file == index_source``, returns ``index.md`` so the first
+      TOC entry becomes the site's home page.
     """
+    if index_source is not None and Path(file) == Path(index_source):
+        return "index.md"
     p = Path(file)
     parts = p.parts
     if parts and parts[0] == "content":

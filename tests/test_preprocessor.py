@@ -96,6 +96,91 @@ def test_include_changelog_silent_when_no_file(tmp_path: Path) -> None:
     assert not report.errors
 
 
+def test_first_toc_entry_promoted_to_index(tmp_path: Path) -> None:
+    """The first TOC entry stages to docs/index.md so /index.html serves it.
+
+    Without this, mkdocs's site root 404s and the header logo (which
+    always links to /) takes the user nowhere.
+    """
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "intro.md").write_text("# Intro\n\nWelcome.\n", encoding="utf-8")
+    (content / "next.md").write_text("# Next page\n", encoding="utf-8")
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "toc": [
+                {"file": "content/intro.md"},
+                {"file": "content/next.md"},
+            ],
+        }
+    )
+    out_dir = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    # First entry promoted to index.md, original path NOT staged.
+    assert (out_dir / "docs" / "index.md").exists()
+    assert not (out_dir / "docs" / "intro.md").exists()
+    # Subsequent entries unchanged.
+    assert (out_dir / "docs" / "next.md").exists()
+    # Nav references index.md, not intro.md.
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    assert "index.md" in mkdocs["nav"]
+    assert "intro.md" not in mkdocs["nav"]
+
+
+def test_empty_section_silently_skipped_in_nav(tmp_path: Path) -> None:
+    """An empty section (no children) shouldn't crash and shouldn't render."""
+    _minimal_book(tmp_path)
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "toc": [
+                {"file": "content/intro.md"},
+                # User stub with no children — common while drafting a TOC.
+                {"section": "Coming soon", "children": None},
+            ],
+        }
+    )
+    out_dir = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    # Empty section should not appear in the nav.
+    nav_labels = [next(iter(e.keys())) if isinstance(e, dict) else e for e in mkdocs["nav"]]
+    assert "Coming soon" not in nav_labels
+
+
+def test_logo_placement_sidebar_stages_stylesheet(tmp_path: Path) -> None:
+    """`logo_placement: sidebar` should stage logo_sidebar.css and list it in extra_css."""
+    _minimal_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "logo_placement": "sidebar",
+            "toc": [{"file": "content/intro.md"}],
+        }
+    )
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    assert (out_dir / "docs" / "stylesheets" / "logo_sidebar.css").exists()
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    assert "stylesheets/logo_sidebar.css" in mkdocs["extra_css"]
+
+
+def test_logo_placement_header_omits_sidebar_stylesheet(tmp_path: Path) -> None:
+    """Default header placement should not stage or reference logo_sidebar.css."""
+    _minimal_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    book = Book.model_validate({"title": "Test", "toc": [{"file": "content/intro.md"}]})
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    assert not (out_dir / "docs" / "stylesheets" / "logo_sidebar.css").exists()
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    assert "stylesheets/logo_sidebar.css" not in mkdocs["extra_css"]
+
+
 def test_pdf_export_adds_with_pdf_plugin(tmp_path: Path) -> None:
     """`pdf_export: true` should append `with-pdf` to the generated plugins."""
     _minimal_book(tmp_path)

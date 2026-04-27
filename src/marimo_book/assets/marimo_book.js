@@ -341,10 +341,62 @@
     });
   }
 
+  /** Move launch buttons into Material's header bar.
+   *
+   * The preprocessor renders the row server-side as
+   * `<div class="marimo-book-buttons" data-placement="header">…</div>`.
+   * In header-mode, that source row is hidden via CSS and we mount a
+   * cloned copy as a child of `.md-header__inner` so the buttons sit
+   * in the global top bar. The clone gets the modifier class
+   * `marimo-book-buttons--header` which switches the styling to
+   * icon-only with a tighter footprint.
+   *
+   * Also wires `data-marimo-book-print` anchors to window.print() —
+   * users get a per-page PDF via the browser's "Save as PDF" without
+   * any server-side mkdocs-with-pdf config.
+   */
+  function mountHeaderButtons(scope) {
+    const headerInner = scope.querySelector(".md-header__inner");
+    // Find the ORIGINAL source row (not a previous clone). The clone
+    // copies all attrs, so we filter on parent: the source lives in the
+    // page main, the clone lives in headerInner.
+    const candidates = scope.querySelectorAll('.marimo-book-buttons[data-placement="header"]');
+    let source = null;
+    for (const c of candidates) {
+      if (!headerInner || !headerInner.contains(c)) {
+        source = c;
+        break;
+      }
+    }
+    if (!headerInner || !source || source.hasAttribute("data-mb-relocated")) return;
+    source.setAttribute("data-mb-relocated", "");
+    // Remove any stale clones from a prior page (Material instant-nav
+    // re-renders the header on each navigation, but bootAll runs again
+    // so we'd double-mount without this).
+    headerInner.querySelectorAll(".marimo-book-buttons--header").forEach(
+      (el) => el.remove()
+    );
+    const clone = source.cloneNode(true);
+    clone.classList.add("marimo-book-buttons--header");
+    clone.removeAttribute("data-mb-relocated");
+    // Insert before the search slot if present, else before the repo
+    // link, else just append. This keeps the buttons left of Material's
+    // chrome (search + repo link) so they don't get pushed off-screen.
+    const search = headerInner.querySelector('[data-md-component="search"]');
+    const repo = headerInner.querySelector(".md-header__source");
+    const anchor = search || repo;
+    if (anchor) {
+      headerInner.insertBefore(clone, anchor);
+    } else {
+      headerInner.appendChild(clone);
+    }
+  }
+
   function bootAll(root) {
     const scope = root || document;
     hydrateAll(scope);
     initPrecomputeOnce(scope);
+    mountHeaderButtons(scope);
   }
 
   // Boot chain: belt-and-suspenders so we run on direct page loads AND

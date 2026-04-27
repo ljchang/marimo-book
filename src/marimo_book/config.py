@@ -59,9 +59,14 @@ class Theme(BaseModel):
 class LaunchButtons(BaseModel):
     """Per-chapter buttons injected by the preprocessor.
 
-    v0.1 ships ``molab``, ``github``, ``download``. Other fields are reserved
-    flags so users can toggle them in config without schema changes when v0.2
-    lands (``wasm``) or if we decide to support ``colab`` / ``binder`` later.
+    v0.1 ships ``molab``, ``github``, ``download``. Other fields are
+    reserved flags so users can toggle them in config without schema
+    changes when v0.2 lands (``wasm``) or if we decide to support
+    ``colab`` / ``binder`` later.
+
+    ``placement`` controls where the row renders:
+      - ``header`` (default): icon-only buttons in Material's top header bar
+      - ``page``: text+icon buttons above each chapter's title (legacy)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -72,6 +77,8 @@ class LaunchButtons(BaseModel):
     colab: bool = False
     binder: bool = False
     wasm: bool = False  # v0.2
+
+    placement: Literal["header", "page"] = "header"
 
 
 class Bibliography(BaseModel):
@@ -207,12 +214,23 @@ class UrlEntry(BaseModel):
 
 
 class SectionEntry(BaseModel):
-    """A grouping node. Recursive via ``children``."""
+    """A grouping node. Recursive via ``children``.
+
+    ``children`` accepts ``null`` / missing as an empty list so authors
+    can stub out empty sections (e.g. while drafting a TOC) without
+    tripping schema validation. Empty sections are skipped by the nav
+    builder so they don't render as headers with nothing under them.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     section: str
     children: list[TocEntry] = Field(default_factory=list)
+
+    @field_validator("children", mode="before")
+    @classmethod
+    def _coerce_none_children(cls, v: Any) -> Any:
+        return [] if v is None else v
 
 
 def _entry_discriminator(v: Any) -> str | None:
@@ -275,6 +293,11 @@ class Book(BaseModel):
     # branding
     logo: Path | None = None
     favicon: Path | None = None
+    # Where to render the logo. ``header`` is Material's default — small
+    # icon in the top-left header bar next to the site title. ``sidebar``
+    # mirrors Jupyter Book: a large logo above the left navigation,
+    # acting as the primary visual anchor of the site.
+    logo_placement: Literal["header", "sidebar"] = "header"
     theme: Theme = Field(default_factory=Theme)
 
     # per-chapter buttons (can be overridden on an entry-by-entry basis later)

@@ -81,7 +81,22 @@ def test_launch_buttons_markdown_file_only_github() -> None:
 def test_launch_buttons_disabled_when_repo_missing() -> None:
     b = Book.model_validate({"title": "T", "toc": [{"file": "content/x.py"}]})
     row = render_button_row(b, Path("content/x.py"))
-    assert row == ""  # no repo → no buttons to derive URLs from
+    assert row == ""  # all three buttons need a repo URL → empty row
+
+
+def test_launch_buttons_emit_icons() -> None:
+    """Buttons render with inline SVG icons + a screen-reader label."""
+    b = _book_with_repo()
+    row = render_button_row(b, Path("content/x.py"))
+    assert '<svg class="marimo-book-button-icon"' in row
+    assert 'class="marimo-book-button-label"' in row
+
+
+def test_launch_buttons_default_placement_header() -> None:
+    """Default placement is 'header' — JS shim relocates into Material's header."""
+    b = _book_with_repo()
+    row = render_button_row(b, Path("content/x.py"))
+    assert 'data-placement="header"' in row
 
 
 # --- end-to-end marimo_export -----------------------------------------------

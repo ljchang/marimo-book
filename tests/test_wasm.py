@@ -50,7 +50,8 @@ def test_wasm_page_contains_island_markup(tmp_path: Path) -> None:
     assert not report.errors
     assert report.pages == 1
 
-    staged = (out_dir / "docs" / "demo.md").read_text(encoding="utf-8")
+    # Single-entry TOC: the only file is auto-promoted to index.md.
+    staged = (out_dir / "docs" / "index.md").read_text(encoding="utf-8")
     # Marimo's CDN scripts injected at the top of the page body.
     assert "@marimo-team/islands" in staged
     # Each cell becomes a <marimo-island>.
@@ -101,7 +102,8 @@ def test_static_page_unchanged_alongside_wasm_entry(tmp_path: Path) -> None:
     report = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
     assert not report.errors
 
-    intro = (out_dir / "docs" / "intro.md").read_text(encoding="utf-8")
+    # First TOC entry (intro.md) auto-promoted to index.md; demo.py stays put.
+    intro = (out_dir / "docs" / "index.md").read_text(encoding="utf-8")
     assert "@marimo-team/islands" not in intro
     assert "# Intro" in intro
 

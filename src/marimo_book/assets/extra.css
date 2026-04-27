@@ -28,12 +28,15 @@
   --md-default-fg-color--lightest:    #27272a;  /* zinc 800 */
   --md-code-bg-color:                 #111113;
   --md-code-fg-color:                 #e4e4e7;
-  /* Lift primary/accent in dark mode (indigo 400 instead of 500) */
-  --md-primary-fg-color:              #818cf8 !important;
+  /* Default primary/accent for the marimo-book brand. No !important
+   * here — the preprocessor's `_inject_palette` writes the user's
+   * book.yml palette into both schemes with !important, and we want
+   * that to win. Authors who don't set a palette get this indigo. */
+  --md-primary-fg-color:              #818cf8;
   --md-accent-fg-color:               #818cf8;
   --md-accent-fg-color--transparent:  rgba(129, 140, 248, 0.12);
   --md-typeset-color:                 #e4e4e7;
-  --md-typeset-a-color:               #a5b4fc;  /* indigo 300 */
+  --md-typeset-a-color:               #a5b4fc;
 }
 
 /* --- Typography: lighter headers, generous line-height ------------------- */
@@ -262,12 +265,29 @@
 
 /* --- marimo-book-specific elements (preserved) --------------------------- */
 
-/* Launch buttons row at the top of each page. */
+/* Launch buttons. Two layouts:
+ *   data-placement="page"   → row above each chapter title (legacy)
+ *   data-placement="header" → cloned by marimo_book.js into Material's
+ *                              header bar; original row is hidden. */
 .marimo-book-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   margin: 0 0 1.25rem 0;
+}
+
+/* In header mode the original row is hidden; the JS shim mounts a
+ * cloned copy as a child of `.md-header__inner` with the modifier
+ * class `marimo-book-buttons--header`. */
+.marimo-book-buttons[data-placement="header"] {
+  display: none;
+}
+.marimo-book-buttons--header {
+  display: flex !important;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 0.5rem;
+  flex-wrap: nowrap;
 }
 
 .marimo-book-button {
@@ -290,6 +310,55 @@
   border-color: var(--md-primary-fg-color);
   color: var(--md-primary-fg-color);
   text-decoration: none;
+}
+
+/* The icon SVGs ride inside each button. Sized to match label. */
+.marimo-book-button-icon {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+/* Header-mode buttons: icon-only (label hidden), tighter padding,
+ * lighter border so they don't compete with the search bar.
+ * Uses --md-default-fg-color so the icons stay readable on the
+ * light/dark header background regardless of the primary palette. */
+.marimo-book-buttons--header .marimo-book-button {
+  padding: 0.35rem;
+  border-color: transparent;
+  color: var(--md-default-fg-color--light);
+  background: transparent;
+}
+.marimo-book-buttons--header .marimo-book-button-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.marimo-book-buttons--header .marimo-book-button-label {
+  /* Visually hide but keep accessible to screen readers. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.marimo-book-buttons--header .marimo-book-button:hover {
+  background: var(--md-default-fg-color--lightest);
+  color: var(--md-primary-fg-color);
+  border-color: transparent;
+}
+
+/* Hide Material's GitHub source widget (the version + stars + forks
+ * card it auto-renders next to repo_url). With our own GitHub icon
+ * in the header it'd be visual duplication; the widget's stats also
+ * lag behind reality and can mislead. We keep `repo_url` set in
+ * mkdocs.yml so per-page "Edit on GitHub" links still work. */
+.md-header__source {
+  display: none;
 }
 
 [data-md-color-scheme="slate"] .marimo-book-button {

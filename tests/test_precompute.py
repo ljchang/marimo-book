@@ -395,7 +395,7 @@ def test_precompute_joint_widgets_via_cross_product(tmp_path: Path) -> None:
     assert report.widgets_skipped == 0
     assert not report.errors
 
-    staged = (tmp_path / "_site_src" / "docs" / "demo.md").read_text(encoding="utf-8")
+    staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
     # Joint group emits a single group metadata + lookup-table block.
     assert 'class="marimo-book-precompute-group"' in staged
     assert 'data-precompute-group="g0"' in staged
@@ -461,7 +461,7 @@ def test_precompute_end_to_end_emits_lookup_table(tmp_path: Path) -> None:
     assert report.widgets_precomputed == 1, report.warnings
     assert not report.errors
 
-    staged = (tmp_path / "_site_src" / "docs" / "demo.md").read_text(encoding="utf-8")
+    staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
     assert 'class="marimo-book-precompute-control"' in staged
     assert 'data-precompute-widget="n"' in staged
     assert "data-precompute-cell=" in staged
@@ -563,7 +563,7 @@ def test_precompute_two_independent_widgets(tmp_path: Path) -> None:
     assert report.widgets_skipped == 0
     assert not report.errors
 
-    staged = (tmp_path / "_site_src" / "docs" / "demo.md").read_text(encoding="utf-8")
+    staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
     # Both widgets get a control mount.
     assert 'data-precompute-widget="a"' in staged
     assert 'data-precompute-widget="b"' in staged

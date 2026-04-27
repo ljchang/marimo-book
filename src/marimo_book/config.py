@@ -59,9 +59,14 @@ class Theme(BaseModel):
 class LaunchButtons(BaseModel):
     """Per-chapter buttons injected by the preprocessor.
 
-    v0.1 ships ``molab``, ``github``, ``download``. Other fields are reserved
-    flags so users can toggle them in config without schema changes when v0.2
-    lands (``wasm``) or if we decide to support ``colab`` / ``binder`` later.
+    v0.1 ships ``molab``, ``github``, ``download``, ``print``. Other fields
+    are reserved flags so users can toggle them in config without schema
+    changes when v0.2 lands (``wasm``) or if we decide to support ``colab``
+    / ``binder`` later.
+
+    ``placement`` controls where the row renders:
+      - ``header`` (default): icon-only buttons in Material's top header bar
+      - ``page``: text+icon buttons above each chapter's title (legacy)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -69,9 +74,12 @@ class LaunchButtons(BaseModel):
     molab: bool = True
     github: bool = True
     download: bool = True
+    print: bool = True
     colab: bool = False
     binder: bool = False
     wasm: bool = False  # v0.2
+
+    placement: Literal["header", "page"] = "header"
 
 
 class Bibliography(BaseModel):

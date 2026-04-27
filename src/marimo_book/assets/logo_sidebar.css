@@ -17,17 +17,24 @@
 
   /* Promote the nav drawer header (which holds the logo) into a visible
    * banner above the primary sidebar nav. Material hides this on desktop
-   * by default; we restore it as a flex container that centres the logo. */
+   * by default; we restore it as a vertical flex column so the logo
+   * sits above the site name (Jupyter-Book layout). */
   .md-sidebar--primary .md-nav--primary > .md-nav__title {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 1.25rem 0.75rem 0.5rem;
+    gap: 0.5rem;
+    padding: 1.25rem 0.75rem 0.75rem;
     height: auto;
     background: none;
     box-shadow: none;
     cursor: default;
-    line-height: 1;
+    line-height: 1.2;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--md-default-fg-color);
   }
 
   /* Hide the drawer-only "back to top" / hamburger label children — only

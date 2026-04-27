@@ -37,6 +37,18 @@ jobs:
         run: pip install -e '.[linkcheck,social,autorefs,pdf]'
       - name: Install demo notebook deps (drawdata used by anywidget_demo.py)
         run: pip install drawdata anywidget
+      # Restore the marimo-book build cache so unchanged chapters skip
+      # re-rendering. Cache lives next to book.yml, so for the
+      # self-hosted docs that's `docs/.marimo_book_cache/`.
+      # Keyed on docs/, src/ (so that a packaging change rebuilds the
+      # output), and pyproject.toml (so dep upgrades invalidate).
+      - name: Restore marimo-book build cache
+        uses: actions/cache@v4
+        with:
+          path: docs/.marimo_book_cache
+          key: docs-mb-${{ runner.os }}-${{ hashFiles('docs/**', 'src/**', 'pyproject.toml') }}
+          restore-keys: |
+            docs-mb-${{ runner.os }}-
       - name: Build docs
         run: marimo-book build -b docs/book.yml --strict
       - uses: actions/upload-pages-artifact@v3

@@ -70,9 +70,8 @@ toc:
       - file: content/precompute_demo.py
       - file: content/wasm_demo.py
         mode: wasm
-      - file: content/anywidget_demo.py
+      - file: content/widgets.py
       - file: content/dependencies.md
-      - file: content/widgets.md
 
   - section: Publishing
     children:

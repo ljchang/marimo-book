@@ -166,7 +166,8 @@ def test_logo_placement_sidebar_stages_stylesheet(tmp_path: Path) -> None:
 
     assert (out_dir / "docs" / "stylesheets" / "logo_sidebar.css").exists()
     mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
-    assert "stylesheets/logo_sidebar.css" in mkdocs["extra_css"]
+    # Asset URLs are versioned (?v=<marimo-book-version>) for cache busting.
+    assert any(p.startswith("stylesheets/logo_sidebar.css") for p in mkdocs["extra_css"])
 
 
 def test_logo_placement_header_omits_sidebar_stylesheet(tmp_path: Path) -> None:
@@ -178,7 +179,7 @@ def test_logo_placement_header_omits_sidebar_stylesheet(tmp_path: Path) -> None:
 
     assert not (out_dir / "docs" / "stylesheets" / "logo_sidebar.css").exists()
     mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
-    assert "stylesheets/logo_sidebar.css" not in mkdocs["extra_css"]
+    assert not any(p.startswith("stylesheets/logo_sidebar.css") for p in mkdocs["extra_css"])
 
 
 def test_pdf_export_adds_with_pdf_plugin(tmp_path: Path) -> None:

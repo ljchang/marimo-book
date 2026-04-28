@@ -5,39 +5,14 @@ public-facing summary of what's shipped, what's in flight, and what's
 on the medium-term horizon. Plans change; treat this as a direction,
 not a contract.
 
-## Shipped in v0.1 (April 2026)
+## Where v0.1 stands
 
-- Five working CLI commands: `new`, `build`, `serve`, `check`, `clean`
-- `book.yml` schema (pydantic v2) covering title, authors, branding,
-  palette, launch buttons, per-widget defaults, analytics,
-  dependencies mode, external-link checker flag, TOC
-- Preprocessor transforms: marimo `.py` → Markdown + inlined outputs;
-  callouts, anywidgets, `.ipynb` → `.md` cross-ref rewrite,
-  `../images/` path fixup
-- Anywidget runtime shim (client-side rehydration, no marimo kernel)
-- Material for MkDocs shell with sensible defaults; dark mode,
-  full-text search, code-copy buttons, responsive theme
-- GitHub Pages deploy workflow scaffolded by `marimo-book new`
-- `sandbox` dependency mode (PEP 723 per-notebook isolation via `uv`)
-- MIT license; PyPI Trusted Publishing workflow
-
-## Shipped since v0.1
-
-- **WASM render mode** (v0.1.0) — per-page `mode: wasm` opts a chapter
-  into marimo's `MarimoIslandGenerator`. Cells run natively in the
-  browser via Pyodide; sliders are continuously reactive. See
-  [Building → WASM render mode](building.md#wasm-render-mode).
-- **Static reactivity for discrete widgets** (v0.1.0a5) —
-  `precompute.enabled: true` re-exports each chapter once per widget
-  value at build time and ships the lookup table inline. Sliders work
-  on truly static pages, no browser kernel.
-- **Incremental build cache** (v0.1.0a4) — content-hashed cache cuts
-  warm rebuilds from ~107 s to ~3.4 s on dartbrains-sized books.
-- **Sidebar logo placement** (v0.1.2) — `logo_placement: sidebar`
-  renders a Jupyter-Book-style banner above the left nav.
-- **Header launch buttons + Plotly hydration** (v0.1.2) — molab /
-  GitHub / Download as icon buttons in Material's top bar; Plotly
-  figures are fully interactive on static pages.
+The 0.1 series is the first stable surface — all the CLI commands,
+the `book.yml` schema, the preprocessor pipeline, anywidget +
+Plotly + WASM rendering, static-reactivity precompute, the build
+cache, and Material-shell theming all ship today. See the
+[changelog](../changelog.md) for the granular release-by-release
+history; below is what's coming next.
 
 ## Next up (v0.2, in planning)
 

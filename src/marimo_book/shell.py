@@ -16,7 +16,20 @@ from typing import Any
 
 import yaml
 
+from . import __version__
 from .config import Book, FileEntry, SectionEntry, UrlEntry
+
+
+def _versioned(path: str) -> str:
+    """Append a ``?v=<marimo-book-version>`` cache-buster to a relative path.
+
+    External (CDN) URLs are pass-through — they handle their own
+    versioning via the ``@version`` segment in the URL.
+    """
+    if path.startswith(("http://", "https://", "//")):
+        return path
+    sep = "&" if "?" in path else "?"
+    return f"{path}{sep}v={__version__}"
 
 
 def emit_mkdocs_yml(
@@ -71,14 +84,21 @@ def _build_config(
     base_css = ["stylesheets/extra.css"]
     if book.logo_placement == "sidebar":
         base_css.append("stylesheets/logo_sidebar.css")
-    cfg["extra_css"] = [*base_css, *extra_css]
+    # Cache-bust local assets with the marimo-book version. GitHub Pages
+    # defaults to `Cache-Control: max-age=600`, so without versioning,
+    # every reader sees stale JS/CSS for ~10 minutes after each deploy
+    # (a hard-refresh works around it but isn't acceptable UX). Each
+    # release bumps the URL, so browsers fetch fresh on first visit.
+    # CDN URLs (jsdelivr etc.) are skipped — they version themselves
+    # via the ``@version`` segment in their path.
+    cfg["extra_css"] = [_versioned(p) for p in (*base_css, *extra_css)]
     cfg["extra_javascript"] = [
         "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
-        "javascripts/mathjax.js",
+        _versioned("javascripts/mathjax.js"),
         # marimo-book runtime shim — rehydrates <div class="marimo-book-anywidget">
         # mounts without requiring marimo's frontend runtime.
-        {"path": "javascripts/marimo_book.js", "defer": True},
-        *extra_javascript,
+        {"path": _versioned("javascripts/marimo_book.js"), "defer": True},
+        *(_versioned(p) if isinstance(p, str) else p for p in extra_javascript),
     ]
 
     cfg["markdown_extensions"] = markdown_extensions()

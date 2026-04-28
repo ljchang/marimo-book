@@ -5,6 +5,20 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **GitHub / molab / download launch-button URLs 404'd when the book
+  lived in a subdirectory of its repo.** The URL builders prepended
+  the source path *relative to the book root* to `<repo>/blob/<branch>/`,
+  so a book at `docs/book.yml` pointed to
+  `<repo>/blob/<branch>/content/<file>` instead of the correct
+  `<repo>/blob/<branch>/docs/content/<file>`. The preprocessor now
+  walks up from the book directory to the enclosing `.git` and
+  prepends that relative path. Books at the repo root (the typical
+  case) are unaffected.
+
 ## [0.1.7] — 2026-04-28
 
 ### Fixed

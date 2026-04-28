@@ -17,13 +17,23 @@ from urllib.parse import urlparse
 from .config import Book
 
 
-def render_button_row(book: Book, source_file: Path) -> str:
+def render_button_row(book: Book, source_file: Path, *, repo_subpath: str = "") -> str:
     """Return an HTML string with a row of enabled launch buttons.
 
     Returns an empty string if none are enabled for this page.
+
+    ``repo_subpath`` is the path from the repo root to the book root,
+    posix-style, with no trailing slash (e.g. ``"docs"`` when the book
+    lives at ``docs/`` in the repo). It's prepended to the source path
+    in every URL so the GitHub / molab / raw-download links resolve to
+    the actual file. Empty when the book lives at the repo root (the
+    typical case — most consumers run ``marimo-book`` against a
+    book.yml at the repo top level).
     """
     buttons: list[str] = []
     source_posix = source_file.as_posix()
+    if repo_subpath:
+        source_posix = f"{repo_subpath.strip('/')}/{source_posix}"
 
     if book.launch_buttons.molab and source_file.suffix == ".py":
         url = _molab_url(book, source_posix)

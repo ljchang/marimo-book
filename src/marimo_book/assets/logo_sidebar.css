@@ -17,22 +17,18 @@
 
   /* Promote the nav drawer header (which holds the logo) into a visible
    * banner above the primary sidebar nav. Material hides this on desktop
-   * by default; we restore it as a left-aligned container that shows
-   * only the logo image (the site name is already in the header bar —
-   * no point in repeating it here).
+   * by default; we restore it as a centered container that shows only
+   * the logo image (the site name is already in the header bar — no
+   * point in repeating it here).
    *
-   * Two critical bits:
-   *  1. background-color matches the sidebar background. The title
-   *     stays sticky (Material default), so without an opaque bg the
-   *     chapter list scrolls *behind* the logo and you see them through
-   *     it.
-   *  2. left-aligned padding so the logo lines up with the chapter
-   *     section labels and roughly with the header's site title. */
+   * background-color matches the sidebar background because the title
+   * stays sticky (Material default); without an opaque bg the chapter
+   * list scrolls *behind* the logo and you see them through it. */
   .md-sidebar--primary .md-nav--primary > .md-nav__title {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    padding: 1rem 0.6rem 0.75rem 1.1rem;
+    justify-content: center;
+    padding: 1rem 0.6rem 0.75rem 0.6rem;
     height: auto;
     background-color: var(--md-default-bg-color);
     box-shadow: none;

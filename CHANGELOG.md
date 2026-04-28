@@ -36,6 +36,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `molab` / version control. New `dependencies.{auto_pep723, pin,
   extras, overrides, requires_python}` fields in `book.yml`.
 
+### Changed
+
+- **Sidebar logo (`logo_placement: sidebar`) is now horizontally
+  centered in the sidebar column** instead of left-flush. The previous
+  asymmetric padding tried to align the logo with chapter section
+  labels, but the labels' own indentation meant they never quite
+  matched anyway. Centering reads more naturally as a banner above
+  the nav.
+
+### Fixed
+
+- **Per-notebook `*Written by …*` attribution lines are no longer
+  stripped from rendered pages.** The export transform was filtering
+  any line matching that pattern from every markdown cell, on the
+  assumption that book-level `authors:` would surface per-page
+  bylines through the page header — but that rendering path was never
+  wired up, so attributions were silently lost. The line now passes
+  through and renders as the italic byline under the chapter title,
+  matching the original Jupyter Book convention.
+
 ## [0.1.8] — 2026-04-28
 
 ### Fixed

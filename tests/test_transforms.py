@@ -99,6 +99,31 @@ def test_launch_buttons_default_placement_header() -> None:
     assert 'data-placement="header"' in row
 
 
+def test_launch_buttons_repo_subpath_prepended_when_book_in_subdir() -> None:
+    """When the book lives in a subdirectory of its repo (e.g. docs/), the
+    GitHub / molab / raw URLs must include that subpath, otherwise links
+    404 against the actual repo layout. Case in point: marimo-book's own
+    docs at docs/book.yml — without this, the GitHub button on
+    /authoring/ would link to ``.../blob/main/content/authoring.md``
+    instead of the correct ``.../blob/main/docs/content/authoring.md``.
+    """
+    b = _book_with_repo()
+    row = render_button_row(b, Path("content/x.py"), repo_subpath="docs")
+    assert "molab.marimo.io/github/owner/repo/blob/v2/docs/content/x.py" in row
+    assert "github.com/owner/repo/blob/v2/docs/content/x.py" in row
+    assert "raw.githubusercontent.com/owner/repo/v2/docs/content/x.py" in row
+
+
+def test_launch_buttons_repo_subpath_empty_keeps_legacy_behavior() -> None:
+    """Empty repo_subpath (the default for books at repo root) leaves URLs
+    unchanged — ensures we don't regress dartbrains-style book layouts
+    where book.yml IS at the repo root."""
+    b = _book_with_repo()
+    row = render_button_row(b, Path("content/x.py"), repo_subpath="")
+    assert "github.com/owner/repo/blob/v2/content/x.py" in row
+    assert "/blob/v2/docs/content" not in row  # no leaked prefix
+
+
 # --- end-to-end marimo_export -----------------------------------------------
 
 

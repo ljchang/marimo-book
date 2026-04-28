@@ -571,6 +571,33 @@ def _iter_file_entries(toc: list) -> list[FileEntry]:
     return out
 
 
+def _book_subpath_in_repo(book_dir: Path) -> str:
+    """Return the book's path relative to its enclosing git repo, or "".
+
+    Walks upward from ``book_dir`` looking for a ``.git`` directory or
+    file (the latter for git worktrees). When found, returns the
+    book's path relative to that repo root, posix-style. When not
+    found (book.yml not inside a checked-out repo), returns an empty
+    string and launch-button URLs fall back to assuming the book is
+    at the repo root — the historical behavior.
+
+    Used by ``stage_page`` to make the GitHub / molab / download
+    launch buttons resolve correctly when ``book.yml`` lives in a
+    subdirectory of its repo (e.g. ``docs/`` for marimo-book's own
+    self-hosted documentation). Without this, a per-page GitHub
+    button on ``content/index.md`` would link to
+    ``https://github.com/<owner>/<repo>/blob/<branch>/content/index.md``,
+    which 404s because the actual path is
+    ``docs/content/index.md``.
+    """
+    book_dir = book_dir.resolve()
+    for p in (book_dir, *book_dir.parents):
+        if (p / ".git").exists():
+            rel = book_dir.relative_to(p)
+            return rel.as_posix() if rel != Path(".") else ""
+    return ""
+
+
 # --- Single-page staging ----------------------------------------------------
 
 
@@ -593,7 +620,9 @@ def stage_page(
     dst = docs_dir / rel_under_docs
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    buttons = render_button_row(book, Path(entry.file))
+    buttons = render_button_row(
+        book, Path(entry.file), repo_subpath=_book_subpath_in_repo(book_dir)
+    )
 
     mode = entry.effective_mode(book.defaults.mode)
     if src_abs.suffix == ".py":

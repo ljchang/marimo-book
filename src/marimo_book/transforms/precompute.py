@@ -65,6 +65,66 @@ _STDERR_BLOCK_RE = re.compile(
 )
 
 
+def find_widget_consumer_cell_idx(source: str, widget_var_names: list[str]) -> int | None:
+    """Return the source-order cell index of the first ``@app.cell`` whose
+    parameter list includes any of ``widget_var_names``.
+
+    Marimo's data flow IS the parameter list: a cell that takes a widget
+    as a parameter is by definition a consumer of that widget. Mounting
+    the slider above the source-order-earliest consumer puts it
+    immediately above the cell whose output the slider drives — the
+    natural place a reader expects controls. This is more robust than
+    using the diff-based "first reactive cell" set, which can include
+    upstream cells whose output happens to differ across the per-value
+    re-exports (random_state, plotly trace IDs, repr addresses, …).
+
+    Counts cells in the source order produced by ``ast.parse``. Markdown
+    cells (``mo.md(...)`` calls inside ``@app.cell`` bodies) count too —
+    each ``@app.cell``-decorated function increments the index — which
+    matches the indexing that ``cells_to_markdown_segments`` and
+    ``data-precompute-cell="{idx}"`` use elsewhere in this module.
+
+    Returns ``None`` when no cell consumes any of the widgets, when the
+    source has a ``SyntaxError``, or when no ``@app.cell`` is found.
+    """
+    if not widget_var_names:
+        return None
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    targets = set(widget_var_names)
+    cell_idx = -1
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if not _is_app_cell_decorated(node):
+            continue
+        cell_idx += 1
+        params = {a.arg for a in node.args.args}
+        if params & targets:
+            return cell_idx
+    return None
+
+
+def _is_app_cell_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Whether ``node`` carries ``@app.cell`` or ``@app.cell(...)``.
+
+    Mirrors the same helper in ``transforms.pep723``; duplicated here to
+    keep this module's public surface self-contained.
+    """
+    for dec in node.decorator_list:
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        if (
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "app"
+            and target.attr == "cell"
+        ):
+            return True
+    return False
+
+
 def _diff_key(body: str) -> str:
     """Return a normalized cell body for downstream-detection comparison.
 
@@ -482,6 +542,15 @@ class PrecomputeResult:
     body: str
     widget_html: str
     reactive_cell_indices: list[int] = field(default_factory=list)
+    # Source-order cell index where the slider control panel should mount.
+    # Identified via AST (cells whose function parameters include a widget
+    # variable name). Falls back to the first reactive cell when no
+    # consumer is found in the AST (rare). Empirically far more reliable
+    # than the diff-based heuristic, which can mark upstream cells as
+    # reactive when their output is non-deterministic across re-exports
+    # (random_state, plotly trace IDs, object reprs, …) — picking such a
+    # cell as the splice anchor strands the slider above unrelated content.
+    splice_anchor_cell_idx: int | None = None
     bytes_total: int = 0
     seconds_total: float = 0.0
     skipped: bool = False
@@ -765,10 +834,22 @@ def precompute_page(
         all_widgets.extend(members)
     widget_html = _build_controls_panel_grouped(independent_groups, joint_results)
 
+    # Anchor the controls panel above the source-order-earliest cell that
+    # actually consumes any of the widgets (via parameter list = marimo
+    # data flow). Falls back to the first reactive cell if AST analysis
+    # finds no consumer (rare). See ``find_widget_consumer_cell_idx``
+    # docstring for why this is more reliable than the diff-based
+    # "first reactive cell" picker.
+    splice_anchor = find_widget_consumer_cell_idx(
+        py_path.read_text(encoding="utf-8"),
+        [c.var_name for c in all_widgets],
+    )
+
     return PrecomputeResult(
         body=body,
         widget_html=widget_html,
         reactive_cell_indices=sorted(set(cell_to_widget) | set(cell_to_group)),
+        splice_anchor_cell_idx=splice_anchor,
         bytes_total=bytes_so_far,
         seconds_total=time.monotonic() - t0,
     )

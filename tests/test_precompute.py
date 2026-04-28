@@ -10,6 +10,7 @@ from __future__ import annotations
 from marimo_book.transforms.precompute import (
     WidgetCandidate,
     estimate_combinations,
+    find_widget_consumer_cell_idx,
     page_excluded,
     scan_widgets,
     substitute_widget_value,
@@ -793,3 +794,136 @@ def test_precompute_lookup_table_values_are_rendered_html(tmp_path: Path) -> Non
         assert "|---|" not in joined, (
             f"value {value_key} still contains raw markdown table delimiters"
         )
+
+
+# --- find_widget_consumer_cell_idx -----------------------------------------
+
+
+def test_consumer_cell_idx_finds_first_param_cell() -> None:
+    """Returns the source-order index of the first @app.cell with the var as a parameter."""
+    src = """import marimo
+app = marimo.App()
+
+
+@app.cell
+def _():
+    import marimo as mo
+    return (mo,)
+
+
+@app.cell
+def _(mo):
+    slider = mo.ui.slider(0, 10)
+    return (slider,)
+
+
+@app.cell
+def _(mo):
+    mo.md("intro")
+    return
+
+
+@app.cell
+def _(slider, mo):
+    return (slider.value * 2,)
+"""
+    # Cell #3 (0-indexed) is the consumer. Cells before it: imports (0),
+    # slider def (1), mo.md (2). Slider def cell doesn't TAKE slider as
+    # param, it CREATES it.
+    assert find_widget_consumer_cell_idx(src, ["slider"]) == 3
+
+
+def test_consumer_cell_idx_returns_none_when_no_consumer() -> None:
+    """Slider defined but never consumed → no anchor."""
+    src = """import marimo
+app = marimo.App()
+
+
+@app.cell
+def _():
+    import marimo as mo
+    return (mo,)
+
+
+@app.cell
+def _(mo):
+    slider = mo.ui.slider(0, 10)
+    return (slider,)
+"""
+    assert find_widget_consumer_cell_idx(src, ["slider"]) is None
+
+
+def test_consumer_cell_idx_returns_none_for_empty_widgets() -> None:
+    assert find_widget_consumer_cell_idx("import marimo\napp = marimo.App()\n", []) is None
+
+
+def test_consumer_cell_idx_handles_syntax_error() -> None:
+    """Malformed source returns None, doesn't crash the build."""
+    assert find_widget_consumer_cell_idx("def : bad\n", ["slider"]) is None
+
+
+def test_consumer_cell_idx_picks_earliest_when_multiple_consumers() -> None:
+    """Two cells consume the slider; index of the earlier one wins."""
+    src = """import marimo
+app = marimo.App()
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _(slider):
+    a = slider.value
+    return (a,)
+
+
+@app.cell
+def _(slider):
+    b = slider.value
+    return (b,)
+"""
+    assert find_widget_consumer_cell_idx(src, ["slider"]) == 1
+
+
+def test_consumer_cell_idx_picks_earliest_across_widgets() -> None:
+    """Multiple widgets, return the earliest consumer of any."""
+    src = """import marimo
+app = marimo.App()
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _(slider2):
+    return (slider2.value,)
+
+
+@app.cell
+def _(slider1):
+    return (slider1.value,)
+"""
+    # slider2's consumer is at index 1, slider1's at index 2 → 1 wins
+    assert find_widget_consumer_cell_idx(src, ["slider1", "slider2"]) == 1
+
+
+def test_consumer_cell_idx_ignores_non_app_cell_functions() -> None:
+    """Module-level helper functions don't count as cells."""
+    src = """import marimo
+app = marimo.App()
+
+
+def helper(slider):
+    return slider.value
+
+
+@app.cell
+def _(slider):
+    return (slider.value,)
+"""
+    # `helper` isn't a cell, so the consumer is index 0 (the only cell).
+    assert find_widget_consumer_cell_idx(src, ["slider"]) == 0

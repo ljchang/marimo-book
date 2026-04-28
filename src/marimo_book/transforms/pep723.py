@@ -303,75 +303,115 @@ def _insert_at_top(source: str, block: str) -> str:
 # --- WASM micropip bootstrap injection --------------------------------------
 
 
+_BOOTSTRAP_SENTINEL = "_marimo_book_micropip_done"
+
+
 def inject_micropip_bootstrap(source: str, packages: Sequence[str]) -> str:
-    """Prepend ``await micropip.install([...])`` to the first ``@app.cell``.
+    """Insert a top-level ``micropip.install`` cell + thread it as a dependency.
 
     For WASM-mode rendering: marimo's islands JS bundle auto-loads
-    Pyodide-bundled packages via ``loadPackagesFromImports`` but has no
-    codepath to install pure-Python PyPI-only deps (e.g. ``nltools``).
-    We ship the install call inside cell code instead. Pyodide's
-    ``micropip`` filters out anything already present in
-    ``sys.modules``, so passing the full :func:`derive_dependencies`
-    output is safe — bundled packages no-op, non-bundled ones install.
+    Pyodide-bundled packages via ``loadPackagesFromImports`` but has
+    no codepath to install pure-Python PyPI-only deps (e.g.
+    ``nltools``, ``dartbrains-tools``). We ship the install call
+    inside cell code instead.
 
-    The injected block is wrapped in ``try/except ImportError`` so
-    build-time CPython execution (where ``micropip`` doesn't exist)
-    fails gracefully rather than crashing the build.
+    **Why a separate cell, not a prepend-into-existing.** An earlier
+    iteration of this transform prepended ``await micropip.install``
+    directly into each ``@app.cell`` that had imports, converting
+    sync cells to ``async def`` along the way. That broke real
+    notebooks: a cell whose existing body did
+    ``_ROOT = next(...)`` for a ``Path.cwd()`` walk would
+    sometimes raise ``StopIteration`` from the staged tempdir, the
+    cell would abort *before* its return statement, and downstream
+    cells failed with ``Name 'mo' is not defined`` because marimo
+    only collects exported variables from a cell that returns
+    successfully.
 
-    Implementation: AST-walk to the first ``@app.cell``-decorated
-    function, prepend the bootstrap statements to its body, convert
-    ``def`` to ``async def`` if needed, and unparse. Comments inside
-    cells do not survive ``ast.unparse``; that's acceptable here
-    because this transform only runs on the staged tempdir copy that
-    marimo reads at build time, never on the user's source.
+    The current transform is non-destructive: it inserts a new
+    ``@app.cell`` after ``app = marimo.App(...)`` whose only job is
+    to ``await micropip.install([...])`` and define a sentinel
+    ``_marimo_book_micropip_done = True``. Then it adds that
+    sentinel as a parameter to every existing ``@app.cell`` (and
+    ``@app.function``-style decorators are left alone). Marimo's
+    dataflow analyzer treats the parameter as a dependency, so the
+    bootstrap cell runs strictly before every other cell — without
+    rewriting any user cell body or changing any existing function
+    signature except by appending one parameter.
+
+    Pyodide's ``micropip`` filters out packages already in
+    ``sys.modules``, so bundled deps no-op. The injected install is
+    wrapped in ``try/except ImportError`` so build-time CPython
+    execution (where ``micropip`` doesn't exist) falls through.
+    Marimo's CPython shim emits one informational
+    ``"['…'] was not installed: micropip is only available in WASM
+    notebooks."`` per build; expected and harmless.
+
+    Comments inside the original ``.py`` survive — only the new cell
+    is added and existing function signatures get one extra
+    parameter; ``ast.unparse`` runs over the whole tree, so cell
+    bodies are reformatted but their semantics are preserved.
 
     Returns ``source`` unchanged when ``packages`` is empty, when no
-    ``@app.cell`` decorator is found, or on syntax error.
+    ``@app.cell`` is found, or on syntax error.
     """
     if not packages:
+        return source
+    # Idempotency: skip if the source already carries our sentinel.
+    # Otherwise re-running the transform (e.g. on an already-staged copy)
+    # would append the parameter to every cell signature N times.
+    if _BOOTSTRAP_SENTINEL in source:
         return source
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return source
 
-    transformer = _BootstrapInjector(list(packages))
-    new_tree = transformer.visit(tree)
-    if not transformer.injected:
+    # Notebooks using ``with app.setup:`` aren't supported by this
+    # transform: marimo runs the setup block before *any* ``@app.cell``,
+    # so making cells depend on our sentinel doesn't get the install in
+    # before the setup block's own third-party imports run. ``await`` is
+    # also invalid at module-level Python, so we can't inject the install
+    # into the setup block's body either. Caller can detect this case via
+    # :func:`has_app_setup_block` and emit a build-time warning.
+    if has_app_setup_block(tree):
         return source
-    ast.fix_missing_locations(new_tree)
-    return ast.unparse(new_tree) + "\n"
 
+    cell_nodes = [
+        n
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and _is_app_cell_decorated(n)
+    ]
+    if not cell_nodes:
+        return source
 
-class _BootstrapInjector(ast.NodeTransformer):
-    """Find the first ``@app.cell`` function and prepend a micropip-install."""
+    insert_idx = _find_app_assignment_index(tree)
+    if insert_idx is None:
+        return source
 
-    def __init__(self, packages: list[str]) -> None:
-        self.packages = packages
-        self.injected = False
+    # Add the sentinel parameter to every existing @app.cell. Marimo's
+    # static analyzer reads parameter names as the cell's input
+    # variables, so this makes every cell depend on the bootstrap.
+    for cell in cell_nodes:
+        existing = {a.arg for a in cell.args.args}
+        if _BOOTSTRAP_SENTINEL not in existing:
+            cell.args.args.append(ast.arg(arg=_BOOTSTRAP_SENTINEL, annotation=None))
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
-        if self.injected or not _is_app_cell_decorated(node):
-            return node
-        new_body = _bootstrap_statements(self.packages) + list(node.body)
-        new_node = ast.AsyncFunctionDef(
-            name=node.name,
-            args=node.args,
-            body=new_body,
-            decorator_list=node.decorator_list,
-            returns=node.returns,
-            type_comment=node.type_comment,
-        )
-        ast.copy_location(new_node, node)
-        self.injected = True
-        return new_node
+    bootstrap_src = (
+        "@app.cell(hide_code=True)\n"
+        "async def _():\n"
+        "    try:\n"
+        "        import micropip\n"
+        f"        await micropip.install({list(packages)!r})\n"
+        "    except ImportError:\n"
+        "        pass\n"
+        f"    {_BOOTSTRAP_SENTINEL} = True\n"
+        f"    return ({_BOOTSTRAP_SENTINEL},)\n"
+    )
+    bootstrap_nodes = ast.parse(bootstrap_src).body
+    tree.body[insert_idx:insert_idx] = bootstrap_nodes
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
-        if self.injected or not _is_app_cell_decorated(node):
-            return node
-        node.body = _bootstrap_statements(self.packages) + list(node.body)
-        self.injected = True
-        return node
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree) + "\n"
 
 
 def _is_app_cell_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
@@ -388,14 +428,46 @@ def _is_app_cell_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
     return False
 
 
-def _bootstrap_statements(packages: list[str]) -> list[ast.stmt]:
-    """Parse the bootstrap source into AST statements ready to splice into a body."""
-    pkg_repr = repr(list(packages))
-    src = (
-        "try:\n"
-        "    import micropip\n"
-        f"    await micropip.install({pkg_repr})\n"
-        "except ImportError:\n"
-        "    pass\n"
-    )
-    return ast.parse(src).body
+def has_app_setup_block(source_or_tree: str | ast.Module) -> bool:
+    """Whether the notebook uses marimo's ``with app.setup:`` construct.
+
+    Marimo's setup block runs at module-import time before any
+    ``@app.cell``; it's the user's escape hatch for "imports + globals
+    every cell needs." Our sentinel-parameter approach can't inject a
+    micropip install before it runs (see comment in
+    :func:`inject_micropip_bootstrap`). Callers should fall back to a
+    build-time warning for notebooks that hit this path.
+    """
+    tree = ast.parse(source_or_tree) if isinstance(source_or_tree, str) else source_or_tree
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.With):
+            continue
+        for item in node.items:
+            ctx = item.context_expr
+            # Match either ``app.setup`` (attribute) or ``app.setup(...)`` (call).
+            target = ctx.func if isinstance(ctx, ast.Call) else ctx
+            if (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "app"
+                and target.attr == "setup"
+            ):
+                return True
+    return False
+
+
+def _find_app_assignment_index(tree: ast.Module) -> int | None:
+    """Return the index of the statement *after* ``app = marimo.App(...)``.
+
+    The bootstrap cell goes immediately after the ``app =`` line so
+    its ``@app.cell`` decorator binds to the right object. Returns
+    ``None`` when no such assignment is found (a notebook that
+    doesn't define ``app`` isn't a marimo notebook in any meaningful
+    sense, so we skip injection).
+    """
+    for i, node in enumerate(tree.body):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "app":
+                    return i + 1
+    return None

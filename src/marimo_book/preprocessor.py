@@ -45,6 +45,7 @@ from .transforms.marimo_export import (
 )
 from .transforms.pep723 import (
     derive_dependencies,
+    has_app_setup_block,
     inject_micropip_bootstrap,
     write_pep723_block,
 )
@@ -321,7 +322,22 @@ def _maybe_stage_with_pep723(
     # have something to install.
     new_source = source
     if wasm_bootstrap and deps:
-        new_source = inject_micropip_bootstrap(new_source, deps)
+        if has_app_setup_block(source):
+            # Setup blocks run before any @app.cell, so our sentinel-based
+            # ordering can't get the install in first. Fall back to skipping
+            # the bootstrap for this notebook + a visible warning so the
+            # author knows their non-bundled imports won't auto-install in
+            # the browser.
+            print(
+                f"  warning: {src_abs.name} uses `with app.setup:` — "
+                "WASM micropip bootstrap skipped for this page. Move "
+                "non-Pyodide-bundled imports (e.g. nltools, dartbrains-tools) "
+                "out of the setup block into a regular `@app.cell` so the "
+                "auto-install can run before them.",
+                file=sys.stderr,
+            )
+        else:
+            new_source = inject_micropip_bootstrap(new_source, deps)
     new_source = write_pep723_block(new_source, deps, requires_python=requires_python)
 
     with tempfile.TemporaryDirectory(prefix="marimo_book_pep723_", dir=src_abs.parent) as tmp_dir:

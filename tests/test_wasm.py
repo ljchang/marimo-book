@@ -156,7 +156,7 @@ def test_wasm_anywidgets_rewritten_to_static_mount(tmp_path: Path) -> None:
         def render_head(self):
             return '<script src="https://example/islands.js"></script>'
 
-        def render_body(self, *, style=""):  # noqa: ARG002
+        def render_body(self, *, style="", include_init_island=True):  # noqa: ARG002
             return fake_body
 
     with patch.object(wasm_module, "MarimoIslandGenerator", _FakeGen):

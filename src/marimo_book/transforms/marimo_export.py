@@ -258,13 +258,7 @@ def _render_markdown_cell(cell: dict, *, strip_duplicate_title: bool) -> str:
     src = _as_str(cell.get("source", "")).strip("\n")
     if not src:
         return ""
-    # The plan strips "*Written by …*" attribution lines from the first
-    # markdown cell because book.yml already renders authors in the page
-    # header. Apply to every markdown cell; the pattern is narrow enough.
-    lines = [
-        line for line in src.split("\n") if not re.match(r"^\s*\*Written [Bb]y\s+.+\*\s*$", line)
-    ]
-    return "\n".join(lines).strip("\n")
+    return src
 
 
 def _render_code_cell(cell: dict, *, widget_defaults: dict | None = None) -> str:

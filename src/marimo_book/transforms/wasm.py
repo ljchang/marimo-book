@@ -125,7 +125,13 @@ def render_wasm_page(
     gen = MarimoIslandGenerator.from_file(str(target), display_code=display_code)
     asyncio.run(gen.build())
     head = gen.render_head()
-    body = gen.render_body(style="")
+    # ``include_init_island=False`` skips marimo's static "Initializing..."
+    # spinner. The bundle is supposed to hide that placeholder once cells
+    # render, but the hide-trigger doesn't fire reliably — pages would
+    # show a stuck spinner above already-working reactive cells. Cells'
+    # static-export initial output already gives the user something to
+    # look at during hydration, so dropping the spinner is a clear UX win.
+    body = gen.render_body(style="", include_init_island=False)
     # Re-target anywidgets to our static-shim mount form. See module docstring
     # for the full rationale; in short, marimo's islands runtime won't load
     # the data: URLs that ScriptRuntimeContext emits for anywidget modules.

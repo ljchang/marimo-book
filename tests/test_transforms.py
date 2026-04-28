@@ -8,6 +8,7 @@ from marimo_book.config import Book
 from marimo_book.launch_buttons import render_button_row
 from marimo_book.transforms.callouts import render_callout_html
 from marimo_book.transforms.marimo_export import (
+    _render_markdown_cell,
     _render_mime_bundle,
     cells_to_markdown,
     export_notebook,
@@ -147,6 +148,26 @@ def test_plotly_rewrap_emits_static_mount() -> None:
     assert 'class="marimo-book-plotly"' in out
     assert "marimo-plotly" not in out.replace("marimo-book-plotly", "")  # no original tag left
     assert "data-figure=" in out
+
+
+def test_markdown_cell_preserves_written_by_byline() -> None:
+    """Per-notebook ``*Written by …*`` attribution lines must survive
+    rendering — they are the canonical Jupyter-Book-era byline and the
+    only place per-chapter authorship is recorded in dartbrains."""
+    cell = {
+        "cell_type": "markdown",
+        "source": "# Introduction to GLM\n*Written by Luke Chang*\n\nBody text.",
+    }
+    out = _render_markdown_cell(cell, strip_duplicate_title=False)
+    assert "*Written by Luke Chang*" in out
+    assert "# Introduction to GLM" in out
+    assert "Body text." in out
+
+
+def test_markdown_cell_passes_through_when_no_byline() -> None:
+    cell = {"cell_type": "markdown", "source": "# Title\n\nJust prose, no byline.\n"}
+    out = _render_markdown_cell(cell, strip_duplicate_title=False)
+    assert out == "# Title\n\nJust prose, no byline."
 
 
 def test_anywidget_escaped_under_text_markdown_routes_to_html() -> None:

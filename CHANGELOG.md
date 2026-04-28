@@ -5,6 +5,36 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Stale assets after every release.** GitHub Pages serves
+  `extra_javascript`/`extra_css` with `Cache-Control: max-age=600`,
+  so without versioning, every reader saw the previous release's JS
+  for ~10 minutes after a deploy — visible as broken precompute
+  sliders and unrendered math until a hard-refresh. Local asset URLs
+  now get a `?v=<marimo-book-version>` query string appended, so
+  every release auto-invalidates the browser cache. CDN URLs are
+  pass-through (they version themselves via the `@version` segment).
+
+### Documentation
+
+- **Anywidget reference + drawdata demo merged into one chapter**
+  (`docs/content/widgets.py`). The reference and the live demo sat
+  three TOC entries apart in 0.1.5; readers landing on the demo had
+  to flip back to find the explanation. Now a single `.py` notebook
+  covers the architecture, troubleshooting, and the drawdata canvas
+  side-by-side.
+- **Roadmap chapter trimmed.** The "Shipped in v0.1" + "Shipped
+  since v0.1" sections were a mirror of the changelog. Dropped them
+  and pointed at the changelog for granular history; the roadmap
+  now focuses on what's coming next.
+- **README rewrite** to reflect the 0.1.6 surface: WASM mode, static
+  reactivity, build cache, autorefs-as-base-dep, the actually-used
+  optional extras. Several stale "Not in v0.1" bullets that had
+  since shipped were dropped.
+
 ## [0.1.6] — 2026-04-27
 
 ### Fixed

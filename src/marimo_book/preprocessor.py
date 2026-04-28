@@ -243,7 +243,9 @@ def _splice_precomputed_body(original_page: str, result) -> str:
     """
     marker_open = '<div class="marimo-book-buttons">'
     marker_close = "</div>"
-    body = _splice_controls_inline(result.body, result.widget_html)
+    body = _splice_controls_inline(
+        result.body, result.widget_html, anchor_cell_idx=result.splice_anchor_cell_idx
+    )
     if marker_open in original_page:
         head_end = original_page.index(marker_open)
         close_at = original_page.index(marker_close, head_end) + len(marker_close)
@@ -252,18 +254,36 @@ def _splice_precomputed_body(original_page: str, result) -> str:
     return body
 
 
-def _splice_controls_inline(body: str, widget_html: str) -> str:
-    """Insert the widget controls just before the first reactive cell.
+def _splice_controls_inline(
+    body: str, widget_html: str, *, anchor_cell_idx: int | None = None
+) -> str:
+    """Insert the widget controls inline, immediately above the cell whose
+    output the widget drives.
 
-    The body is a Markdown blob with ``<div class="marimo-book-precompute-cell"
-    data-precompute-cell="N" …>`` markers around each cell whose output
-    depends on a widget. Placing controls there keeps the slider visually
-    adjacent to the brain plot / table / chart it drives.
+    ``anchor_cell_idx`` is the source-order cell index that consumes the
+    widget (computed via AST in :func:`precompute.find_widget_consumer_cell_idx`).
+    The cell is identified in the rendered body by its
+    ``data-precompute-cell="N"`` wrapper. Mounting at this anchor — the
+    cell whose function parameters include the widget variable —
+    guarantees the slider lands immediately above the cell whose output
+    actually depends on it (the brain viewer, the figure, the table).
+
+    Falls back to the first ``data-precompute-cell`` marker when no
+    anchor was identified (rare: notebook with no reactive consumer
+    detected via AST). Falls back further to top-of-body when there are
+    no reactive markers at all.
     """
     if not widget_html:
         return body
-    needle = '<div class="marimo-book-precompute-cell"'
-    pos = body.find(needle)
+    if anchor_cell_idx is not None:
+        needle = (
+            f'<div class="marimo-book-precompute-cell" data-precompute-cell="{anchor_cell_idx}"'
+        )
+        pos = body.find(needle)
+        if pos != -1:
+            return body[:pos] + widget_html + "\n\n" + body[pos:]
+    # Fallback: first reactive cell (legacy behaviour).
+    pos = body.find('<div class="marimo-book-precompute-cell"')
     if pos == -1:
         return widget_html + "\n\n" + body
     return body[:pos] + widget_html + "\n\n" + body[pos:]

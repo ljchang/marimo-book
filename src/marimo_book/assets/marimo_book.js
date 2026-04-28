@@ -129,12 +129,44 @@
   //      we render the input control (range / select / checkbox).
   //   2. <div class="marimo-book-precompute-cell" data-precompute-cell="N">
   //      — wraps each cell whose output differs across widget values.
-  //   3. Two <script type="application/json"> blocks: -widget (metadata) and
-  //      -table (per-value cell HTML deltas).
+  //   3. Two <template> blocks: -widget (metadata) and -table (per-value
+  //      cell HTML deltas). They were originally <script type="application/json">
+  //      but Material's `navigation.instant` re-creates every <script>
+  //      tag on page swap and chokes on JSON's first colon with
+  //      "Unexpected token ':'", silently dropping the script — leaving
+  //      the shim with no data to read on instant-nav arrivals (forcing
+  //      a hard refresh). <template> is inert and survives the swap.
   //
   // On input we look up the value's delta and swap the affected cells'
   // innerHTML; cells absent from the delta restore to their initial
   // (default-value) HTML, snapshotted at first init.
+
+  // Read the JSON payload from a precompute data container. Accepts both
+  // <template> (current emitter, post-Material-instant-nav-fix) and
+  // <script type="application/json"> (legacy emitter, in case stale build
+  // caches still emit the old shape). Returns null if the element is
+  // missing.
+  function readPrecomputeJson(el) {
+    if (!el) return null;
+    const text =
+      el.tagName === "TEMPLATE"
+        ? (el.content && el.content.textContent) || el.innerHTML || ""
+        : el.textContent || "";
+    return JSON.parse(text || "{}");
+  }
+  // Selector helpers: a precompute container can be either a <template>
+  // (current) or a <script> (legacy). Each helper appends an attribute
+  // filter to both branches so a single querySelector finds whichever one
+  // the emitter wrote.
+  function precomputeWidgetSel(filter) {
+    return `template.marimo-book-precompute-widget${filter}, script.marimo-book-precompute-widget${filter}`;
+  }
+  function precomputeTableSel(filter) {
+    return `template.marimo-book-precompute-table${filter}, script.marimo-book-precompute-table${filter}`;
+  }
+  function precomputeGroupSel(filter) {
+    return `template.marimo-book-precompute-group${filter}, script.marimo-book-precompute-group${filter}`;
+  }
 
   function valueKey(value) {
     return JSON.stringify(value);
@@ -202,18 +234,25 @@
 
   function initPrecomputeForWidget(scope, varName) {
     const sel = `[data-precompute-widget="${CSS.escape(varName)}"]`;
-    const widgetEl = scope.querySelector("script.marimo-book-precompute-widget" + sel);
-    const tableEl = scope.querySelector("script.marimo-book-precompute-table" + sel);
+    const widgetEl = scope.querySelector(precomputeWidgetSel(sel));
+    const tableEl = scope.querySelector(precomputeTableSel(sel));
     const controlEl = scope.querySelector(".marimo-book-precompute-control" + sel);
     if (!widgetEl || !tableEl || !controlEl) return;
     if (controlEl.getAttribute("data-mb-precompute-init")) return;
 
     let widget, table;
     try {
-      widget = JSON.parse(widgetEl.textContent || "{}");
-      table = JSON.parse(tableEl.textContent || "{}");
+      widget = readPrecomputeJson(widgetEl) || {};
+      table = readPrecomputeJson(tableEl) || {};
     } catch (err) {
-      console.error("[marimo-book] precompute JSON parse failed for " + varName, err);
+      // bootAll fires twice on Material instant-nav (DOMContentLoaded /
+      // immediate-eval AND document$.subscribe), and the first call
+      // sometimes catches a transient DOM where the template element is
+      // present but its text content hasn't been integrated yet — the
+      // JSON parse rejects on a truncated payload. The second call sees
+      // the complete content and succeeds. Log at debug level so the
+      // recovery is observable in DevTools but doesn't alarm users.
+      console.debug("[marimo-book] precompute JSON parse deferred for " + varName + " (will retry on next bootAll)", err);
       return;
     }
 
@@ -241,7 +280,14 @@
         const html = Object.prototype.hasOwnProperty.call(delta, idx)
           ? delta[idx]
           : baseSnapshot[idx];
-        if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+        if (html !== undefined && el.innerHTML !== html) {
+          el.innerHTML = html;
+          // Cell HTML swapped in is a build-time static snapshot — any
+          // <div class="marimo-book-plotly"> inside is an un-hydrated
+          // placeholder. Re-run plotly hydration for this cell so the
+          // plots render in the new content. Idempotent via [data-mb-plotly].
+          hydratePlotly(el);
+        }
       });
       if (typeof built.syncLabel === "function") built.syncLabel();
     }
@@ -254,16 +300,18 @@
 
   function initPrecomputeForGroup(scope, groupId) {
     const sel = `[data-precompute-group="${CSS.escape(groupId)}"]`;
-    const metaEl = scope.querySelector("script.marimo-book-precompute-group" + sel);
-    const tableEl = scope.querySelector("script.marimo-book-precompute-table" + sel);
+    const metaEl = scope.querySelector(precomputeGroupSel(sel));
+    const tableEl = scope.querySelector(precomputeTableSel(sel));
     if (!metaEl || !tableEl) return;
 
     let meta, table;
     try {
-      meta = JSON.parse(metaEl.textContent || "{}");
-      table = JSON.parse(tableEl.textContent || "{}");
+      meta = readPrecomputeJson(metaEl) || {};
+      table = readPrecomputeJson(tableEl) || {};
     } catch (err) {
-      console.error("[marimo-book] precompute group JSON parse failed for " + groupId, err);
+      // See initPrecomputeForWidget — bootAll's idempotent retry covers
+      // first-pass parse races on instant-nav.
+      console.debug("[marimo-book] precompute group JSON parse deferred for " + groupId + " (will retry on next bootAll)", err);
       return;
     }
 
@@ -296,7 +344,12 @@
         const html = Object.prototype.hasOwnProperty.call(delta, idx)
           ? delta[idx]
           : baseSnapshot[idx];
-        if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+        if (html !== undefined && el.innerHTML !== html) {
+          el.innerHTML = html;
+          // See applyValue in initPrecomputeForWidget — same plotly
+          // re-hydration concern.
+          hydratePlotly(el);
+        }
       });
       builders.forEach((b) => {
         if (typeof b.syncLabel === "function") b.syncLabel();

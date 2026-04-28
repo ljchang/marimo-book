@@ -931,12 +931,50 @@ def _wrap_reactive_segments_multi(
     return out
 
 
+def _safe_json_for_template(obj: object) -> str:
+    """Serialize ``obj`` to JSON safe to embed inside an inert ``<template>``.
+
+    Plain ``json.dumps`` emits literal ``<``, ``>``, ``&`` characters; when
+    those appear inside a ``<template>`` element the HTML parser treats them
+    as the start of nested markup, which corrupts the precompute lookup
+    table (cell HTML strings contain ``<`` heavily). Escaping them as JSON
+    unicode escapes (``\\u003c`` etc) keeps the payload as a single text
+    node — the parser sees no markup, and ``JSON.parse`` produces the same
+    deserialized object.
+
+    Embedding inside ``<template>`` (instead of ``<script type="application/json">``)
+    is what makes the payload survive Material for MkDocs' ``navigation.instant``
+    page swap: that handler tries to re-execute every ``<script>`` tag it finds
+    in the new page (regardless of MIME type) and chokes on JSON's ``:`` with
+    ``SyntaxError: Failed to execute 'replaceWith' on 'Element': Unexpected
+    token ':'``, silently dropping the script element from the swapped DOM.
+    Templates aren't scripts, so the handler ignores them.
+
+    The emitted ``<template>`` carries ``markdown="0"`` so the ``md_in_html``
+    Markdown extension (enabled by default in mkdocs-material projects) does
+    NOT recurse into the JSON payload — without that opt-out, CommonMark's
+    backslash-escape rule rewrites ``\\\\D`` → ``\\D`` mid-pipeline, producing
+    invalid JSON (``\\D`` is not a defined JSON escape) that ``JSON.parse``
+    rejects with ``Bad escaped character``. Cell HTML in marimo notebooks
+    routinely contains JS regex literals like ``/\\D/g`` so this isn't
+    hypothetical.
+    """
+    return (
+        json.dumps(obj, separators=(",", ":"))
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
+
+
 def _embed_metadata(candidate: WidgetCandidate, by_value: dict[str, dict[int, str]]) -> str:
-    """Emit ``<script type="application/json">`` blocks the JS shim reads.
+    """Emit ``<template>`` blocks the JS shim reads.
 
     Both the widget-metadata block and the lookup-table block carry a
     ``data-precompute-widget="varname"`` attribute so the shim can pair
-    them with the matching control on multi-widget pages.
+    them with the matching control on multi-widget pages. See
+    :func:`_safe_json_for_template` for why ``<template>`` not ``<script
+    type="application/json">``.
     """
     var_attr = f'data-precompute-widget="{_html_escape(candidate.var_name)}"'
     widget_meta = {
@@ -945,15 +983,24 @@ def _embed_metadata(candidate: WidgetCandidate, by_value: dict[str, dict[int, st
         "values": [_jsonable(v) for v in candidate.values],
         "default": _jsonable(candidate.default),
     }
+    # Wrap each <template> inside its own raw <div markdown="0"> so
+    # md_in_html / pymdown extensions don't recurse into the JSON
+    # payload. <template> alone isn't enough — it's not on md_in_html's
+    # block-element allowlist, so without the wrapper its content gets
+    # treated as inline markdown and CommonMark backslash-escape eats
+    # one backslash from every literal regex (`\\D` → `\D`), producing
+    # invalid JSON. The wrapper div is the canonical opt-out hook.
     widget_block = (
-        f'<script type="application/json" class="marimo-book-precompute-widget" {var_attr}>'
-        + json.dumps(widget_meta, separators=(",", ":"))
-        + "</script>"
+        f'<div class="marimo-book-precompute-data" markdown="0">\n'
+        f'<template class="marimo-book-precompute-widget" {var_attr}>'
+        + _safe_json_for_template(widget_meta)
+        + "</template>\n</div>"
     )
     table_block = (
-        f'<script type="application/json" class="marimo-book-precompute-table" {var_attr}>'
-        + json.dumps(by_value, separators=(",", ":"))
-        + "</script>"
+        f'<div class="marimo-book-precompute-data" markdown="0">\n'
+        f'<template class="marimo-book-precompute-table" {var_attr}>'
+        + _safe_json_for_template(by_value)
+        + "</template>\n</div>"
     )
     return widget_block + "\n" + table_block
 
@@ -1014,15 +1061,18 @@ def _embed_group_metadata(
             for c in members
         ],
     }
+    # See _embed_metadata above for why the <div markdown="0"> wrapper.
     meta_block = (
-        f'<script type="application/json" class="marimo-book-precompute-group" {group_attr}>'
-        + json.dumps(payload, separators=(",", ":"))
-        + "</script>"
+        f'<div class="marimo-book-precompute-data" markdown="0">\n'
+        f'<template class="marimo-book-precompute-group" {group_attr}>'
+        + _safe_json_for_template(payload)
+        + "</template>\n</div>"
     )
     table_block = (
-        f'<script type="application/json" class="marimo-book-precompute-table" {group_attr}>'
-        + json.dumps(table, separators=(",", ":"))
-        + "</script>"
+        f'<div class="marimo-book-precompute-data" markdown="0">\n'
+        f'<template class="marimo-book-precompute-table" {group_attr}>'
+        + _safe_json_for_template(table)
+        + "</template>\n</div>"
     )
     return meta_block + "\n" + table_block
 

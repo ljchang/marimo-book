@@ -322,22 +322,28 @@ def _maybe_stage_with_pep723(
     # have something to install.
     new_source = source
     if wasm_bootstrap and deps:
+        # Setup blocks run before any @app.cell, so our sentinel-based
+        # ordering can't get the install in first. Pyodide auto-loads
+        # *bundled* scientific packages (numpy, pandas, scipy, sklearn,
+        # matplotlib, …) via ``loadPackagesFromImports`` during cell
+        # parsing, so a setup block whose imports are all bundled works
+        # fine. A setup block with any non-bundled import (the
+        # dartbrains-tools / nltools class) will fail before our
+        # bootstrap can run. We can't tell the two apart cheaply
+        # (there's no maintained Pyodide-bundle list in our pipeline),
+        # so on detection of any setup block we still inject the
+        # bootstrap (covers cells outside the setup block) and emit an
+        # advisory warning so the author can audit their setup imports.
         if has_app_setup_block(source):
-            # Setup blocks run before any @app.cell, so our sentinel-based
-            # ordering can't get the install in first. Fall back to skipping
-            # the bootstrap for this notebook + a visible warning so the
-            # author knows their non-bundled imports won't auto-install in
-            # the browser.
             print(
-                f"  warning: {src_abs.name} uses `with app.setup:` — "
-                "WASM micropip bootstrap skipped for this page. Move "
-                "non-Pyodide-bundled imports (e.g. nltools, dartbrains-tools) "
-                "out of the setup block into a regular `@app.cell` so the "
-                "auto-install can run before them.",
+                f"  note: {src_abs.name} uses `with app.setup:`. Setup-block "
+                "imports run before WASM micropip install; make sure every "
+                "import there is in Pyodide's bundled package set, or move "
+                "non-bundled imports (nltools, dartbrains-tools, etc.) into "
+                "a regular `@app.cell` so the auto-install can run first.",
                 file=sys.stderr,
             )
-        else:
-            new_source = inject_micropip_bootstrap(new_source, deps)
+        new_source = inject_micropip_bootstrap(new_source, deps)
     new_source = write_pep723_block(new_source, deps, requires_python=requires_python)
 
     with tempfile.TemporaryDirectory(prefix="marimo_book_pep723_", dir=src_abs.parent) as tmp_dir:

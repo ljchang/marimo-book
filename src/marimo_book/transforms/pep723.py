@@ -366,16 +366,6 @@ def inject_micropip_bootstrap(source: str, packages: Sequence[str]) -> str:
     except SyntaxError:
         return source
 
-    # Notebooks using ``with app.setup:`` aren't supported by this
-    # transform: marimo runs the setup block before *any* ``@app.cell``,
-    # so making cells depend on our sentinel doesn't get the install in
-    # before the setup block's own third-party imports run. ``await`` is
-    # also invalid at module-level Python, so we can't inject the install
-    # into the setup block's body either. Caller can detect this case via
-    # :func:`has_app_setup_block` and emit a build-time warning.
-    if has_app_setup_block(tree):
-        return source
-
     cell_nodes = [
         n
         for n in tree.body
@@ -457,17 +447,52 @@ def has_app_setup_block(source_or_tree: str | ast.Module) -> bool:
 
 
 def _find_app_assignment_index(tree: ast.Module) -> int | None:
-    """Return the index of the statement *after* ``app = marimo.App(...)``.
+    """Return the index just after ``app = marimo.App(...)``, skipping any
+    immediately-following ``with app.setup:`` block.
 
-    The bootstrap cell goes immediately after the ``app =`` line so
-    its ``@app.cell`` decorator binds to the right object. Returns
-    ``None`` when no such assignment is found (a notebook that
-    doesn't define ``app`` isn't a marimo notebook in any meaningful
-    sense, so we skip injection).
+    The bootstrap cell needs ``@app.cell`` to bind to the right
+    ``app`` object, so it must come after the assignment. It also
+    needs to come *after* any ``with app.setup:`` block — empirically,
+    inserting an ``@app.cell`` between ``app =`` and ``with app.setup:``
+    confuses marimo's runtime variable resolution and downstream cells
+    error out with ``name 'mo' is not defined``. Setup blocks are
+    nearly always immediately after ``app =`` in marimo notebooks, so
+    we just walk past them.
+
+    Returns ``None`` when no ``app = ...`` is found (not a marimo
+    notebook in any meaningful sense, so we skip injection).
     """
+    app_idx = None
     for i, node in enumerate(tree.body):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "app":
-                    return i + 1
-    return None
+                    app_idx = i
+                    break
+            if app_idx is not None:
+                break
+    if app_idx is None:
+        return None
+
+    # Skip past any ``with app.setup:`` block(s) that follow the assignment.
+    insert_idx = app_idx + 1
+    while insert_idx < len(tree.body):
+        node = tree.body[insert_idx]
+        if not isinstance(node, ast.With):
+            break
+        is_app_setup = False
+        for item in node.items:
+            ctx = item.context_expr
+            target = ctx.func if isinstance(ctx, ast.Call) else ctx
+            if (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "app"
+                and target.attr == "setup"
+            ):
+                is_app_setup = True
+                break
+        if not is_app_setup:
+            break
+        insert_idx += 1
+    return insert_idx

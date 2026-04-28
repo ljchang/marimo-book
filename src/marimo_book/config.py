@@ -156,11 +156,55 @@ class Dependencies(BaseModel):
 
     The CLI ``--sandbox`` / ``--no-sandbox`` flags on ``build`` and
     ``serve`` override this per-invocation.
+
+    **Auto PEP 723 generation.** Marimo's WASM Pyodide kernel reads each
+    notebook's ``# /// script`` block as the trusted manifest of packages
+    to install via ``micropip`` before any cell runs. Without it,
+    third-party imports silently fail in the browser — the dartbrains
+    chapters' ``numpy``/``pandas``/``nilearn``/``nltools`` imports are
+    the canonical broken case. marimo-book generates this block
+    automatically by walking each notebook's AST, mapping import names
+    to PyPI distributions via marimo's own table, and staging a copy
+    with the block injected before ``MarimoIslandGenerator`` reads it:
+
+    - For ``mode: wasm`` pages, generation is unconditional (the build
+      is broken without it).
+    - For static / sandbox pages, set ``auto_pep723: true`` to opt in.
+      Useful when running ``sandbox`` mode against notebooks that don't
+      hand-author their own block.
+
+    The build never modifies your source ``.py`` files. To commit the
+    generated headers back into source (for portability to ``molab``,
+    sharing, or version control), run ``marimo-book sync-deps``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["env", "sandbox"] = "env"
+
+    # Whether to auto-generate PEP 723 blocks for static/sandbox pages.
+    # WASM pages always generate regardless of this flag.
+    auto_pep723: bool = False
+
+    # ``none`` → emit unpinned (e.g. ``"numpy"``); ``env`` → pin to the
+    # currently-installed version via ``importlib.metadata.version()``.
+    # Falls back to unpinned per-package when a package isn't installed.
+    pin: Literal["none", "env"] = "none"
+
+    # Always-included dependency strings (e.g. ``["nltools>=0.5"]``).
+    # NOT mapped through the import → distribution table; written
+    # verbatim. An ``extras`` entry naming the same distribution as a
+    # detected import wins (its version specifier is preserved).
+    extras: list[str] = Field(default_factory=list)
+
+    # Manual import-name → distribution-name overrides for cases marimo's
+    # built-in mapping table doesn't cover (e.g. ``{"my_internal": "my-internal"}``).
+    overrides: dict[str, str] = Field(default_factory=dict)
+
+    # Override the ``requires-python`` value written into generated
+    # blocks. ``None`` → derive from the running interpreter
+    # (``f">={sys.version_info.major}.{sys.version_info.minor}"``).
+    requires_python: str | None = None
 
 
 class Defaults(BaseModel):

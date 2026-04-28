@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from marimo_book import __version__
 from marimo_book.config import load_book
 from marimo_book.preprocessor import Preprocessor
+from marimo_book.transforms.pep723 import derive_dependencies, write_pep723_block
 
 app = typer.Typer(
     name="marimo-book",
@@ -347,6 +348,95 @@ def check(
     typer.echo(f"OK: loaded '{book.title}' with {_count_toc(book.toc)} TOC entries")
     if strict:
         typer.echo("[stub] --strict content checks not yet implemented")
+
+
+@app.command("sync-deps")
+def sync_deps(
+    book_file: Path = typer.Option(
+        Path("book.yml"),
+        "--book",
+        "-b",
+        help="Path to the book.yml config.",
+        exists=True,
+        dir_okay=False,
+    ),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help=(
+            "Don't modify any files. Exit non-zero if any notebook would have "
+            "its PEP 723 block updated. Suitable for a CI hook."
+        ),
+    ),
+) -> None:
+    """Write or refresh PEP 723 ``# /// script`` blocks in TOC ``.py`` notebooks.
+
+    Walks every notebook entry in ``book.yml``'s TOC, derives its
+    dependency list (AST-walks imports, maps to PyPI distributions
+    via marimo's table, applies ``dependencies.extras`` and
+    ``dependencies.overrides``), and updates the file's PEP 723 block
+    in place.
+
+    Existing blocks are *merged* rather than overwritten — any
+    ``requires-python``, ``tool.uv`` table, or hand-curated dependency
+    that's already there is preserved; new dependencies are added.
+    Run this before sharing a notebook with molab or pushing to a
+    repo whose CI builds in WASM mode, so the block lands in version
+    control instead of only existing in build output.
+
+    With ``--check``, the command leaves files unchanged and exits
+    code 1 if any notebook is missing or out-of-date relative to its
+    detected imports + ``book.yml``'s ``dependencies`` config.
+    """
+    from .preprocessor import _iter_file_entries, _running_python_version_constraint
+
+    book = _load_or_exit(book_file)
+    book_dir = book_file.resolve().parent
+    deps_cfg = book.dependencies
+    requires_python = deps_cfg.requires_python or _running_python_version_constraint()
+
+    py_entries = [e for e in _iter_file_entries(book.toc) if e.file.suffix == ".py"]
+    if not py_entries:
+        typer.echo("No marimo .py notebooks in TOC.")
+        return
+
+    changed: list[Path] = []
+    skipped: list[Path] = []
+
+    for entry in py_entries:
+        src_abs = (book_dir / entry.file).resolve()
+        if not src_abs.exists():
+            typer.echo(f"  skip: {entry.file} (missing)", err=True)
+            skipped.append(src_abs)
+            continue
+        before = src_abs.read_text(encoding="utf-8")
+        deps = derive_dependencies(
+            before,
+            extras=deps_cfg.extras,
+            overrides=deps_cfg.overrides,
+            pin=deps_cfg.pin,
+        )
+        after = write_pep723_block(before, deps, requires_python=requires_python)
+        if after == before:
+            continue
+        changed.append(src_abs)
+        if check:
+            typer.echo(f"  would update: {entry.file}")
+        else:
+            src_abs.write_text(after, encoding="utf-8")
+            typer.echo(f"  updated: {entry.file}")
+
+    if check and changed:
+        typer.echo(
+            f"sync-deps --check: {len(changed)} notebook(s) need updates.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if not changed:
+        typer.echo(f"All {len(py_entries)} notebook(s) up to date.")
+    else:
+        verb = "would update" if check else "updated"
+        typer.echo(f"sync-deps: {verb} {len(changed)} of {len(py_entries)} notebook(s).")
 
 
 @app.command("clean")

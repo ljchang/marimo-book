@@ -141,20 +141,33 @@ def export_notebook_with_overrides(
         )
 
 
-def cleanup_orphan_precompute_dirs(content_dir: Path) -> int:
-    """Remove leaked ``marimo_book_precompute_*`` dirs in ``content_dir``.
+_ORPHAN_TEMP_PREFIXES: tuple[str, ...] = (
+    "marimo_book_precompute_",  # from export_notebook_with_overrides
+    "marimo_book_pep723_",  # from preprocessor's PEP 723 staging
+)
 
-    These are created by :func:`export_notebook_with_overrides` and removed
-    by its ``TemporaryDirectory`` context manager on normal exit. If the
-    process is interrupted mid-precompute (Ctrl-C, watcher restart, OOM)
-    the dir leaks and pollutes the source tree. Called from the
-    preprocessor before each build.
+
+def cleanup_orphan_precompute_dirs(content_dir: Path) -> int:
+    """Remove leaked marimo-book temp dirs in ``content_dir``.
+
+    Sweeps both ``marimo_book_precompute_*`` (from
+    :func:`export_notebook_with_overrides`) and ``marimo_book_pep723_*``
+    (from the preprocessor's PEP 723 sibling-tempdir staging). These
+    are created next to the source notebook so marimo's cell-execution
+    cwd resolves relative imports correctly, and removed by their
+    ``TemporaryDirectory`` context managers on normal exit. If the
+    process is interrupted (Ctrl-C, watcher restart, OOM) the dir
+    leaks and pollutes the source tree. Called from the preprocessor
+    before each build.
+
+    The function name is preserved for back-compat with callers; the
+    sweep covers both prefixes regardless.
     """
     if not content_dir.is_dir():
         return 0
     removed = 0
     for child in content_dir.iterdir():
-        if child.is_dir() and child.name.startswith("marimo_book_precompute_"):
+        if child.is_dir() and child.name.startswith(_ORPHAN_TEMP_PREFIXES):
             shutil.rmtree(child, ignore_errors=True)
             removed += 1
     return removed

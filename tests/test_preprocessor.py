@@ -6,11 +6,16 @@ import json
 import shutil
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
-from marimo_book.config import Book
-from marimo_book.preprocessor import Preprocessor
+from marimo_book.config import Book, Dependencies
+from marimo_book.preprocessor import Preprocessor, _maybe_stage_with_pep723
+from marimo_book.transforms.pep723 import (
+    has_pep723_block,
+    read_existing_dependencies,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 NOTEBOOK_FIXTURE = FIXTURES / "simple_notebook.py"
@@ -323,3 +328,170 @@ def test_cache_invalidates_when_staged_output_missing(tmp_path: Path) -> None:
     second = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
     assert second.pages_cached == 0
     assert second.pages_rendered == 2
+
+
+# --- PEP 723 staging --------------------------------------------------------
+
+
+def test_maybe_stage_disabled_yields_none(tmp_path: Path) -> None:
+    """``enabled=False`` is a fast no-op: no tempdir, no rewrite."""
+    src = tmp_path / "nb.py"
+    src.write_text("import numpy\n")
+    with _maybe_stage_with_pep723(src, Dependencies(), enabled=False) as staged:
+        assert staged is None
+
+
+def test_maybe_stage_writes_block_to_sibling_tempdir(tmp_path: Path) -> None:
+    """``enabled=True`` returns a sibling tempdir copy with PEP 723 injected.
+
+    The sibling location matters: marimo's cell-execution cwd is the
+    notebook's parent dir, so a copy under
+    ``src.parent/marimo_book_pep723_*/<name>.py`` keeps cwd-based
+    relative imports (``open("./data/foo.csv")``) resolving the same way
+    as in the original notebook.
+    """
+    src = tmp_path / "nb.py"
+    src.write_text("import marimo as mo\nimport numpy\nimport pandas\n")
+    with _maybe_stage_with_pep723(src, Dependencies(), enabled=True) as staged:
+        assert staged is not None
+        assert staged.exists()
+        # Sibling tempdir: parent of the staged file is a tempdir whose
+        # parent is the original notebook's parent.
+        assert staged.parent.parent == src.parent
+        assert staged.parent.name.startswith("marimo_book_pep723_")
+        rewritten = staged.read_text()
+        assert has_pep723_block(rewritten)
+        deps = read_existing_dependencies(rewritten)
+        assert deps == ["numpy", "pandas"]
+    # Tempdir cleaned up after context exit.
+    assert not staged.parent.exists()
+
+
+def test_maybe_stage_applies_extras_and_overrides(tmp_path: Path) -> None:
+    """Extras and overrides round-trip through the staged file's block."""
+    src = tmp_path / "nb.py"
+    src.write_text("import nltools\nimport my_internal\n")
+    deps_cfg = Dependencies(
+        extras=["nltools>=0.5"],
+        overrides={"my_internal": "my-internal-pkg"},
+    )
+    with _maybe_stage_with_pep723(src, deps_cfg, enabled=True) as staged:
+        assert staged is not None
+        deps = read_existing_dependencies(staged.read_text()) or []
+    # Extras win for nltools (version specifier preserved); override wins for my_internal.
+    assert "nltools>=0.5" in deps
+    assert "my-internal-pkg" in deps
+
+
+def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
+    """``stage_page`` for a WASM entry must call ``render_wasm_page`` with a
+    staged source path whose contents include both the PEP 723 block AND
+    the micropip bootstrap injected into the first ``@app.cell``.
+
+    Verified by mocking ``render_wasm_page`` to capture the args before
+    the tempdir is cleaned up.
+    """
+    from marimo_book.preprocessor import stage_page
+
+    book_dir = tmp_path
+    (book_dir / "content").mkdir()
+    nb = book_dir / "content" / "nb.py"
+    # Use the real fixture as the body so MarimoIslandGenerator never
+    # actually runs (we mock the call). Adding `import numpy` so we have
+    # something to install.
+    nb.write_text(NOTEBOOK_FIXTURE.read_text(encoding="utf-8") + "\nimport numpy\n")
+    docs_dir = tmp_path / "_site_src" / "docs"
+    docs_dir.mkdir(parents=True)
+
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py", "mode": "wasm"}],
+            "defaults": {"mode": "static"},
+        }
+    )
+    captured: dict[str, str] = {}
+
+    def fake_render(py_path, *, display_code=False, staged_source_path=None):
+        # Capture the staged source content while the tempdir still exists.
+        assert staged_source_path is not None, "WASM path must receive a staged source"
+        captured["content"] = staged_source_path.read_text()
+        return "<!-- mocked wasm body -->"
+
+    with patch("marimo_book.preprocessor.render_wasm_page", side_effect=fake_render):
+        stage_page(book, book_dir, book.toc[0], docs_dir)
+
+    # PEP 723 block present and lists numpy.
+    assert has_pep723_block(captured["content"])
+    deps = read_existing_dependencies(captured["content"]) or []
+    assert "numpy" in deps
+    # WASM bootstrap injected: try/except + await micropip.install in the
+    # first cell. Without this the islands runtime can't provision deps.
+    assert "await micropip.install" in captured["content"]
+    assert "except ImportError" in captured["content"]
+
+
+def test_stage_page_auto_pep723_static_mode_skips_bootstrap(tmp_path: Path) -> None:
+    """``auto_pep723: true`` for static pages writes the block but NOT the bootstrap.
+
+    The bootstrap is WASM-specific (the islands runtime can't install
+    deps any other way). Static pages run under a real Python env at
+    build time and don't need a runtime micropip call.
+    """
+    from marimo_book.preprocessor import stage_page
+
+    book_dir = tmp_path
+    (book_dir / "content").mkdir()
+    nb = book_dir / "content" / "nb.py"
+    nb.write_text(NOTEBOOK_FIXTURE.read_text(encoding="utf-8") + "\nimport numpy\n")
+    docs_dir = tmp_path / "_site_src" / "docs"
+    docs_dir.mkdir(parents=True)
+
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py"}],  # default static
+            "dependencies": {"auto_pep723": True},
+        }
+    )
+    captured: dict[str, str] = {}
+
+    def fake_render_marimo(src, book_arg, *, sandbox=False):
+        # Read content while the staged tempdir is still alive (it gets
+        # torn down on context exit, before the assertions below).
+        captured["content"] = Path(src).read_text(encoding="utf-8")
+        return "<!-- mocked -->"
+
+    with patch("marimo_book.preprocessor._render_marimo", side_effect=fake_render_marimo):
+        stage_page(book, book_dir, book.toc[0], docs_dir)
+
+    staged_content = captured["content"]
+    assert has_pep723_block(staged_content), "static auto_pep723 still emits the block"
+    assert "await micropip.install" not in staged_content, (
+        "static-mode pages must not get the WASM bootstrap"
+    )
+
+
+def test_stage_page_static_mode_skips_staging_by_default(tmp_path: Path) -> None:
+    """Static-mode pages don't get PEP 723 staging unless ``auto_pep723: true``."""
+    from marimo_book.preprocessor import stage_page
+
+    book_dir = tmp_path
+    (book_dir / "content").mkdir()
+    nb = book_dir / "content" / "nb.py"
+    nb.write_text(NOTEBOOK_FIXTURE.read_text(encoding="utf-8"))
+    docs_dir = tmp_path / "_site_src" / "docs"
+    docs_dir.mkdir(parents=True)
+
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
+    captured = {"args": None}
+
+    def fake_render(src, book_arg, *, sandbox=False):
+        captured["args"] = src
+        return "<!-- mocked -->"
+
+    with patch("marimo_book.preprocessor._render_marimo", side_effect=fake_render):
+        stage_page(book, book_dir, book.toc[0], docs_dir)
+
+    # Default static path receives the ORIGINAL source, not a staged copy.
+    assert captured["args"] == nb.resolve()

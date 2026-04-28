@@ -21,16 +21,20 @@ mkdocs installed.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import shutil
+import sys
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
-from .config import Book, FileEntry, SectionEntry, UrlEntry
+from .config import Book, Dependencies, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .shell import _nav_from_toc, emit_mkdocs_yml
 from .transforms.link_rewrites import apply_link_rewrites
@@ -38,6 +42,11 @@ from .transforms.marimo_export import (
     cells_to_markdown,
     cleanup_orphan_precompute_dirs,
     export_notebook,
+)
+from .transforms.pep723 import (
+    derive_dependencies,
+    inject_micropip_bootstrap,
+    write_pep723_block,
 )
 from .transforms.precompute import (
     WidgetCandidate,
@@ -257,6 +266,73 @@ def _splice_controls_inline(body: str, widget_html: str) -> str:
     if pos == -1:
         return widget_html + "\n\n" + body
     return body[:pos] + widget_html + "\n\n" + body[pos:]
+
+
+@contextlib.contextmanager
+def _maybe_stage_with_pep723(
+    src_abs: Path,
+    deps_cfg: Dependencies,
+    *,
+    enabled: bool,
+    wasm_bootstrap: bool = False,
+) -> Iterator[Path | None]:
+    """Yield a path to a sibling tempdir copy of ``src_abs`` with PEP 723 injected.
+
+    When ``enabled`` is False, yields ``None`` (callers fall back to the
+    original path). When True, walks the notebook's AST, derives the
+    dependency list, and writes a copy with a freshly-generated
+    ``# /// script`` block to a sibling tempdir of ``src_abs.parent``.
+
+    When ``wasm_bootstrap=True`` (set for ``mode: wasm`` pages), also
+    AST-injects ``await micropip.install([...])`` into the first
+    ``@app.cell`` of the staged copy. Marimo's islands JS bundle has
+    no codepath that reads PEP 723 — Pyodide's ``loadPackagesFromImports``
+    auto-loads bundled scientific packages by import-scanning, but
+    pure-Python PyPI-only deps (the dartbrains-flavoured ``nltools``
+    case) silently fail. Shipping the install call inside cell code
+    is currently the only way to provision them. See
+    :func:`~marimo_book.transforms.pep723.inject_micropip_bootstrap`.
+
+    The tempdir lives next to the original notebook (rather than under
+    ``.marimo_book_cache/``) so marimo's cell-execution cwd matches the
+    original source location — relative imports (``from .util import x``,
+    ``open("./data/foo.csv")``) keep resolving as the author intended.
+    The tempdir is removed on context exit; the orphan-sweep at build
+    start handles process-interrupted leaks.
+    """
+    if not enabled:
+        yield None
+        return
+
+    source = src_abs.read_text(encoding="utf-8")
+    deps = derive_dependencies(
+        source,
+        extras=deps_cfg.extras,
+        overrides=deps_cfg.overrides,
+        pin=deps_cfg.pin,
+    )
+    requires_python = deps_cfg.requires_python or _running_python_version_constraint()
+
+    # Order matters: AST-inject the bootstrap FIRST (round-trips through
+    # ast.unparse, dropping cell-level comments), then add the PEP 723
+    # block via the comment-preserving string-level writer. Doing it the
+    # other way around would have ast.unparse strip the just-written
+    # block too. Bootstrap fires only when wasm_bootstrap is set AND we
+    # have something to install.
+    new_source = source
+    if wasm_bootstrap and deps:
+        new_source = inject_micropip_bootstrap(new_source, deps)
+    new_source = write_pep723_block(new_source, deps, requires_python=requires_python)
+
+    with tempfile.TemporaryDirectory(prefix="marimo_book_pep723_", dir=src_abs.parent) as tmp_dir:
+        staged = Path(tmp_dir) / src_abs.name
+        staged.write_text(new_source, encoding="utf-8")
+        yield staged
+
+
+def _running_python_version_constraint() -> str:
+    """Default ``requires-python`` when one isn't specified — current ``X.Y``."""
+    return f">={sys.version_info.major}.{sys.version_info.minor}"
 
 
 def _file_sha256(path: Path) -> str:
@@ -626,16 +702,33 @@ def stage_page(
 
     mode = entry.effective_mode(book.defaults.mode)
     if src_abs.suffix == ".py":
-        if mode == "wasm":
-            # WASM-mode pages bypass our static cell rendering. Marimo's
-            # islands runtime takes over in the browser; the body we
-            # write here contains marimo's CDN-loaded scripts + the
-            # ``<marimo-island>`` web components for each cell.
-            body = render_wasm_page(src_abs)
-            apply_rewrites = False
-        else:
-            body = _render_marimo(src_abs, book, sandbox=sandbox)
-            apply_rewrites = True
+        # WASM pages always get the staging pipeline (PEP 723 block +
+        # micropip bootstrap injected into the first cell, since the
+        # islands runtime can't otherwise provision pure-Python PyPI
+        # deps). Static / sandbox pages opt in via
+        # ``dependencies.auto_pep723`` and only get the PEP 723 block;
+        # the bootstrap is WASM-specific. The build never modifies the
+        # source ``.py`` — it writes a sibling tempdir copy and feeds
+        # marimo that copy. Sibling-tempdir location matches the
+        # existing precompute pattern so cwd-based relative imports
+        # inside the notebook still resolve.
+        needs_pep723 = mode == "wasm" or book.dependencies.auto_pep723
+        with _maybe_stage_with_pep723(
+            src_abs,
+            book.dependencies,
+            enabled=needs_pep723,
+            wasm_bootstrap=mode == "wasm",
+        ) as staged:
+            if mode == "wasm":
+                # WASM-mode pages bypass our static cell rendering. Marimo's
+                # islands runtime takes over in the browser; the body we
+                # write here contains marimo's CDN-loaded scripts + the
+                # ``<marimo-island>`` web components for each cell.
+                body = render_wasm_page(src_abs, staged_source_path=staged)
+                apply_rewrites = False
+            else:
+                body = _render_marimo(staged or src_abs, book, sandbox=sandbox)
+                apply_rewrites = True
     elif src_abs.suffix == ".md":
         body = _render_markdown(src_abs)
         apply_rewrites = True

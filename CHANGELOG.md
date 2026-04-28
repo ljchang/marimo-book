@@ -5,6 +5,47 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] — 2026-04-28
+
+### Fixed
+
+- **Precompute pages now mount the slider on first arrival via Material's
+  `navigation.instant`** — no more "hard refresh to see the slider" UX.
+  The `<script type="application/json">` blocks the JS shim was reading
+  triggered Material's instant-nav script-handler with
+  `SyntaxError: Failed to execute 'replaceWith' on 'Element': Unexpected
+  token ':'` on JSON's first colon, silently dropping the script element
+  from the swapped DOM and leaving the shim with no data. Switched all
+  four emitter sites (widget metadata + lookup table for both independent
+  and joint-group widgets) to
+  `<div class="marimo-book-precompute-data" markdown="0"><template>{json}</template></div>`.
+  `<template>` isn't a script so Material's handler ignores it; the
+  `<div markdown="0">` wrapper opts out of the `md_in_html` Markdown
+  extension's recursive processing — without it, CommonMark's
+  backslash-escape rule rewrites `\\D` → `\D` mid-pipeline on JS regex
+  literals embedded in cell HTML, producing invalid JSON. New
+  `_safe_json_for_template` helper escapes literal `<` `>` `&` to JSON
+  unicode escapes (`<` etc.) so the payload contains no markup the
+  HTML parser would misinterpret. The JS reader (`readPrecomputeJson`)
+  accepts both `<template>` (current emitter) and `<script>` (legacy)
+  for stale-cache rollover safety.
+- **Plotly figures inside precompute reactive cells no longer disappear
+  when the slider moves.** `applyValue` rewrites a cell's HTML via
+  `el.innerHTML = baseSnapshot[idx]`, swapping in a build-time static
+  snapshot that contains an un-hydrated `<div class="marimo-book-plotly"
+  data-figure="...">` placeholder; previously hydrated plots were
+  obliterated. Now `hydratePlotly(el)` runs after each swap (both
+  independent-widget and joint-group `applyValue` paths). Idempotent
+  via `[data-mb-plotly]` so already-hydrated mounts aren't re-rendered.
+- **Spurious console.error spam during instant-nav arrivals downgraded
+  to console.debug.** `bootAll` fires twice on instant-nav
+  (`DOMContentLoaded`/immediate-eval + `document$.subscribe`); the first
+  call sometimes catches a transient DOM where the precompute template
+  is in the tree but its text content hasn't been integrated yet, and
+  `JSON.parse` rejects on a truncated payload. The second call recovers
+  in milliseconds. The error log was misleading users into believing
+  the slider was broken when it was about to mount.
+
 ## [0.1.10] — 2026-04-28
 
 ### Fixed

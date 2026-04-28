@@ -5,39 +5,55 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.9] — 2026-04-28
 
 ### Added
 
-- **WASM-mode pages now provision third-party deps via in-browser
+- **WASM-mode pages now auto-install third-party deps via in-browser
   `micropip`.** Marimo's islands JS bundle auto-loads
   Pyodide-bundled scientific packages (numpy, pandas, scipy, sklearn,
   matplotlib, nilearn, nibabel, …) by import-scanning each cell, but
-  pure-Python PyPI-only deps (the dartbrains-flavoured `nltools`
-  case) silently failed because the bundle has no PEP 723 / micropip
-  hook. The preprocessor now AST-injects a try/except
-  `await micropip.install([...])` block at the top of the first
-  `@app.cell` function in the staged WASM copy of each notebook, with
-  the install list derived from a fresh AST walk of the notebook's
+  pure-Python PyPI-only deps (the dartbrains-flavoured `nltools` /
+  `dartbrains-tools` case) silently failed because the islands runtime
+  has no PEP 723 / micropip codepath. The preprocessor now stages a
+  sibling-tempdir copy of each WASM notebook with two transforms
+  injected: (1) a freshly-generated `# /// script` PEP 723 block at
+  the top of the file, derived from a fresh AST walk of the notebook's
   imports + marimo's own ~777-entry import → PyPI distribution
-  mapping table. Pyodide's micropip filters out packages already in
-  `sys.modules`, so the install call is safe to issue with the full
-  dep list and no separate "Pyodide-bundled" manifest needs
-  maintaining. The try/except wraps `ImportError` so build-time
-  CPython execution (where `micropip` doesn't exist) doesn't crash.
-- **Auto-generated PEP 723 blocks for marimo notebooks.** The
-  preprocessor stages a sibling-tempdir copy of each notebook with a
-  freshly-generated `# /// script` block prepended; the build never
-  modifies source `.py` files. WASM pages get the block
-  unconditionally (paired with the micropip bootstrap above);
-  static/sandbox pages opt in with `dependencies.auto_pep723: true`.
-  New `marimo-book sync-deps [--check]` CLI command commits
-  generated blocks back into source notebooks for portability to
-  `molab` / version control. New `dependencies.{auto_pep723, pin,
-  extras, overrides, requires_python}` fields in `book.yml`.
+  mapping table, and (2) a new `@app.cell async def _():` after the
+  `app = marimo.App(...)` line (and after any `with app.setup:`
+  block) whose body does `await micropip.install([...])` and returns
+  a sentinel `_marimo_book_micropip_done = True`. That sentinel is
+  appended as a parameter to every existing `@app.cell` function so
+  marimo's dataflow scheduler runs the install before any other
+  cell — without rewriting any user cell body. Pyodide's micropip
+  filters by `sys.modules`, so passing the full dep list across all
+  pages is safe (bundled packages no-op). The install is wrapped in
+  `try/except ImportError` so build-time CPython execution (where
+  `micropip` doesn't exist) doesn't crash. Notebooks with `with
+  app.setup:` blocks are supported but emit an informational note —
+  setup-block imports run at module-import time before any cell, and
+  `await` is invalid at module level, so any non-Pyodide-bundled
+  imports in the setup block must be moved to a regular `@app.cell`.
+- **Auto-generated PEP 723 blocks for marimo notebooks.** WASM pages
+  get the block unconditionally (paired with the micropip bootstrap
+  above); static and sandbox pages opt in with
+  `dependencies.auto_pep723: true` — useful for `molab` / sandbox
+  reproducibility. The build never modifies your source `.py` files;
+  blocks live only in the staged tempdir copy marimo reads at build
+  time. New `marimo-book sync-deps [--check]` CLI commits generated
+  blocks back into source notebooks when you want them under version
+  control. New `dependencies.{auto_pep723, pin, extras, overrides,
+  requires_python}` fields in `book.yml`.
 
 ### Changed
 
+- **WASM pages no longer show a static "Initializing…" spinner above
+  the rendered cells.** The `MarimoIslandGenerator` init island's
+  hide-trigger is unreliable and the spinner was lingering over
+  already-working reactive cells. Cells' static-export initial output
+  covers the hydration window, so dropping the spinner is a clean UX
+  win.
 - **Sidebar logo (`logo_placement: sidebar`) is now horizontally
   centered in the sidebar column** instead of left-flush. The previous
   asymmetric padding tried to align the logo with chapter section

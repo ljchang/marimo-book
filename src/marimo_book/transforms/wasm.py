@@ -21,6 +21,37 @@ The head + body are concatenated and embedded in the staged ``.md``.
 ``style=""`` suppresses marimo's default ``max-width: 740px`` wrapper
 so Material's content area controls width.
 
+**Dependency loading in islands (and why PEP 723 alone doesn't fix it).**
+``MarimoIslandGenerator`` does not propagate any dependency manifest
+into its rendered HTML, and the ``@marimo-team/islands`` worker
+bundle has no codepath that reads ``<marimo-code>`` or PEP 723
+metadata from the page. The bundle uses two distinct package paths:
+
+- ``pyodide.loadPackagesFromImports(cell_source)`` — auto-loads
+  Pyodide-bundled scientific packages (numpy, pandas, scipy, sklearn,
+  matplotlib, sympy, nilearn, nibabel, …) by AST-scanning cell code
+  for imports. This is how most scientific notebooks "just work".
+- ``micropip.install(<hardcoded list>)`` at bootstrap — installs
+  marimo itself plus a fixed set (jedi, pygments, docutils,
+  pyodide_http, plus pandas/duckdb/sqlglot/pyarrow when ``mo.sql``
+  or polars is detected). The list is baked into the JS bundle; no
+  path lets a notebook's PEP 723 block extend it.
+
+The result for dartbrains-flavoured pages: any third-party package
+that's pure-Python on PyPI but **not** in Pyodide's bundle (the
+canonical example being ``nltools``) silently fails to import in the
+browser, and there is no add-deps hook in the islands runtime to fix
+it from the host page. The fundamental fix requires either switching
+this module to ``marimo export html-wasm`` (which DOES read PEP 723)
+or upstream changes to the islands runtime.
+
+The preprocessor still stages a copy of the notebook with an
+auto-generated PEP 723 block before handing it to
+``MarimoIslandGenerator`` — that block is invisible to the islands
+runtime today, but it's the correct manifest, useful for sandbox
+mode, ``marimo-book sync-deps`` (molab portability), and as the
+prerequisite for any future migration to the html-wasm export path.
+
 Static reactivity (``precompute.enabled``) is automatically a no-op
 for WASM-rendered pages: the preprocessor's ``_run_precompute`` is
 called only for static-mode entries.
@@ -62,7 +93,12 @@ from marimo import MarimoIslandGenerator
 from .anywidgets import rewrite_anywidget_html
 
 
-def render_wasm_page(py_path: Path, *, display_code: bool = False) -> str:
+def render_wasm_page(
+    py_path: Path,
+    *,
+    display_code: bool = False,
+    staged_source_path: Path | None = None,
+) -> str:
     """Render a marimo notebook as a WASM-interactive page body.
 
     Returns a single string suitable for splicing into the staged
@@ -76,8 +112,17 @@ def render_wasm_page(py_path: Path, *, display_code: bool = False) -> str:
     ``display_code`` toggles whether each cell's source is shown
     alongside its output. The default is False (output only) since
     marimo notebooks typically use ``hide_code=True`` setup cells.
+
+    ``staged_source_path``: when provided, ``MarimoIslandGenerator``
+    reads from this path instead of ``py_path``. Used by the
+    preprocessor to feed marimo a copy of the notebook with an
+    auto-generated PEP 723 inline-metadata block, so the WASM Pyodide
+    kernel knows which packages to ``micropip.install`` before any
+    cell runs. ``py_path`` is still accepted for backwards
+    compatibility and standalone test usage.
     """
-    gen = MarimoIslandGenerator.from_file(str(py_path), display_code=display_code)
+    target = staged_source_path or py_path
+    gen = MarimoIslandGenerator.from_file(str(target), display_code=display_code)
     asyncio.run(gen.build())
     head = gen.render_head()
     body = gen.render_body(style="")

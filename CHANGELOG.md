@@ -5,6 +5,37 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **WASM-mode pages now provision third-party deps via in-browser
+  `micropip`.** Marimo's islands JS bundle auto-loads
+  Pyodide-bundled scientific packages (numpy, pandas, scipy, sklearn,
+  matplotlib, nilearn, nibabel, …) by import-scanning each cell, but
+  pure-Python PyPI-only deps (the dartbrains-flavoured `nltools`
+  case) silently failed because the bundle has no PEP 723 / micropip
+  hook. The preprocessor now AST-injects a try/except
+  `await micropip.install([...])` block at the top of the first
+  `@app.cell` function in the staged WASM copy of each notebook, with
+  the install list derived from a fresh AST walk of the notebook's
+  imports + marimo's own ~777-entry import → PyPI distribution
+  mapping table. Pyodide's micropip filters out packages already in
+  `sys.modules`, so the install call is safe to issue with the full
+  dep list and no separate "Pyodide-bundled" manifest needs
+  maintaining. The try/except wraps `ImportError` so build-time
+  CPython execution (where `micropip` doesn't exist) doesn't crash.
+- **Auto-generated PEP 723 blocks for marimo notebooks.** The
+  preprocessor stages a sibling-tempdir copy of each notebook with a
+  freshly-generated `# /// script` block prepended; the build never
+  modifies source `.py` files. WASM pages get the block
+  unconditionally (paired with the micropip bootstrap above);
+  static/sandbox pages opt in with `dependencies.auto_pep723: true`.
+  New `marimo-book sync-deps [--check]` CLI command commits
+  generated blocks back into source notebooks for portability to
+  `molab` / version control. New `dependencies.{auto_pep723, pin,
+  extras, overrides, requires_python}` fields in `book.yml`.
+
 ## [0.1.8] — 2026-04-28
 
 ### Fixed

@@ -111,3 +111,88 @@ def test_clean_leaves_content_and_book_yml(runner: CliRunner, tmp_path: Path) ->
     assert result.exit_code == 0
     assert book_file.exists()
     assert (tmp_path / "content" / "x.md").exists()
+
+
+# --- sync-deps --------------------------------------------------------------
+
+
+def _make_book_with_notebook(tmp_path: Path, source: str) -> Path:
+    """Lay down a minimal book with one ``.py`` notebook entry; return book.yml path."""
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "nb.py").write_text(source, encoding="utf-8")
+    book_yml = tmp_path / "book.yml"
+    book_yml.write_text("title: T\ntoc:\n  - file: content/nb.py\n", encoding="utf-8")
+    return book_yml
+
+
+def test_sync_deps_adds_block_to_bare_notebook(runner: CliRunner, tmp_path: Path) -> None:
+    """A notebook without a PEP 723 block gets one written in place."""
+    book_yml = _make_book_with_notebook(
+        tmp_path, "import marimo as mo\nimport numpy\nimport pandas\n"
+    )
+    result = runner.invoke(app, ["sync-deps", "-b", str(book_yml)])
+    assert result.exit_code == 0, result.output
+    rewritten = (tmp_path / "content" / "nb.py").read_text(encoding="utf-8")
+    assert rewritten.startswith("# /// script\n")
+    assert '"numpy"' in rewritten
+    assert '"pandas"' in rewritten
+    # marimo itself is excluded from the dependency list (provided by runtime).
+    assert '"marimo"' not in rewritten
+
+
+def test_sync_deps_check_exits_nonzero_when_block_missing(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """``--check`` must not modify files and must signal divergence via exit code."""
+    book_yml = _make_book_with_notebook(tmp_path, "import numpy\n")
+    before = (tmp_path / "content" / "nb.py").read_text(encoding="utf-8")
+    result = runner.invoke(app, ["sync-deps", "-b", str(book_yml), "--check"])
+    assert result.exit_code == 1
+    assert "would update" in result.output
+    after = (tmp_path / "content" / "nb.py").read_text(encoding="utf-8")
+    assert after == before, "--check must not modify files"
+
+
+def test_sync_deps_check_passes_when_already_up_to_date(runner: CliRunner, tmp_path: Path) -> None:
+    """Idempotency: running sync-deps then --check yields exit 0."""
+    book_yml = _make_book_with_notebook(tmp_path, "import marimo as mo\nimport numpy\n")
+    first = runner.invoke(app, ["sync-deps", "-b", str(book_yml)])
+    assert first.exit_code == 0
+    second = runner.invoke(app, ["sync-deps", "-b", str(book_yml), "--check"])
+    assert second.exit_code == 0, second.output
+
+
+def test_sync_deps_preserves_existing_block_keys(runner: CliRunner, tmp_path: Path) -> None:
+    """Hand-curated ``[tool.uv]`` and ``requires-python`` survive a sync."""
+    source = """# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "numpy",
+# ]
+#
+# [tool.uv]
+# extra-index-url = ["https://example/"]
+# ///
+
+import numpy
+import pandas
+"""
+    book_yml = _make_book_with_notebook(tmp_path, source)
+    result = runner.invoke(app, ["sync-deps", "-b", str(book_yml)])
+    assert result.exit_code == 0, result.output
+    rewritten = (tmp_path / "content" / "nb.py").read_text(encoding="utf-8")
+    assert 'requires-python = ">=3.12"' in rewritten
+    assert "[tool.uv]" in rewritten
+    assert "https://example/" in rewritten
+    assert '"pandas"' in rewritten
+
+
+def test_sync_deps_no_py_notebooks_in_toc(runner: CliRunner, tmp_path: Path) -> None:
+    """A book with only Markdown entries is a no-op (informational message)."""
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# x")
+    book_yml = tmp_path / "book.yml"
+    book_yml.write_text("title: T\ntoc:\n  - file: content/intro.md\n")
+    result = runner.invoke(app, ["sync-deps", "-b", str(book_yml)])
+    assert result.exit_code == 0
+    assert "No marimo .py notebooks" in result.output

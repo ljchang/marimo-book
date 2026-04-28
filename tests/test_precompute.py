@@ -771,12 +771,12 @@ def test_precompute_lookup_table_values_are_rendered_html(tmp_path: Path) -> Non
 
     staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
     match = re.search(
-        r'<script type="application/json" class="marimo-book-precompute-table"[^>]*>'
-        r"(.*?)</script>",
+        r'<template class="marimo-book-precompute-table"[^>]*>'
+        r"(.*?)</template>",
         staged,
         re.DOTALL,
     )
-    assert match is not None, "lookup-table script not emitted"
+    assert match is not None, "lookup-table template not emitted"
     table = json.loads(match.group(1))
     # Values 2 and 3 are non-default; both should be HTML.
     assert {"2", "3"}.issubset(table.keys()), table.keys()

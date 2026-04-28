@@ -5,6 +5,31 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] — 2026-04-28
+
+### Fixed
+
+- **Precompute slider control panel now mounts above the cell that
+  actually consumes the widget**, not above the first cell whose
+  output happens to differ across re-exports. The previous "first
+  reactive cell by diff" heuristic was fragile: any non-deterministic
+  upstream output (sklearn `random_state`, plotly trace IDs, repr
+  addresses, transient prints, library deprecation warnings, …) made
+  upstream cells appear reactive and the slider mounted there,
+  leaving the actual viewer far below it on the page. The new anchor
+  is AST-derived: the source-order-earliest `@app.cell` whose
+  function parameter list contains a widget variable name. Marimo's
+  parameter list IS the data-flow graph, so this is a strict
+  improvement on the diff heuristic. Falls back to the legacy
+  first-reactive-cell behaviour when no consumer is found in the AST
+  (defensive — should never happen on a valid notebook). The
+  motivating case was dartbrains' ICA chapter: the brain viewer cell
+  is the only cell taking `component_slider` as a parameter, so the
+  slider now mounts immediately above it. New
+  `find_widget_consumer_cell_idx(source, widget_var_names)` helper
+  in `transforms.precompute`; new `splice_anchor_cell_idx` field on
+  `PrecomputeResult`.
+
 ## [0.1.9] — 2026-04-28
 
 ### Added

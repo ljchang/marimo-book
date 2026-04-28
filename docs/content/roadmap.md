@@ -11,7 +11,7 @@ The 0.1 series is the first stable surface — all the CLI commands,
 the `book.yml` schema, the preprocessor pipeline, anywidget +
 Plotly + WASM rendering, static-reactivity precompute, the build
 cache, and Material-shell theming all ship today. See the
-[changelog](../changelog.md) for the granular release-by-release
+[changelog](changelog.md) for the granular release-by-release
 history; below is what's coming next.
 
 ## Next up (v0.2, in planning)

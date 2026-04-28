@@ -198,7 +198,7 @@ by default; opt in per book.
 | `precompute.max_bytes_per_page` | int | `10485760` (10 MB) | Inline-table budget. Bump to 50 MB for chapters whose per-render output is large (e.g. inline brain HTML viewers) |
 | `precompute.exclude_pages[]` | list of paths | `[]` | Pages listed here render every widget as static even when the global flag is on |
 
-See [Building → Static reactivity](building.md#static-reactivity-precompute)
+See [Building → Static reactivity](building.md#static-reactivity)
 for the full pipeline + tuning guide.
 
 ### Bibliography

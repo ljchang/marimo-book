@@ -266,6 +266,81 @@ def _(NetMagnetizationWidget, mo, n_protons_slider, b0_on_toggle):
     assert parsed_map == {"n_protons": "A-0", "b0_on": "A-1"}, parsed_map
 
 
+def test_wasm_anywidget_signature_disambiguates_same_label_across_widgets() -> None:
+    """Two sliders sharing a label but with different ranges resolve to
+    distinct object-ids, not whichever happened to render first.
+
+    Concrete case from dartbrains' Preprocessing.py: TransformCubeWidget
+    and CostFunctionWidget both label their first slider "Translate X",
+    but the cube uses range -15..15 step 0.5 while the cost function uses
+    0..20 step 1. Pre-fix, both widgets resolved to the cube's object-id
+    because the global label→object-id map was first-wins.
+    """
+    import json
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    notebook_src = """
+import marimo
+app = marimo.App()
+
+@app.cell
+def _(mo):
+    cube_tx = mo.ui.slider(start=-15, stop=15, step=0.5, value=0, label="Translate X")
+    cost_tx = mo.ui.slider(start=0, stop=20, step=1, value=0, label="Translate X")
+    return cube_tx, cost_tx
+
+@app.cell
+def _(TransformCubeWidget, mo, cube_tx):
+    _w = TransformCubeWidget(trans_x=float(cube_tx.value))
+    _wrapped = mo.ui.anywidget(_w)
+    _wrapped
+    return
+
+@app.cell
+def _(CostFunctionWidget, mo, cost_tx):
+    _w = CostFunctionWidget(trans_x=float(cost_tx.value))
+    _wrapped = mo.ui.anywidget(_w)
+    _wrapped
+    return
+"""
+    body = (
+        # Slider definition island: two sliders, same label, different ranges
+        '<marimo-island data-cell-id="defs">'
+        '<marimo-ui-element object-id="defs-0">'
+        '<marimo-slider data-label=\'"Translate X"\' data-start="-15" data-stop="15" data-step="0.5"></marimo-slider>'
+        '</marimo-ui-element>'
+        '<marimo-ui-element object-id="defs-1">'
+        '<marimo-slider data-label=\'"Translate X"\' data-start="0" data-stop="20" data-step="1"></marimo-slider>'
+        '</marimo-ui-element>'
+        '</marimo-island>'
+        # TransformCubeWidget mount
+        '<marimo-island data-cell-id="cube">'
+        '<marimo-ui-element object-id="cube-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+        # CostFunctionWidget mount
+        '<marimo-island data-cell-id="cost">'
+        '<marimo-ui-element object-id="cost-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m2"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+    )
+    out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
+    from bs4 import BeautifulSoup
+    parsed = BeautifulSoup(out, "lxml")
+    blob = parsed.find("script", attrs={
+        "type": "application/json",
+        "class": "marimo-book-anywidget-drivers",
+    })
+    assert blob is not None
+    registry = json.loads(blob.string)
+    # The fix: each widget resolves to its OWN slider's object-id, not
+    # whichever happened to render first.
+    assert registry == {
+        "cube-0": {"trans_x": "defs-0"},
+        "cost-0": {"trans_x": "defs-1"},
+    }, registry
+
+
 def test_wasm_anywidget_no_driver_map_when_no_slider_kwargs() -> None:
     """Widgets that use only literal kwargs (no `slider.value` references)
     get NO data-driven-by attribute — preserves backwards compatibility

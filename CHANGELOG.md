@@ -5,6 +5,31 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.16] — 2026-04-29
+
+### Fixed
+
+- **Sliders sharing a label across cells now resolve to distinct widgets.**
+  v0.1.15 matched widget kwargs to rendered sliders by `data-label`
+  alone, with a first-wins `setdefault`. The dartbrains motivating case
+  hit this on Preprocessing.py: the TransformCubeWidget and the
+  CostFunctionWidget both label their first translation slider
+  "Translate X", but the cube's covers `-15..15` step `0.5` while the
+  cost function's covers `0..20` step `1`. With label-only matching, the
+  CostFunctionWidget's `trans_x` resolved to the cube's slider object-id,
+  so dragging the cost function's "Translate X" silently moved the
+  cube's matrix readout instead of its own.
+
+  Fix: match on the discriminating tuple
+  ``(control_tag, label, start, stop, step)`` extracted from the AST
+  call site (`mo.ui.slider(start=…, stop=…, step=…, label=…)`) and the
+  rendered control's `data-start`/`data-stop`/`data-step`/`data-label`
+  attrs. Two sliders sharing a label but with different numeric ranges
+  now get distinct signatures and resolve correctly. Falls back to
+  label-only when the AST signature can't be reconstructed (e.g. slider
+  built with non-literal kwargs), preserving the previous best-effort
+  behaviour for that path.
+
 ## [0.1.15] — 2026-04-29
 
 ### Fixed

@@ -346,11 +346,22 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
         return
 
     # Pass 1: scan AST for slider definitions and widget constructions.
-    var_to_label: dict[str, str] = {}
+    #
+    # Each `var = mo.ui.<control>(label=…, start=…, stop=…, step=…)` is keyed
+    # by a discriminating signature tuple so two sliders sharing the same
+    # `label` (e.g. both Preprocessing.py's TransformCubeWidget translation
+    # slider and CostFunctionWidget's translation slider use "Translate X")
+    # map to distinct rendered controls. The signature includes the control
+    # tag (so sliders, switches, dropdowns never collide with each other)
+    # plus the slider numeric range. Exact-match against the data-* attrs
+    # on the rendered <marimo-slider> element resolves the right object-id
+    # even across cells.
+    var_to_signature: dict[str, tuple] = {}
+    var_to_label: dict[str, str] = {}  # kept for the AST→label fallback path
     widget_drivers_in_order: list[dict[str, str]] = []
     for cell_func in _iter_app_cell_functions(tree):
         for child in ast.walk(cell_func):
-            # `var = mo.ui.<control>(label="...")` — record var → label.
+            # `var = mo.ui.<control>(label="...", start=…, stop=…, step=…)`
             if (
                 isinstance(child, ast.Assign)
                 and len(child.targets) == 1
@@ -358,9 +369,12 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
                 and isinstance(child.value, ast.Call)
                 and _is_ui_control_call(child.value)
             ):
-                label = _extract_label_kwarg(child.value)
-                if label is not None:
-                    var_to_label[child.targets[0].id] = label
+                var_name = child.targets[0].id
+                sig = _slider_signature_from_ast(child.value)
+                if sig is not None:
+                    var_to_signature[var_name] = sig
+                    if sig[1] is not None:  # signature[1] is label
+                        var_to_label[var_name] = sig[1]
             # `WidgetClass(trait=var.value, ...)` or `WidgetClass(trait=float(var.value), ...)`.
             if isinstance(child, ast.Call):
                 name = _call_name(child)
@@ -379,7 +393,9 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
         return
 
     # Pass 2: walk rendered HTML for sliders/controls inside <marimo-ui-element>.
-    # Build label → object_id by matching the wrapped control's data-label.
+    # Build a primary signature → object-id index plus a secondary label → object-id
+    # fallback for AST cases where we couldn't synthesise a full signature.
+    signature_to_object_id: dict[tuple, str] = {}
     label_to_object_id: dict[str, str] = {}
     for ui_el in soup.find_all("marimo-ui-element"):
         obj_id = ui_el.get("object-id")
@@ -396,10 +412,11 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
         )
         if ctrl is None:
             continue
-        raw_label = ctrl.get("data-label")
-        text = _decode_marimo_attr_label(raw_label)
+        sig = _slider_signature_from_html(ctrl)
+        if sig is not None:
+            signature_to_object_id.setdefault(sig, obj_id)
+        text = _decode_marimo_attr_label(ctrl.get("data-label"))
         if text:
-            # First wins — labels should be unique within a page.
             label_to_object_id.setdefault(text, obj_id)
 
     # Pass 3: pair anywidget mounts (in DOM order) to widget constructions
@@ -424,10 +441,17 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
     for mount, drivers in zip(mounts, widget_drivers_in_order):
         resolved: dict[str, str] = {}
         for trait, var_name in drivers.items():
-            label = var_to_label.get(var_name)
-            if not label:
-                continue
-            obj_id = label_to_object_id.get(label)
+            obj_id: str | None = None
+            sig = var_to_signature.get(var_name)
+            if sig is not None:
+                obj_id = signature_to_object_id.get(sig)
+            if obj_id is None:
+                # Fallback when the AST signature couldn't be reconstructed
+                # (e.g. slider built with non-literal kwargs). Loses cross-
+                # cell discrimination but recovers the common single-use case.
+                label = var_to_label.get(var_name)
+                if label:
+                    obj_id = label_to_object_id.get(label)
             if obj_id:
                 resolved[trait] = obj_id
         if not resolved:
@@ -524,6 +548,82 @@ def _extract_value_var_ref(node: ast.expr) -> str | None:
     ):
         return _extract_value_var_ref(node.args[0])
     return None
+
+
+def _slider_signature_from_ast(call: ast.Call) -> tuple | None:
+    """Build a discriminating tuple from a `mo.ui.<control>(...)` call.
+
+    Tuple shape: ``(control_tag, label, start, stop, step)`` where
+    ``control_tag`` is the corresponding rendered element name
+    (``"marimo-slider"`` for ``mo.ui.slider``, etc.). ``start``/``stop``/
+    ``step`` are floats when present, otherwise None. The shape matches
+    what :func:`_slider_signature_from_html` extracts so two sliders with
+    the same ``label`` but different ranges (a common collision when one
+    notebook has both translation widgets) resolve to distinct rendered
+    object-ids. Returns None if the AST call has no extractable label
+    (i.e. nothing usable as a signature key).
+    """
+    func = call.func
+    if not isinstance(func, ast.Attribute):
+        return None
+    control_name = func.attr
+    if control_name not in _UI_CONTROL_FUNCS:
+        return None
+    label: str | None = None
+    start = stop = step = None
+    for kw in call.keywords:
+        if kw.arg == "label" and isinstance(kw.value, ast.Constant) and isinstance(
+            kw.value.value, str
+        ):
+            label = kw.value.value
+        elif kw.arg == "start":
+            start = _ast_numeric(kw.value)
+        elif kw.arg == "stop":
+            stop = _ast_numeric(kw.value)
+        elif kw.arg == "step":
+            step = _ast_numeric(kw.value)
+    if label is None:
+        return None
+    return (f"marimo-{control_name}", label, start, stop, step)
+
+
+def _slider_signature_from_html(ctrl: Tag) -> tuple | None:
+    """Build the matching tuple from a rendered control element.
+
+    Mirrors :func:`_slider_signature_from_ast` so the dict lookup hits
+    exactly. Marimo emits numeric attributes plain (``data-start="-15"``)
+    and string-like attributes JSON-wrapped (``data-label='"…"'``); we
+    parse each accordingly.
+    """
+    label = _decode_marimo_attr_label(ctrl.get("data-label"))
+    if label is None:
+        return None
+    start = _maybe_float(ctrl.get("data-start"))
+    stop = _maybe_float(ctrl.get("data-stop"))
+    step = _maybe_float(ctrl.get("data-step"))
+    return (ctrl.name, label, start, stop, step)
+
+
+def _ast_numeric(node: ast.expr) -> float | None:
+    """Extract an int/float from an AST node, including unary-minus literals."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(
+        node.value, bool
+    ):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        inner = _ast_numeric(node.operand)
+        if inner is not None:
+            return -inner
+    return None
+
+
+def _maybe_float(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return None
 
 
 def _decode_marimo_attr_label(raw: str | None) -> str | None:

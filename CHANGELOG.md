@@ -5,6 +5,50 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] — 2026-04-28
+
+### Fixed
+
+- **Anywidgets now render in WASM-mode pages.** Build-time
+  `rewrite_anywidget_html` rewrites every `<marimo-anywidget>` in
+  `MarimoIslandGenerator`'s initial render to our shim mount form
+  (`<div class="marimo-book-anywidget">`), so static + precompute
+  pages have always worked. WASM-mode pages were broken: once Pyodide
+  boots and the islands runtime re-executes anywidget cells, marimo's
+  React renderer emits FRESH `<marimo-anywidget>` elements with
+  `data-js-url="data:text/javascript;base64,..."` and the runtime's
+  `isTrustedVirtualFileUrl` check rejects every data URL emitted
+  before the kernel's `initialized` message wins the race against the
+  first batch of widget cells, throwing
+  `Refusing to load anywidget module from untrusted URL` and leaving
+  the cell output area empty (the dartbrains MR_Physics page was the
+  motivating case). New `installAnywidgetRuntimeIntercept()` in the
+  shim attaches a `MutationObserver` on `document.body` that watches
+  for runtime-emitted `<marimo-anywidget>` insertions, copies their
+  data-* attributes onto a fresh `<div class="marimo-book-anywidget">`,
+  replaces the original, and calls the same `hydrateMount` static
+  pages use — which loads the data URL via the host page's `import()`
+  (no trust check on the host) and wires up a local model. marimo's
+  React render fires first and logs the trust warning into a
+  now-doomed React tree, the observer then removes the element and
+  React's `disconnectedCallback` unmounts cleanly. `data-mb-rewrapped`
+  makes the rewrap idempotent. State sync trade-off matches the
+  existing static-mode shim: anywidget state set in the browser
+  doesn't round-trip to Pyodide, but cells that take `mo.ui.*`
+  controls as kwargs re-emit a new `<marimo-anywidget>` with updated
+  `data-initial-value` on each kernel re-execution, which the
+  observer re-hydrates with the new state. `<marimo-plotly>`
+  deliberately not intercepted — the islands runtime loads Plotly.js
+  from CDN and skips the trust check entirely.
+- **Precompute slider value swaps now also re-hydrate anywidgets.**
+  `applyValue` in the precompute shim now calls `hydrateAll(el)`
+  alongside the existing `hydratePlotly(el)` after each
+  `el.innerHTML = baseSnapshot[idx]` swap, so reactive cells whose
+  build-time snapshot includes an un-hydrated
+  `<div class="marimo-book-anywidget">` placeholder get hydrated when
+  the slider moves to a value that swaps in different widget HTML.
+  Idempotent via `[data-mb-hydrated]`.
+
 ## [0.1.11] — 2026-04-28
 
 ### Fixed

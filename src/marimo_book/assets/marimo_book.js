@@ -120,6 +120,89 @@
     });
   }
 
+  // ---- WASM-mode anywidget intercept --------------------------------------
+  //
+  // Build-time `rewrite_anywidget_html` rewrites every `<marimo-anywidget>`
+  // marimo emits into our `<div class="marimo-book-anywidget">` mount form,
+  // so static + precompute pages never see a `<marimo-anywidget>` in the DOM.
+  //
+  // WASM-mode pages are different. The build-time rewrite catches the
+  // initial render produced by `MarimoIslandGenerator.build()`, but once
+  // Pyodide boots in the browser and the islands runtime re-executes the
+  // anywidget cells, marimo's React renderer emits FRESH `<marimo-anywidget>`
+  // elements with `data-js-url="data:text/javascript;base64,..."` payloads.
+  // The islands runtime's `WidgetDefRegistry.getModule` then runs an
+  // `isTrustedVirtualFileUrl` check that rejects every data: URL emitted
+  // before the kernel has finished initialising (the trust flag is set by
+  // the kernel's `initialized` message — there's a race on the first batch
+  // of widget cells), throwing
+  //   "Refusing to load anywidget module from untrusted URL: data:..."
+  // and leaving the cell's output area empty.
+  //
+  // We intercept those runtime emissions with a MutationObserver on
+  // `document.body`. When a `<marimo-anywidget>` is inserted (anywhere,
+  // any depth), we copy its data-* attributes onto a fresh
+  // `<div class="marimo-book-anywidget">`, replace it, and call the same
+  // `hydrateMount` we use for the static-rewritten mounts — which loads
+  // the data: URL via the host page's `import()` (no trust check on the
+  // host) and wires up the local model. Marimo's React renderer fires
+  // first (and logs the trust warning into a now-doomed render), then
+  // the observer's callback fires and removes the element entirely; the
+  // React tree's disconnectedCallback unmounts cleanly.
+  //
+  // The current-static-shim model is local-only — anywidget state set in
+  // the browser doesn't round-trip to Pyodide. For widgets that take
+  // `mo.ui.*` controls as kwargs (where state flows kernel → widget),
+  // the cell re-execution will emit a new `<marimo-anywidget>` with
+  // updated `data-initial-value` and our intercept re-hydrates with the
+  // new state. For widgets the user mutates client-side (slider in the
+  // widget, button click), the change stays in the local model — same
+  // trade-off as static / precompute pages.
+  function rewrapMarimoAnywidget(node) {
+    if (!(node instanceof Element)) return;
+    if (node.tagName !== "MARIMO-ANYWIDGET") return;
+    if (node.dataset.mbRewrapped) return;
+    node.dataset.mbRewrapped = "1";
+    const div = document.createElement("div");
+    div.className = "marimo-book-anywidget";
+    for (const attr of node.attributes) {
+      if (attr.name === "data-mb-rewrapped") continue;
+      div.setAttribute(attr.name, attr.value);
+    }
+    node.replaceWith(div);
+    div.setAttribute("data-mb-hydrated", "1");
+    hydrateMount(div);
+  }
+
+  let _anywidgetObserver = null;
+  function installAnywidgetRuntimeIntercept(scope) {
+    scope = scope || document;
+    // Catch elements present at install time (defense if the runtime emitted
+    // some before our observer was attached).
+    scope.querySelectorAll("marimo-anywidget").forEach(rewrapMarimoAnywidget);
+    if (_anywidgetObserver) return;
+    if (typeof MutationObserver === "undefined") return;
+    _anywidgetObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (node.tagName === "MARIMO-ANYWIDGET") {
+            rewrapMarimoAnywidget(node);
+          } else if (node.querySelectorAll) {
+            // Marimo's runtime sometimes inserts a wrapper that contains
+            // the <marimo-anywidget> as a descendant rather than at top
+            // level — scan inside.
+            node.querySelectorAll("marimo-anywidget").forEach(rewrapMarimoAnywidget);
+          }
+        }
+      }
+    });
+    _anywidgetObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
   // ---- Static reactivity (precompute) ------------------------------------
   //
   // The preprocessor injects three things per page when book.precompute
@@ -283,10 +366,12 @@
         if (html !== undefined && el.innerHTML !== html) {
           el.innerHTML = html;
           // Cell HTML swapped in is a build-time static snapshot — any
-          // <div class="marimo-book-plotly"> inside is an un-hydrated
-          // placeholder. Re-run plotly hydration for this cell so the
-          // plots render in the new content. Idempotent via [data-mb-plotly].
+          // <div class="marimo-book-plotly"> or <div class="marimo-book-anywidget">
+          // inside is an un-hydrated placeholder. Re-run hydration for
+          // this cell so the plots / widgets render in the new content.
+          // Idempotent via [data-mb-plotly] / [data-mb-hydrated].
           hydratePlotly(el);
+          hydrateAll(el);
         }
       });
       if (typeof built.syncLabel === "function") built.syncLabel();
@@ -346,9 +431,10 @@
           : baseSnapshot[idx];
         if (html !== undefined && el.innerHTML !== html) {
           el.innerHTML = html;
-          // See applyValue in initPrecomputeForWidget — same plotly
-          // re-hydration concern.
+          // See applyValue in initPrecomputeForWidget — same re-hydration
+          // concern for both plotly and anywidget mounts.
           hydratePlotly(el);
+          hydrateAll(el);
         }
       });
       builders.forEach((b) => {
@@ -497,6 +583,7 @@
     initPrecomputeOnce(scope);
     mountHeaderButtons(scope);
     hydratePlotly(scope);
+    installAnywidgetRuntimeIntercept(document);
   }
 
   // Boot chain: belt-and-suspenders so we run on direct page loads AND

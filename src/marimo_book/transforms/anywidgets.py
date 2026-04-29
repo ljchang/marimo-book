@@ -403,23 +403,24 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
             label_to_object_id.setdefault(text, obj_id)
 
     # Pass 3: pair anywidget mounts (in DOM order) to widget constructions
-    # (in AST order) and emit data-driven-by on the PARENT <marimo-ui-element>.
+    # (in AST order). For each, build a {trait: object_id} map and store
+    # it BOTH on the mount/parent (for static + precompute paths) AND in
+    # a page-global JS registry keyed by parent <marimo-ui-element>'s
+    # object-id (for the WASM runtime path, where everything inside the
+    # marimo-island gets replaced on first kernel-driven render).
     #
-    # Why the parent and not the mount div: in WASM mode marimo's runtime
-    # eventually re-emits a fresh <marimo-anywidget> inside the same
-    # <marimo-ui-element> when the kernel finishes initialising; the
-    # MutationObserver intercept in marimo_book.js rewraps that fresh
-    # element to a NEW <div class="marimo-book-anywidget">, copying only
-    # marimo-known attributes (data-js-url, data-initial-value, etc.) —
-    # data-driven-by would be dropped. <marimo-ui-element>, in contrast,
-    # is never replaced; only its random-id attribute mutates. Putting
-    # data-driven-by on the parent keeps it stable across rewraps.
-    #
-    # Also fall back to setting it on the mount div for any consumer that
-    # checks there first (and for the static + precompute paths where
-    # the runtime never re-emits and the parent unwrap can drop the
-    # marimo-ui-element entirely).
+    # Why three storage locations:
+    #   - mount div: covers static + precompute, where the build-time
+    #     div is never replaced by anything.
+    #   - parent <marimo-ui-element>: defensive fallback for any path
+    #     where the parent survives but the inner div is rewrapped.
+    #   - page-global script blob: the only thing that survives WASM
+    #     mode's full island-content replacement. The runtime emits a
+    #     fresh <marimo-ui-element object-id="SFPL-0"> with the SAME
+    #     object-id as the build-time element, so the global lookup by
+    #     object-id reliably hits the right entry across that swap.
     mounts = soup.find_all("div", class_="marimo-book-anywidget")
+    object_id_to_drivers: dict[str, dict[str, str]] = {}
     for mount, drivers in zip(mounts, widget_drivers_in_order):
         resolved: dict[str, str] = {}
         for trait, var_name in drivers.items():
@@ -436,6 +437,30 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
         parent_ui = mount.find_parent("marimo-ui-element")
         if parent_ui is not None:
             parent_ui["data-driven-by"] = encoded
+            ui_obj_id = parent_ui.get("object-id")
+            if ui_obj_id:
+                object_id_to_drivers[ui_obj_id] = resolved
+
+    if object_id_to_drivers:
+        # Inject a top-of-body <script type="application/json"> blob the JS
+        # shim parses once at boot. Use a class (not id) so multiple WASM
+        # pages on the same site don't collide if Material's instant-nav
+        # ever leaves a stale blob around.
+        script = soup.new_tag(
+            "script",
+            attrs={
+                "type": "application/json",
+                "class": "marimo-book-anywidget-drivers",
+            },
+        )
+        script.string = json.dumps(object_id_to_drivers)
+        # Insert at the start of <body> if present, else before the first child.
+        body = soup.find("body")
+        target_parent = body if body is not None else soup
+        if target_parent.contents:
+            target_parent.insert(0, script)
+        else:
+            target_parent.append(script)
 
 
 def _iter_app_cell_functions(tree: ast.AST):

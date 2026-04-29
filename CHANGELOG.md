@@ -5,6 +5,32 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.15] — 2026-04-29
+
+### Fixed
+
+- **WASM-mode driver map now survives full island-content rebuild.**
+  v0.1.14 emitted `data-driven-by` on both the mount div and the
+  surrounding `<marimo-ui-element>`, expecting only the inner div to
+  be rewrapped by the runtime. Live verification on /Preprocessing/
+  showed something more aggressive: marimo's runtime *replaces every
+  descendant of `<marimo-island>`* on its first kernel-driven render,
+  not just the inner anywidget. The fresh `<marimo-ui-element>` keeps
+  the same `object-id` (so the runtime's UIElementRegistry stays
+  consistent) but `data-driven-by` is wiped along with everything else.
+  Symptoms: `parentDrivenBy: null` on every mount, model_ids in the
+  live DOM differing from the served HTML.
+
+  Fix: emit a page-global `<script type="application/json"
+  class="marimo-book-anywidget-drivers">{…}</script>` blob, keyed by
+  the widget's parent `<marimo-ui-element>.object-id`. The JS shim's
+  new `loadDriverRegistry()` parses it once at boot, and `readDrivenBy()`
+  now has three fallback layers: mount-div attribute → parent
+  ui-element attribute → global registry by object-id. The mount and
+  parent paths still cover static + precompute (where the registry
+  isn't strictly needed); the global registry is the only resort in
+  WASM mode after the kernel rebuilds the island.
+
 ## [0.1.14] — 2026-04-29
 
 ### Fixed

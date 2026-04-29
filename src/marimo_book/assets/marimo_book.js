@@ -91,23 +91,57 @@
   //      the new state — no DOM swap, no re-mount, no kernel round-trip.
   const MARIMO_RERENDER_TYPE = "__custom_marimo_element__";
 
-  /** Read `data-driven-by` from `el` or its surrounding <marimo-ui-element>.
+  // Lazy-loaded global driver registry keyed by parent
+  // <marimo-ui-element>.object-id. Populated from the build-time
+  // <script type="application/json" class="marimo-book-anywidget-drivers">
+  // blob the preprocessor injects at the top of <body>. This is the only
+  // location that reliably survives WASM mode's island-content rebuild —
+  // marimo's runtime replaces every descendant of <marimo-island> when
+  // it first paints kernel output, so attributes on the build-time
+  // <marimo-ui-element> and our mount div are both wiped. The fresh
+  // ui-element keeps the same object-id, though, so the global lookup
+  // by object-id stays correct.
+  let _driverRegistry = null;
+  function loadDriverRegistry() {
+    if (_driverRegistry !== null) return _driverRegistry;
+    _driverRegistry = {};
+    const blob = document.querySelector(
+      "script[type='application/json'].marimo-book-anywidget-drivers"
+    );
+    if (!blob || !blob.textContent) return _driverRegistry;
+    try {
+      const parsed = JSON.parse(blob.textContent);
+      if (parsed && typeof parsed === "object") _driverRegistry = parsed;
+    } catch (_) {}
+    return _driverRegistry;
+  }
+
+  /** Read `data-driven-by` from `el`, the parent ui-element, or the global registry.
    *
-   *  Build-time injection puts the attribute on BOTH locations (mount div
-   *  and parent ui-element). The mount div copy is the only one available
-   *  on static + precompute pages where `_handle_ui_wrapper` may unwrap
-   *  the parent. The parent copy is the only one that survives the WASM
-   *  runtime rewrap path, where marimo's runtime re-emits a fresh
-   *  `<marimo-anywidget>` that the MutationObserver intercept replaces
-   *  with a new div containing only marimo-known attributes (data-js-url,
-   *  data-initial-value, ...) — so `data-driven-by` would be dropped from
-   *  the mount but is preserved on the never-replaced ui-element above.
+   *  Three layers of fallback:
+   *  1. The mount div's own attribute (works for static + precompute pages
+   *     where the build-time div is never replaced).
+   *  2. The surrounding ui-element's attribute (works in any path where
+   *     the ui-element survives but only the inner mount is rewrapped).
+   *  3. The global registry, looked up by the ui-element's object-id —
+   *     the only resort in WASM mode after the kernel re-renders the
+   *     entire island contents (which strips both the mount and the
+   *     parent's `data-driven-by` attributes; only object-id is stable).
    */
   function readDrivenBy(el) {
     const own = el.getAttribute && el.getAttribute("data-driven-by");
     if (own) return own;
     const parent = el.closest && el.closest("marimo-ui-element");
-    if (parent) return parent.getAttribute("data-driven-by");
+    if (parent) {
+      const parentOwn = parent.getAttribute("data-driven-by");
+      if (parentOwn) return parentOwn;
+      const objId = parent.getAttribute("object-id");
+      if (objId) {
+        const registry = loadDriverRegistry();
+        const entry = registry[objId];
+        if (entry) return JSON.stringify(entry);
+      }
+    }
     return null;
   }
 

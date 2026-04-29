@@ -198,14 +198,26 @@ def _(SmoothingWidget, mo, fwhm_slider):
     assert driven_by, f"missing data-driven-by on mount: {mount}"
     parsed_map = json.loads(driven_by)
     assert parsed_map == {"fwhm": "x1-0"}, parsed_map
-    # Also emitted on the parent <marimo-ui-element> so it survives WASM
-    # runtime rewraps that replace the inner div.
+    # Also emitted on the parent <marimo-ui-element> so it survives partial
+    # rewraps that replace the inner div.
     parent_ui = mount.find_parent("marimo-ui-element")
     assert parent_ui is not None
     assert parent_ui.get("data-driven-by") == driven_by, (
         f"parent ui-element should mirror mount's data-driven-by, "
         f"got {parent_ui.get('data-driven-by')!r}"
     )
+    # Page-global registry, keyed by object-id — the only thing that
+    # survives WASM mode's full island-content rebuild after kernel boot.
+    blob = parsed.find(
+        "script",
+        attrs={"type": "application/json", "class": "marimo-book-anywidget-drivers"},
+    )
+    assert blob is not None, "global driver registry script blob missing"
+    registry = json.loads(blob.string)
+    # Keyed by the WIDGET's parent <marimo-ui-element> object-id (x2-0
+    # here — x1-0 is the slider's). Each value is the trait→slider-objId
+    # map the JS shim applies via UIElementRegistry.lookupValue().
+    assert registry == {"x2-0": {"fwhm": "x1-0"}}, registry
 
 
 def test_wasm_anywidget_handles_typed_kwargs_int_bool_str() -> None:

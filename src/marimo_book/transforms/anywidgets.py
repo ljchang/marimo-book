@@ -403,7 +403,22 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
             label_to_object_id.setdefault(text, obj_id)
 
     # Pass 3: pair anywidget mounts (in DOM order) to widget constructions
-    # (in AST order) and emit data-driven-by.
+    # (in AST order) and emit data-driven-by on the PARENT <marimo-ui-element>.
+    #
+    # Why the parent and not the mount div: in WASM mode marimo's runtime
+    # eventually re-emits a fresh <marimo-anywidget> inside the same
+    # <marimo-ui-element> when the kernel finishes initialising; the
+    # MutationObserver intercept in marimo_book.js rewraps that fresh
+    # element to a NEW <div class="marimo-book-anywidget">, copying only
+    # marimo-known attributes (data-js-url, data-initial-value, etc.) —
+    # data-driven-by would be dropped. <marimo-ui-element>, in contrast,
+    # is never replaced; only its random-id attribute mutates. Putting
+    # data-driven-by on the parent keeps it stable across rewraps.
+    #
+    # Also fall back to setting it on the mount div for any consumer that
+    # checks there first (and for the static + precompute paths where
+    # the runtime never re-emits and the parent unwrap can drop the
+    # marimo-ui-element entirely).
     mounts = soup.find_all("div", class_="marimo-book-anywidget")
     for mount, drivers in zip(mounts, widget_drivers_in_order):
         resolved: dict[str, str] = {}
@@ -414,8 +429,13 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
             obj_id = label_to_object_id.get(label)
             if obj_id:
                 resolved[trait] = obj_id
-        if resolved:
-            mount["data-driven-by"] = json.dumps(resolved)
+        if not resolved:
+            continue
+        encoded = json.dumps(resolved)
+        mount["data-driven-by"] = encoded
+        parent_ui = mount.find_parent("marimo-ui-element")
+        if parent_ui is not None:
+            parent_ui["data-driven-by"] = encoded
 
 
 def _iter_app_cell_functions(tree: ast.AST):

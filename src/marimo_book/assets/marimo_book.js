@@ -91,11 +91,31 @@
   //      the new state — no DOM swap, no re-mount, no kernel round-trip.
   const MARIMO_RERENDER_TYPE = "__custom_marimo_element__";
 
+  /** Read `data-driven-by` from `el` or its surrounding <marimo-ui-element>.
+   *
+   *  Build-time injection puts the attribute on BOTH locations (mount div
+   *  and parent ui-element). The mount div copy is the only one available
+   *  on static + precompute pages where `_handle_ui_wrapper` may unwrap
+   *  the parent. The parent copy is the only one that survives the WASM
+   *  runtime rewrap path, where marimo's runtime re-emits a fresh
+   *  `<marimo-anywidget>` that the MutationObserver intercept replaces
+   *  with a new div containing only marimo-known attributes (data-js-url,
+   *  data-initial-value, ...) — so `data-driven-by` would be dropped from
+   *  the mount but is preserved on the never-replaced ui-element above.
+   */
+  function readDrivenBy(el) {
+    const own = el.getAttribute && el.getAttribute("data-driven-by");
+    if (own) return own;
+    const parent = el.closest && el.closest("marimo-ui-element");
+    if (parent) return parent.getAttribute("data-driven-by");
+    return null;
+  }
+
   /** Apply a kernel-side slider→trait map to the local model. */
   function applyDrivers(el, model) {
     let drivenBy;
     try {
-      drivenBy = JSON.parse(el.getAttribute("data-driven-by") || "{}");
+      drivenBy = JSON.parse(readDrivenBy(el) || "{}");
     } catch (_) {
       return;
     }

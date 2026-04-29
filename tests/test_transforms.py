@@ -198,6 +198,14 @@ def _(SmoothingWidget, mo, fwhm_slider):
     assert driven_by, f"missing data-driven-by on mount: {mount}"
     parsed_map = json.loads(driven_by)
     assert parsed_map == {"fwhm": "x1-0"}, parsed_map
+    # Also emitted on the parent <marimo-ui-element> so it survives WASM
+    # runtime rewraps that replace the inner div.
+    parent_ui = mount.find_parent("marimo-ui-element")
+    assert parent_ui is not None
+    assert parent_ui.get("data-driven-by") == driven_by, (
+        f"parent ui-element should mirror mount's data-driven-by, "
+        f"got {parent_ui.get('data-driven-by')!r}"
+    )
 
 
 def test_wasm_anywidget_handles_typed_kwargs_int_bool_str() -> None:

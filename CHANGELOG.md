@@ -5,6 +5,34 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.14] — 2026-04-29
+
+### Fixed
+
+- **WASM-mode `data-driven-by` now survives the runtime div rewrap.**
+  v0.1.13 emitted `data-driven-by` only on `<div class="marimo-book-anywidget">`,
+  but in WASM mode marimo's runtime eventually re-emits a fresh
+  `<marimo-anywidget>` once the kernel finishes initialising. The
+  `installAnywidgetRuntimeIntercept` MutationObserver replaces it with a
+  brand-new mount div, copying only marimo-known attributes
+  (`data-js-url`, `data-initial-value`, `data-js-hash`, `data-model-id`)
+  — so our custom `data-driven-by` attribute was silently dropped.
+  Net effect on the dartbrains motivating case: the JS shim's
+  `applyDrivers()` ran but found no map, slider drags silently fell back
+  to defaults again. Live verification on /Preprocessing/ confirmed
+  the issue (mount divs had `data-mb-hydrated="1"` from the rewrap path
+  but no `data-driven-by`, and the model_ids in the live DOM didn't match
+  the model_ids in the served HTML).
+
+  Fix: `_inject_widget_drivers` now emits `data-driven-by` on **both**
+  the mount div *and* the surrounding `<marimo-ui-element>`. The
+  `<marimo-ui-element>` is never replaced by the runtime — only its
+  `random-id` mutates — so the parent copy survives every rewrap. The
+  shim's new `readDrivenBy(el)` helper checks the mount first (covers
+  static + precompute paths where `_handle_ui_wrapper` may have
+  unwrapped the parent) and falls back to `el.closest("marimo-ui-element")`
+  (covers the WASM rewrap path).
+
 ## [0.1.13] — 2026-04-29
 
 ### Fixed

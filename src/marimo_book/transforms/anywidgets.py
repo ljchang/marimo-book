@@ -358,8 +358,33 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
     # even across cells.
     var_to_signature: dict[str, tuple] = {}
     var_to_label: dict[str, str] = {}  # kept for the AST→label fallback path
+    # Entries are dicts (possibly empty) — one per WidgetClass(...) call seen
+    # in source order. Empty dicts MUST be kept so the zip-with-DOM-mounts in
+    # Pass 3 stays aligned: a widget that takes only literal kwargs (no
+    # slider drives) still occupies a slot in the document, and dropping it
+    # from this list would shift every subsequent driver's pairing onto the
+    # wrong mount.
     widget_drivers_in_order: list[dict[str, str]] = []
     for cell_func in _iter_app_cell_functions(tree):
+        # Build a per-cell alias map for the common
+        #   _local = some_slider.value
+        # idiom (heavy in dartbrains' MR_Physics widget cells), then resolve
+        # `WidgetClass(trait=_local)` and `WidgetClass(trait=float(_local))`
+        # back to the originating slider variable. Without this, every
+        # PrecessionWidget instance constructed with intermediate locals
+        # gets no driver entry at all and the zip alignment in Pass 3
+        # breaks.
+        local_aliases: dict[str, str] = {}
+        for child in ast.walk(cell_func):
+            if (
+                isinstance(child, ast.Assign)
+                and len(child.targets) == 1
+                and isinstance(child.targets[0], ast.Name)
+            ):
+                aliased = _extract_value_var_ref(child.value)
+                if aliased is not None:
+                    local_aliases[child.targets[0].id] = aliased
+
         for child in ast.walk(cell_func):
             # `var = mo.ui.<control>(label="...", start=…, stop=…, step=…)`
             if (
@@ -375,7 +400,10 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
                     var_to_signature[var_name] = sig
                     if sig[1] is not None:  # signature[1] is label
                         var_to_label[var_name] = sig[1]
-            # `WidgetClass(trait=var.value, ...)` or `WidgetClass(trait=float(var.value), ...)`.
+            # `WidgetClass(trait=var.value, ...)`,
+            # `WidgetClass(trait=float(var.value), ...)`,
+            # or `WidgetClass(trait=_local)` / `trait=float(_local)` where
+            # `_local = some_slider.value` was assigned above in the cell.
             if isinstance(child, ast.Call):
                 name = _call_name(child)
                 if name and _WIDGET_NAME_RE.match(name):
@@ -383,13 +411,12 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
                     for kw in child.keywords:
                         if kw.arg is None:
                             continue
-                        var_ref = _extract_value_var_ref(kw.value)
+                        var_ref = _extract_value_var_ref(kw.value, local_aliases)
                         if var_ref is not None:
                             drivers[kw.arg] = var_ref
-                    if drivers:
-                        widget_drivers_in_order.append(drivers)
+                    widget_drivers_in_order.append(drivers)
 
-    if not widget_drivers_in_order:
+    if not any(widget_drivers_in_order):
         return
 
     # Pass 2: walk rendered HTML for sliders/controls inside <marimo-ui-element>.
@@ -525,12 +552,20 @@ def _extract_label_kwarg(call: ast.Call) -> str | None:
     return None
 
 
-def _extract_value_var_ref(node: ast.expr) -> str | None:
+def _extract_value_var_ref(
+    node: ast.expr, local_aliases: dict[str, str] | None = None
+) -> str | None:
     """For `var.value`, `float(var.value)`, etc., return ``var``'s name.
 
-    Recognised forms:
-      - ``Name.value``                 → "Name"
+    Recognised forms (each peels back to the original slider variable):
+      - ``Name.value``                       → "Name"
       - ``float(Name.value)`` (or int/bool/str) → "Name"
+      - ``Name`` when ``local_aliases[Name]`` exists (an upstream
+        ``_local = slider.value`` assignment in the same cell), in which
+        case the alias is recursively followed. This is heavy in the
+        dartbrains MR_Physics widget cells, e.g.
+            _b0 = b0_larmor_slider.value
+            PrecessionWidget(b0=_b0)   # ← needs alias resolution
     """
     # var.value
     if (
@@ -546,7 +581,10 @@ def _extract_value_var_ref(node: ast.expr) -> str | None:
         and node.func.id in {"float", "int", "bool", "str"}
         and len(node.args) == 1
     ):
-        return _extract_value_var_ref(node.args[0])
+        return _extract_value_var_ref(node.args[0], local_aliases)
+    # Bare Name that aliases an earlier `_local = some_slider.value`.
+    if isinstance(node, ast.Name) and local_aliases is not None:
+        return local_aliases.get(node.id)
     return None
 
 

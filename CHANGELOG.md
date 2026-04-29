@@ -5,6 +5,47 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.17] — 2026-04-29
+
+### Fixed
+
+- **Spinning-plot sliders on WASM pages now drive their widgets.**
+  Two related gaps shipped in 0.1.13–0.1.16:
+  1. The AST extractor only recognised `WidgetClass(trait=slider.value)`
+     and `WidgetClass(trait=float(slider.value))` directly. It missed
+     the heavily-used dartbrains MR_Physics pattern of pre-extracting
+     slider values into intermediate locals first:
+       ```python
+       _b0 = b0_larmor_slider.value
+       _widget = PrecessionWidget(b0=_b0, flip_angle=30.0, ...)
+       ```
+     Every PrecessionWidget instance constructed this way silently
+     fell off the registry — six of nine MR_Physics widget mounts on
+     production had no `data-driven-by` entry at all.
+  2. Widgets with no detectable slider drivers (literal-only kwargs)
+     were dropped from the source-order list before zipping with DOM
+     mounts. That misaligned every subsequent driver map onto the
+     wrong widget's mount — e.g. a TransformCubeWidget construction
+     paired with a NetMagnetizationWidget mount, so the cube's
+     translation sliders silently moved a different widget's
+     n_protons trait. Rare to spot because the symptoms looked like
+     "nothing happened", but it was the underlying cause of several
+     subtle MR_Physics misbehaviours.
+
+  Fix part 1: per-cell alias map captures `_local = slider.value`
+  assignments, then `_extract_value_var_ref` recursively follows the
+  alias when it sees `Widget(trait=_local)` or `Widget(trait=float(_local))`.
+
+  Fix part 2: undriven widgets stay in `widget_drivers_in_order` as
+  empty `{}` placeholders so the zip pairs each AST construction with
+  its corresponding DOM mount in document order. The empty entries
+  are skipped at emit time (no `data-driven-by` written), preserving
+  the previous semantics for widgets that don't need a driver map.
+
+  New regression tests:
+    test_wasm_anywidget_resolves_intermediate_local_alias_to_slider
+    test_wasm_anywidget_zip_alignment_preserved_with_undriven_widgets
+
 ## [0.1.16] — 2026-04-29
 
 ### Fixed

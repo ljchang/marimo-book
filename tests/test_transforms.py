@@ -341,6 +341,121 @@ def _(CostFunctionWidget, mo, cost_tx):
     }, registry
 
 
+def test_wasm_anywidget_resolves_intermediate_local_alias_to_slider() -> None:
+    """`_local = slider.value` then `Widget(trait=_local)` resolves the
+    same way as `Widget(trait=slider.value)` directly.
+
+    Concrete case from dartbrains MR_Physics.py: PrecessionWidget cells
+    pre-extract slider values into intermediate locals before passing
+    them as kwargs (e.g. `_b0 = b0_larmor_slider.value;
+    PrecessionWidget(b0=_b0, ...)`). Without alias resolution, every
+    such widget gets no driver map and the spinning-plot sliders
+    silently fail to drive their widget.
+    """
+    import json
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    notebook_src = """
+import marimo
+app = marimo.App()
+
+@app.cell
+def _(mo):
+    b0_larmor_slider = mo.ui.slider(start=0.5, stop=7, step=0.5, value=3, label="B0 (T)")
+    return b0_larmor_slider,
+
+@app.cell
+def _(PrecessionWidget, b0_larmor_slider, mo):
+    _b0 = b0_larmor_slider.value
+    _widget = PrecessionWidget(b0=_b0, flip_angle=30.0, show_relaxation=False)
+    _wrapped = mo.ui.anywidget(_widget)
+    _wrapped
+    return
+"""
+    body = (
+        '<marimo-island data-cell-id="d1">'
+        '<marimo-ui-element object-id="d1-0">'
+        '<marimo-slider data-label=\'"B0 (T)"\' data-start="0.5" data-stop="7" data-step="0.5"></marimo-slider>'
+        '</marimo-ui-element></marimo-island>'
+        '<marimo-island data-cell-id="w1">'
+        '<marimo-ui-element object-id="w1-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+    )
+    out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
+    from bs4 import BeautifulSoup
+    parsed = BeautifulSoup(out, "lxml")
+    blob = parsed.find("script", attrs={
+        "type": "application/json",
+        "class": "marimo-book-anywidget-drivers",
+    })
+    assert blob is not None
+    registry = json.loads(blob.string)
+    assert registry == {"w1-0": {"b0": "d1-0"}}, registry
+
+
+def test_wasm_anywidget_zip_alignment_preserved_with_undriven_widgets() -> None:
+    """Widgets with no slider kwargs (literal-only) still take a slot in
+    the source-order list so subsequent widget→mount pairing stays
+    aligned. Without this, every literal-only widget would shift the
+    next widget's drivers onto the wrong mount.
+    """
+    import json
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    notebook_src = """
+import marimo
+app = marimo.App()
+
+@app.cell
+def _(mo):
+    speed_slider = mo.ui.slider(start=0.1, stop=2.0, step=0.1, value=1.0, label="Speed")
+    return speed_slider,
+
+@app.cell
+def _(SomeStaticWidget, mo):
+    # No slider kwargs — should occupy a slot but emit no driver map.
+    _w = SomeStaticWidget(static_value=42)
+    _wrapped = mo.ui.anywidget(_w)
+    _wrapped
+    return
+
+@app.cell
+def _(SomeDynamicWidget, mo, speed_slider):
+    _w = SomeDynamicWidget(speed=float(speed_slider.value))
+    _wrapped = mo.ui.anywidget(_w)
+    _wrapped
+    return
+"""
+    body = (
+        '<marimo-island><marimo-ui-element object-id="s-0">'
+        '<marimo-slider data-label=\'"Speed"\' data-start="0.1" data-stop="2.0" data-step="0.1"></marimo-slider>'
+        '</marimo-ui-element></marimo-island>'
+        # First widget: literal-only, has no driver map (DOM mount #0)
+        '<marimo-island><marimo-ui-element object-id="static-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+        # Second widget: speed-driven (DOM mount #1) — its drivers must NOT
+        # be paired onto static-0 just because the first widget had no
+        # entry to consume.
+        '<marimo-island><marimo-ui-element object-id="dynamic-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m2"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+    )
+    out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
+    from bs4 import BeautifulSoup
+    parsed = BeautifulSoup(out, "lxml")
+    blob = parsed.find("script", attrs={
+        "type": "application/json",
+        "class": "marimo-book-anywidget-drivers",
+    })
+    assert blob is not None
+    registry = json.loads(blob.string)
+    # The driven widget (dynamic-0) gets the speed-slider mapping.
+    # The undriven widget (static-0) does NOT appear in the registry.
+    assert registry == {"dynamic-0": {"speed": "s-0"}}, registry
+
+
 def test_wasm_anywidget_no_driver_map_when_no_slider_kwargs() -> None:
     """Widgets that use only literal kwargs (no `slider.value` references)
     get NO data-driven-by attribute — preserves backwards compatibility

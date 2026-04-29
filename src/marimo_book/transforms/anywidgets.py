@@ -44,6 +44,7 @@ def rewrite_anywidget_html(
     cell_source: str | None = None,
     widget_defaults: dict | None = None,
     keep_marimo_controls: bool = False,
+    notebook_source: str | None = None,
 ) -> str:
     """Rewrite marimo custom elements for static rendering.
 
@@ -66,6 +67,15 @@ def rewrite_anywidget_html(
     must NOT be stripped. We still rewrap anywidgets (because marimo's
     runtime refuses to load anywidget modules from data URLs) but leave
     every other custom element in place.
+
+    ``notebook_source`` (full ``.py`` text): when provided, an extra pass
+    cross-references the AST against the rendered HTML to emit
+    ``data-driven-by`` JSON on each anywidget mount. The map is
+    ``{trait_name: ui_element_object_id}`` so ``marimo_book.js`` can pull
+    the live slider value from the runtime's UIElementRegistry on
+    ``rerender()`` and propagate it to the widget's local model. Without
+    this, the static-shim model only ever shows the build-time defaults
+    even when the user moves a slider.
     """
     if (
         "marimo-anywidget" not in raw_html
@@ -91,6 +101,12 @@ def rewrite_anywidget_html(
     # The marimo_book.js shim loads Plotly.js on first hit and renders.
     for node in list(soup.find_all("marimo-plotly")):
         _rewrap_plotly(node, soup)
+
+    # Pass 2b: when full notebook source is provided (WASM mode), emit a
+    # data-driven-by map on each anywidget mount so the JS shim can wire
+    # rerender() to live UIElementRegistry values.
+    if notebook_source:
+        _inject_widget_drivers(soup, notebook_source)
 
     if not keep_marimo_controls:
         # Pass 3: unwrap or drop <marimo-ui-element> wrappers.
@@ -296,3 +312,191 @@ _ANYWIDGET_SENTINEL = re.compile(r"<marimo-(anywidget|ui-element|plotly)\b", re.
 def contains_anywidget(raw_html: str) -> bool:
     """Quick test used to skip the BeautifulSoup parse when nothing matches."""
     return bool(_ANYWIDGET_SENTINEL.search(raw_html))
+
+
+# --- WASM driver injection --------------------------------------------------
+#
+# In WASM mode the static-shim mount in marimo_book.js creates a LOCAL JS
+# model from data-initial-value. Marimo's runtime emits {model_id: ...} for
+# anywidget — opaque, useless for static. So slider drives never reach the
+# widget's animation loop; the cube doesn't move when the user drags.
+#
+# Bridge: at build time, AST-extract from each widget construction call the
+# `trait=var.value` kwargs, find each slider's rendered <marimo-ui-element>
+# by matching its data-label against the slider's source-side label kwarg,
+# and emit `data-driven-by='{"trait": "object-id", ...}'` on the mount. The
+# JS shim's rerender() (called by marimo's runtime on each cell re-execution)
+# reads the map, looks up live values via UIElementRegistry.lookupValue(), and
+# applies them as model.set(trait, value). The widget's `model.on("change:…")`
+# handlers + rAF loop pick up the new values and the canvas re-renders.
+
+_UI_CONTROL_FUNCS = frozenset(
+    {
+        "slider", "switch", "dropdown", "radio", "number", "text",
+        "checkbox", "multiselect", "date", "datetime",
+    }
+)
+
+
+def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
+    """Emit `data-driven-by` on each `<div class="marimo-book-anywidget">`."""
+    try:
+        tree = ast.parse(notebook_source)
+    except SyntaxError:
+        return
+
+    # Pass 1: scan AST for slider definitions and widget constructions.
+    var_to_label: dict[str, str] = {}
+    widget_drivers_in_order: list[dict[str, str]] = []
+    for cell_func in _iter_app_cell_functions(tree):
+        for child in ast.walk(cell_func):
+            # `var = mo.ui.<control>(label="...")` — record var → label.
+            if (
+                isinstance(child, ast.Assign)
+                and len(child.targets) == 1
+                and isinstance(child.targets[0], ast.Name)
+                and isinstance(child.value, ast.Call)
+                and _is_ui_control_call(child.value)
+            ):
+                label = _extract_label_kwarg(child.value)
+                if label is not None:
+                    var_to_label[child.targets[0].id] = label
+            # `WidgetClass(trait=var.value, ...)` or `WidgetClass(trait=float(var.value), ...)`.
+            if isinstance(child, ast.Call):
+                name = _call_name(child)
+                if name and _WIDGET_NAME_RE.match(name):
+                    drivers: dict[str, str] = {}
+                    for kw in child.keywords:
+                        if kw.arg is None:
+                            continue
+                        var_ref = _extract_value_var_ref(kw.value)
+                        if var_ref is not None:
+                            drivers[kw.arg] = var_ref
+                    if drivers:
+                        widget_drivers_in_order.append(drivers)
+
+    if not widget_drivers_in_order:
+        return
+
+    # Pass 2: walk rendered HTML for sliders/controls inside <marimo-ui-element>.
+    # Build label → object_id by matching the wrapped control's data-label.
+    label_to_object_id: dict[str, str] = {}
+    for ui_el in soup.find_all("marimo-ui-element"):
+        obj_id = ui_el.get("object-id")
+        if not obj_id:
+            continue
+        ctrl = next(
+            (
+                c
+                for c in ui_el.find_all(True, recursive=True)
+                if c.name and c.name.startswith("marimo-")
+                and c.name.split("-", 1)[1] in _UI_CONTROL_FUNCS
+            ),
+            None,
+        )
+        if ctrl is None:
+            continue
+        raw_label = ctrl.get("data-label")
+        text = _decode_marimo_attr_label(raw_label)
+        if text:
+            # First wins — labels should be unique within a page.
+            label_to_object_id.setdefault(text, obj_id)
+
+    # Pass 3: pair anywidget mounts (in DOM order) to widget constructions
+    # (in AST order) and emit data-driven-by.
+    mounts = soup.find_all("div", class_="marimo-book-anywidget")
+    for mount, drivers in zip(mounts, widget_drivers_in_order):
+        resolved: dict[str, str] = {}
+        for trait, var_name in drivers.items():
+            label = var_to_label.get(var_name)
+            if not label:
+                continue
+            obj_id = label_to_object_id.get(label)
+            if obj_id:
+                resolved[trait] = obj_id
+        if resolved:
+            mount["data-driven-by"] = json.dumps(resolved)
+
+
+def _iter_app_cell_functions(tree: ast.AST):
+    """Yield every `@app.cell` (or `@app.cell(...)`) decorated function."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for dec in node.decorator_list:
+            target = dec.func if isinstance(dec, ast.Call) else dec
+            if isinstance(target, ast.Attribute) and target.attr == "cell":
+                yield node
+                break
+
+
+def _is_ui_control_call(call: ast.Call) -> bool:
+    """Match `mo.ui.slider(...)` / `mo.ui.switch(...)` / etc."""
+    func = call.func
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr not in _UI_CONTROL_FUNCS:
+        return False
+    parent = func.value
+    return (
+        isinstance(parent, ast.Attribute)
+        and parent.attr == "ui"
+        and isinstance(parent.value, ast.Name)
+        and parent.value.id == "mo"
+    )
+
+
+def _extract_label_kwarg(call: ast.Call) -> str | None:
+    """Pull a string-literal `label=` kwarg from a control constructor."""
+    for kw in call.keywords:
+        if kw.arg == "label" and isinstance(kw.value, ast.Constant) and isinstance(
+            kw.value.value, str
+        ):
+            return kw.value.value
+    return None
+
+
+def _extract_value_var_ref(node: ast.expr) -> str | None:
+    """For `var.value`, `float(var.value)`, etc., return ``var``'s name.
+
+    Recognised forms:
+      - ``Name.value``                 → "Name"
+      - ``float(Name.value)`` (or int/bool/str) → "Name"
+    """
+    # var.value
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr == "value"
+        and isinstance(node.value, ast.Name)
+    ):
+        return node.value.id
+    # float(var.value) / int(...) / bool(...) / str(...)
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"float", "int", "bool", "str"}
+        and len(node.args) == 1
+    ):
+        return _extract_value_var_ref(node.args[0])
+    return None
+
+
+def _decode_marimo_attr_label(raw: str | None) -> str | None:
+    """Marimo's `data-label` is a JSON-encoded HTML fragment wrapping the label.
+
+    Example raw value:
+        ``"<span class=\"...\"><span class=\"paragraph\">Translate X</span></span>"``
+
+    Returns the inner text (e.g. ``"Translate X"``), or None if undecodable.
+    """
+    if not raw:
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        decoded = raw
+    if not isinstance(decoded, str):
+        return None
+    fragment = BeautifulSoup(decoded, "lxml")
+    text = fragment.get_text(strip=True)
+    return text or None

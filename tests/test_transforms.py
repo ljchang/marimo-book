@@ -150,6 +150,129 @@ def test_plotly_rewrap_emits_static_mount() -> None:
     assert "data-figure=" in out
 
 
+def test_wasm_anywidget_emits_data_driven_by_for_slider_kwargs() -> None:
+    """In WASM mode, anywidget mounts get a `data-driven-by` JSON map that
+    pairs each `WidgetClass(trait=slider.value)` kwarg to the slider's
+    rendered ``object-id``. The JS shim's ``rerender()`` reads this map
+    and pulls live values from the runtime's UIElementRegistry — without
+    it, slider drags never reach the widget's local model in WASM mode.
+    """
+    import json
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    notebook_src = """
+import marimo
+app = marimo.App()
+
+@app.cell
+def _(mo):
+    fwhm_slider = mo.ui.slider(start=0, stop=20, step=0.5, value=0, label="FWHM (mm)")
+    return fwhm_slider,
+
+@app.cell
+def _(SmoothingWidget, mo, fwhm_slider):
+    _w = SmoothingWidget(fwhm=float(fwhm_slider.value))
+    _wrapped = mo.ui.anywidget(_w)
+    _wrapped
+    return
+"""
+    # data-label is JSON-encoded HTML in marimo's emitter — match the live shape.
+    body = (
+        '<marimo-island data-cell-id="x1">'
+        '<marimo-ui-element object-id="x1-0">'
+        '<marimo-slider data-label=\'"&lt;span class=\\"paragraph\\"&gt;FWHM (mm)&lt;/span&gt;"\'></marimo-slider>'
+        '</marimo-ui-element></marimo-island>'
+        '<marimo-island data-cell-id="x2">'
+        '<marimo-ui-element object-id="x2-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+    )
+    out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
+    # Look for the emitted attribute. BeautifulSoup re-encodes HTML, so we
+    # check via re-parse rather than substring match.
+    from bs4 import BeautifulSoup
+    parsed = BeautifulSoup(out, "lxml")
+    mount = parsed.find("div", class_="marimo-book-anywidget")
+    assert mount is not None, "anywidget mount should be rewritten to a static div"
+    driven_by = mount.get("data-driven-by")
+    assert driven_by, f"missing data-driven-by on mount: {mount}"
+    parsed_map = json.loads(driven_by)
+    assert parsed_map == {"fwhm": "x1-0"}, parsed_map
+
+
+def test_wasm_anywidget_handles_typed_kwargs_int_bool_str() -> None:
+    """`Widget(t=int(s.value))` / `bool(...)` / `str(...)` resolve the same
+    way as bare `s.value` — the cast is transparent for driver mapping.
+    """
+    import json
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    notebook_src = """
+import marimo
+app = marimo.App()
+
+@app.cell
+def _(mo):
+    n_protons_slider = mo.ui.slider(start=10, stop=200, value=100, label="N protons")
+    b0_on_toggle = mo.ui.switch(label="B-zero ON")
+    return n_protons_slider, b0_on_toggle
+
+@app.cell
+def _(NetMagnetizationWidget, mo, n_protons_slider, b0_on_toggle):
+    _w = NetMagnetizationWidget(
+        n_protons=int(n_protons_slider.value),
+        b0_on=bool(b0_on_toggle.value),
+    )
+    _wrapped = mo.ui.anywidget(_w)
+    _wrapped
+    return
+"""
+    body = (
+        '<marimo-island><marimo-ui-element object-id="A-0">'
+        '<marimo-slider data-label=\'"N protons"\'></marimo-slider>'
+        '</marimo-ui-element>'
+        '<marimo-ui-element object-id="A-1">'
+        '<marimo-switch data-label=\'"B-zero ON"\'></marimo-switch>'
+        '</marimo-ui-element></marimo-island>'
+        '<marimo-island><marimo-ui-element object-id="B-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+    )
+    out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
+    from bs4 import BeautifulSoup
+    parsed = BeautifulSoup(out, "lxml")
+    mount = parsed.find("div", class_="marimo-book-anywidget")
+    parsed_map = json.loads(mount["data-driven-by"])
+    assert parsed_map == {"n_protons": "A-0", "b0_on": "A-1"}, parsed_map
+
+
+def test_wasm_anywidget_no_driver_map_when_no_slider_kwargs() -> None:
+    """Widgets that use only literal kwargs (no `slider.value` references)
+    get NO data-driven-by attribute — preserves backwards compatibility
+    for the static + precompute path that doesn't need this hook.
+    """
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    notebook_src = """
+import marimo
+app = marimo.App()
+
+@app.cell
+def _(SomeWidget, mo):
+    _w = SomeWidget(static_value=42)
+    _wrapped = mo.ui.anywidget(_w)
+    _wrapped
+    return
+"""
+    body = (
+        '<marimo-island><marimo-ui-element object-id="C-0">'
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
+        '</marimo-ui-element></marimo-island>'
+    )
+    out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
+    assert "data-driven-by" not in out
+
+
 def test_markdown_cell_preserves_written_by_byline() -> None:
     """Per-notebook ``*Written by …*`` attribution lines must survive
     rendering — they are the canonical Jupyter-Book-era byline and the

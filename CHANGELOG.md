@@ -5,6 +5,49 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.13] — 2026-04-29
+
+### Fixed
+
+- **WASM-mode anywidget sliders now drive widgets live.** Marimo's runtime
+  bumps a `random-id` attribute on each `<marimo-ui-element>` after the
+  kernel finishes re-executing a cell, then calls
+  `firstElementChild.rerender()` to refresh the cell output. Our static
+  shim mount (`<div class="marimo-book-anywidget">`) had neither
+  `rerender()` nor the `__type__ === "__custom_marimo_element__"` marker
+  the runtime checks, so every slider drag fired
+  `[marimo-ui-element] first child must have a rerender method` and the
+  widget DOM stayed frozen on its build-time defaults — Pyodide ran,
+  cells re-executed, but the visible state never advanced. Two coordinated
+  changes:
+  1. `rewrite_anywidget_html` accepts a new `notebook_source` kwarg
+     (passed by `render_wasm_page`). When set, an AST pass walks every
+     `@app.cell` function for `var = mo.ui.<control>(label="…")`
+     definitions and `WidgetClass(trait=var.value)` (and
+     `float(var.value)` / `int(...)` / `bool(...)`) constructions, then
+     cross-references with the rendered HTML's `<marimo-ui-element>` /
+     `data-label` to emit
+     `data-driven-by='{"trait": "object-id", …}'` JSON on each anywidget
+     mount. Mounts and constructions pair up by document order.
+  2. `marimo_book.js`'s `hydrateMount` now sets
+     `el.__type__ = "__custom_marimo_element__"` and an `el.rerender()`
+     that reads the `data-driven-by` map and pulls live values via
+     `window._marimo_private_UIElementRegistry.lookupValue(objectId)`,
+     applying each as `model.set(trait, value)`. The widget's existing
+     `change:<trait>` listeners + animation loop pick up the new state
+     on the next frame — no DOM swap, no kernel round-trip on the JS
+     side, no anywidget Comm bridge. The same `applyDrivers()` runs at
+     hydrate time so the first paint reflects the user's current
+     control state instead of build-time defaults.
+
+  Net effect on the dartbrains motivating case: dragging Translate-X on
+  the `TransformCubeWidget` in `/Preprocessing/` now updates the cube's
+  affine matrix readout in real time. Same for `CostFunctionWidget`,
+  `SmoothingWidget`, and the `MR_Physics` widgets that take
+  `mo.ui.slider` kwargs. Widgets without slider drivers (literal kwargs
+  only) still get no `data-driven-by` — preserves the existing
+  static + precompute behaviour exactly.
+
 ## [0.1.12] — 2026-04-28
 
 ### Fixed

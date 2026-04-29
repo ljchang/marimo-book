@@ -138,5 +138,10 @@ def render_wasm_page(
     # `keep_marimo_controls=True` because in WASM mode the islands runtime
     # serves <marimo-slider>/<marimo-dropdown>/etc. as live, kernel-backed
     # controls — they must NOT be stripped (only static export does that).
-    body = rewrite_anywidget_html(body, keep_marimo_controls=True)
+    # `notebook_source` enables the AST-driven `data-driven-by` injection so
+    # the shim's rerender() can pull live UIElement values into widget traits.
+    notebook_source = target.read_text(encoding="utf-8")
+    body = rewrite_anywidget_html(
+        body, keep_marimo_controls=True, notebook_source=notebook_source
+    )
     return head + "\n" + body

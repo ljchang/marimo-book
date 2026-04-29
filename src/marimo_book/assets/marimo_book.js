@@ -78,6 +78,49 @@
     return value;
   }
 
+  // Marimo's runtime checks `firstElementChild.__type__ === "__custom_marimo_element__"`
+  // before calling `firstElementChild.rerender()` (when a parent <marimo-ui-element>
+  // changes its random-id, signalling that downstream cell HTML should refresh).
+  // We satisfy that contract so:
+  //   1. The runtime stops logging
+  //      `[marimo-ui-element] first child must have a rerender method`.
+  //   2. We get a hook to pull live trait values out of the runtime's
+  //      UIElementRegistry and propagate them to the widget's local model
+  //      via model.set(trait, value), which fires the widget's existing
+  //      change:<trait> listeners and the rAF loop's next frame picks up
+  //      the new state — no DOM swap, no re-mount, no kernel round-trip.
+  const MARIMO_RERENDER_TYPE = "__custom_marimo_element__";
+
+  /** Apply a kernel-side slider→trait map to the local model. */
+  function applyDrivers(el, model) {
+    let drivenBy;
+    try {
+      drivenBy = JSON.parse(el.getAttribute("data-driven-by") || "{}");
+    } catch (_) {
+      return;
+    }
+    if (!drivenBy || typeof drivenBy !== "object") return;
+    const reg = window._marimo_private_UIElementRegistry;
+    if (!reg || typeof reg.lookupValue !== "function") return;
+    for (const [trait, objectId] of Object.entries(drivenBy)) {
+      if (typeof objectId !== "string") continue;
+      let value;
+      try {
+        value = reg.lookupValue(objectId);
+      } catch (_) {
+        continue;
+      }
+      // Skip undefined (control not yet hydrated) and {model_id: ...} blobs
+      // (anywidgets reference each other this way; not a primitive trait).
+      if (value === undefined) continue;
+      if (
+        value && typeof value === "object" &&
+        Object.keys(value).length === 1 && "model_id" in value
+      ) continue;
+      model.set(trait, value);
+    }
+  }
+
   async function hydrateMount(el) {
     const jsUrl = decodeAttr(el.getAttribute("data-js-url"));
     if (!jsUrl || typeof jsUrl !== "string") {
@@ -101,6 +144,18 @@
     el.innerHTML = "";
     const initial = parseInitial(el.getAttribute("data-initial-value"));
     const model = makeModel(initial);
+    // Pull initial slider values from the runtime registry (if WASM is up
+    // by the time we hydrate), so the first paint matches the user's
+    // current control state instead of the build-time defaults.
+    applyDrivers(el, model);
+    // Mark element so marimo's runtime treats us as a rerenderable host.
+    el.__type__ = MARIMO_RERENDER_TYPE;
+    el.rerender = function () {
+      // Marimo bumps the parent <marimo-ui-element>'s random-id every time
+      // a dependent cell finishes re-executing. Re-pull driver values so
+      // the widget reflects the new slider position.
+      applyDrivers(el, model);
+    };
     try {
       const cleanup = widget.render({ model, el });
       if (typeof cleanup === "function") {

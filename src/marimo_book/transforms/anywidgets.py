@@ -332,8 +332,16 @@ def contains_anywidget(raw_html: str) -> bool:
 
 _UI_CONTROL_FUNCS = frozenset(
     {
-        "slider", "switch", "dropdown", "radio", "number", "text",
-        "checkbox", "multiselect", "date", "datetime",
+        "slider",
+        "switch",
+        "dropdown",
+        "radio",
+        "number",
+        "text",
+        "checkbox",
+        "multiselect",
+        "date",
+        "datetime",
     }
 )
 
@@ -432,7 +440,8 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
             (
                 c
                 for c in ui_el.find_all(True, recursive=True)
-                if c.name and c.name.startswith("marimo-")
+                if c.name
+                and c.name.startswith("marimo-")
                 and c.name.split("-", 1)[1] in _UI_CONTROL_FUNCS
             ),
             None,
@@ -465,7 +474,7 @@ def _inject_widget_drivers(soup: BeautifulSoup, notebook_source: str) -> None:
     #     object-id reliably hits the right entry across that swap.
     mounts = soup.find_all("div", class_="marimo-book-anywidget")
     object_id_to_drivers: dict[str, dict[str, str]] = {}
-    for mount, drivers in zip(mounts, widget_drivers_in_order):
+    for mount, drivers in zip(mounts, widget_drivers_in_order, strict=False):
         resolved: dict[str, str] = {}
         for trait, var_name in drivers.items():
             obj_id: str | None = None
@@ -545,8 +554,10 @@ def _is_ui_control_call(call: ast.Call) -> bool:
 def _extract_label_kwarg(call: ast.Call) -> str | None:
     """Pull a string-literal `label=` kwarg from a control constructor."""
     for kw in call.keywords:
-        if kw.arg == "label" and isinstance(kw.value, ast.Constant) and isinstance(
-            kw.value.value, str
+        if (
+            kw.arg == "label"
+            and isinstance(kw.value, ast.Constant)
+            and isinstance(kw.value.value, str)
         ):
             return kw.value.value
     return None
@@ -610,8 +621,10 @@ def _slider_signature_from_ast(call: ast.Call) -> tuple | None:
     label: str | None = None
     start = stop = step = None
     for kw in call.keywords:
-        if kw.arg == "label" and isinstance(kw.value, ast.Constant) and isinstance(
-            kw.value.value, str
+        if (
+            kw.arg == "label"
+            and isinstance(kw.value, ast.Constant)
+            and isinstance(kw.value.value, str)
         ):
             label = kw.value.value
         elif kw.arg == "start":
@@ -644,8 +657,10 @@ def _slider_signature_from_html(ctrl: Tag) -> tuple | None:
 
 def _ast_numeric(node: ast.expr) -> float | None:
     """Extract an int/float from an AST node, including unary-minus literals."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(
-        node.value, bool
+    if (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
     ):
         return float(node.value)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):

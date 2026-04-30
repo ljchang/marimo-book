@@ -158,6 +158,7 @@ def test_wasm_anywidget_emits_data_driven_by_for_slider_kwargs() -> None:
     it, slider drags never reach the widget's local model in WASM mode.
     """
     import json
+
     from marimo_book.transforms.anywidgets import rewrite_anywidget_html
 
     notebook_src = """
@@ -181,16 +182,17 @@ def _(SmoothingWidget, mo, fwhm_slider):
         '<marimo-island data-cell-id="x1">'
         '<marimo-ui-element object-id="x1-0">'
         '<marimo-slider data-label=\'"&lt;span class=\\"paragraph\\"&gt;FWHM (mm)&lt;/span&gt;"\'></marimo-slider>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
         '<marimo-island data-cell-id="x2">'
         '<marimo-ui-element object-id="x2-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
     )
     out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
     # Look for the emitted attribute. BeautifulSoup re-encodes HTML, so we
     # check via re-parse rather than substring match.
     from bs4 import BeautifulSoup
+
     parsed = BeautifulSoup(out, "lxml")
     mount = parsed.find("div", class_="marimo-book-anywidget")
     assert mount is not None, "anywidget mount should be rewritten to a static div"
@@ -225,6 +227,7 @@ def test_wasm_anywidget_handles_typed_kwargs_int_bool_str() -> None:
     way as bare `s.value` — the cast is transparent for driver mapping.
     """
     import json
+
     from marimo_book.transforms.anywidgets import rewrite_anywidget_html
 
     notebook_src = """
@@ -249,17 +252,18 @@ def _(NetMagnetizationWidget, mo, n_protons_slider, b0_on_toggle):
 """
     body = (
         '<marimo-island><marimo-ui-element object-id="A-0">'
-        '<marimo-slider data-label=\'"N protons"\'></marimo-slider>'
-        '</marimo-ui-element>'
+        "<marimo-slider data-label='\"N protons\"'></marimo-slider>"
+        "</marimo-ui-element>"
         '<marimo-ui-element object-id="A-1">'
-        '<marimo-switch data-label=\'"B-zero ON"\'></marimo-switch>'
-        '</marimo-ui-element></marimo-island>'
+        "<marimo-switch data-label='\"B-zero ON\"'></marimo-switch>"
+        "</marimo-ui-element></marimo-island>"
         '<marimo-island><marimo-ui-element object-id="B-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
     )
     out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
     from bs4 import BeautifulSoup
+
     parsed = BeautifulSoup(out, "lxml")
     mount = parsed.find("div", class_="marimo-book-anywidget")
     parsed_map = json.loads(mount["data-driven-by"])
@@ -277,6 +281,7 @@ def test_wasm_anywidget_signature_disambiguates_same_label_across_widgets() -> N
     because the global label→object-id map was first-wins.
     """
     import json
+
     from marimo_book.transforms.anywidgets import rewrite_anywidget_html
 
     notebook_src = """
@@ -308,29 +313,33 @@ def _(CostFunctionWidget, mo, cost_tx):
         '<marimo-island data-cell-id="defs">'
         '<marimo-ui-element object-id="defs-0">'
         '<marimo-slider data-label=\'"Translate X"\' data-start="-15" data-stop="15" data-step="0.5"></marimo-slider>'
-        '</marimo-ui-element>'
+        "</marimo-ui-element>"
         '<marimo-ui-element object-id="defs-1">'
         '<marimo-slider data-label=\'"Translate X"\' data-start="0" data-stop="20" data-step="1"></marimo-slider>'
-        '</marimo-ui-element>'
-        '</marimo-island>'
+        "</marimo-ui-element>"
+        "</marimo-island>"
         # TransformCubeWidget mount
         '<marimo-island data-cell-id="cube">'
         '<marimo-ui-element object-id="cube-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
         # CostFunctionWidget mount
         '<marimo-island data-cell-id="cost">'
         '<marimo-ui-element object-id="cost-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m2"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
     )
     out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
     from bs4 import BeautifulSoup
+
     parsed = BeautifulSoup(out, "lxml")
-    blob = parsed.find("script", attrs={
-        "type": "application/json",
-        "class": "marimo-book-anywidget-drivers",
-    })
+    blob = parsed.find(
+        "script",
+        attrs={
+            "type": "application/json",
+            "class": "marimo-book-anywidget-drivers",
+        },
+    )
     assert blob is not None
     registry = json.loads(blob.string)
     # The fix: each widget resolves to its OWN slider's object-id, not
@@ -353,6 +362,7 @@ def test_wasm_anywidget_resolves_intermediate_local_alias_to_slider() -> None:
     silently fail to drive their widget.
     """
     import json
+
     from marimo_book.transforms.anywidgets import rewrite_anywidget_html
 
     notebook_src = """
@@ -376,19 +386,23 @@ def _(PrecessionWidget, b0_larmor_slider, mo):
         '<marimo-island data-cell-id="d1">'
         '<marimo-ui-element object-id="d1-0">'
         '<marimo-slider data-label=\'"B0 (T)"\' data-start="0.5" data-stop="7" data-step="0.5"></marimo-slider>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
         '<marimo-island data-cell-id="w1">'
         '<marimo-ui-element object-id="w1-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:..."\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
     )
     out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
     from bs4 import BeautifulSoup
+
     parsed = BeautifulSoup(out, "lxml")
-    blob = parsed.find("script", attrs={
-        "type": "application/json",
-        "class": "marimo-book-anywidget-drivers",
-    })
+    blob = parsed.find(
+        "script",
+        attrs={
+            "type": "application/json",
+            "class": "marimo-book-anywidget-drivers",
+        },
+    )
     assert blob is not None
     registry = json.loads(blob.string)
     assert registry == {"w1-0": {"b0": "d1-0"}}, registry
@@ -401,6 +415,7 @@ def test_wasm_anywidget_zip_alignment_preserved_with_undriven_widgets() -> None:
     next widget's drivers onto the wrong mount.
     """
     import json
+
     from marimo_book.transforms.anywidgets import rewrite_anywidget_html
 
     notebook_src = """
@@ -430,25 +445,29 @@ def _(SomeDynamicWidget, mo, speed_slider):
     body = (
         '<marimo-island><marimo-ui-element object-id="s-0">'
         '<marimo-slider data-label=\'"Speed"\' data-start="0.1" data-stop="2.0" data-step="0.1"></marimo-slider>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
         # First widget: literal-only, has no driver map (DOM mount #0)
         '<marimo-island><marimo-ui-element object-id="static-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
         # Second widget: speed-driven (DOM mount #1) — its drivers must NOT
         # be paired onto static-0 just because the first widget had no
         # entry to consume.
         '<marimo-island><marimo-ui-element object-id="dynamic-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m2"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
     )
     out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
     from bs4 import BeautifulSoup
+
     parsed = BeautifulSoup(out, "lxml")
-    blob = parsed.find("script", attrs={
-        "type": "application/json",
-        "class": "marimo-book-anywidget-drivers",
-    })
+    blob = parsed.find(
+        "script",
+        attrs={
+            "type": "application/json",
+            "class": "marimo-book-anywidget-drivers",
+        },
+    )
     assert blob is not None
     registry = json.loads(blob.string)
     # The driven widget (dynamic-0) gets the speed-slider mapping.
@@ -477,7 +496,7 @@ def _(SomeWidget, mo):
     body = (
         '<marimo-island><marimo-ui-element object-id="C-0">'
         '<marimo-anywidget data-initial-value=\'{"model_id":"m"}\' data-js-url=\'"data:"\'></marimo-anywidget>'
-        '</marimo-ui-element></marimo-island>'
+        "</marimo-ui-element></marimo-island>"
     )
     out = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_src)
     assert "data-driven-by" not in out

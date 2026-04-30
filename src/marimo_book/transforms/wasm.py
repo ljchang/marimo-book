@@ -141,7 +141,5 @@ def render_wasm_page(
     # `notebook_source` enables the AST-driven `data-driven-by` injection so
     # the shim's rerender() can pull live UIElement values into widget traits.
     notebook_source = target.read_text(encoding="utf-8")
-    body = rewrite_anywidget_html(
-        body, keep_marimo_controls=True, notebook_source=notebook_source
-    )
+    body = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_source)
     return head + "\n" + body

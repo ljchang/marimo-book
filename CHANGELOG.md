@@ -5,6 +5,20 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Require marimo ≥ 0.23.6.** That release ships
+  [marimo-team/marimo#9409](https://github.com/marimo-team/marimo/pull/9409),
+  which makes `MarimoIslandGenerator.from_file()` propagate the
+  notebook filename. On WASM pages, `__file__` and
+  `mo.notebook_dir()` now resolve to the notebook's own location
+  instead of the host's `__main__`, so relative paths like
+  `Path(__file__).parent / "data"` work without a cwd-walk
+  workaround. The corresponding caveat has been removed from the
+  WASM-mode docs.
+
 ## [0.1.17] — 2026-04-29
 
 ### Fixed

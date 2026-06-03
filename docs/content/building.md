@@ -460,12 +460,6 @@ on a static page is faster end-to-end.
 - First page load is heavy (~30 MB Pyodide download, cached after).
 - Not every Python package is in Pyodide's package set — check
   [pyodide.org/packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html).
-- File system access via relative paths needs care: marimo's
-  `__file__` and `mo.notebook_dir()` resolve to internal paths under
-  `MarimoIslandGenerator`. If a notebook does
-  `Path(__file__).parent / "data"` it won't find the file. Use a
-  cwd-walk pattern instead, or wait for
-  [marimo-team/marimo#9391](https://github.com/marimo-team/marimo/issues/9391).
 
 The `Authoring → WASM demo` page in this book is a working example.
 

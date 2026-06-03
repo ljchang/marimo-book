@@ -26,7 +26,6 @@ import hashlib
 import json
 import shutil
 import sys
-import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -42,6 +41,7 @@ from .transforms.marimo_export import (
     cells_to_markdown,
     cleanup_orphan_precompute_dirs,
     export_notebook,
+    staged_sibling_file,
 )
 from .transforms.pep723 import (
     derive_dependencies,
@@ -297,12 +297,13 @@ def _maybe_stage_with_pep723(
     enabled: bool,
     wasm_bootstrap: bool = False,
 ) -> Iterator[Path | None]:
-    """Yield a path to a sibling tempdir copy of ``src_abs`` with PEP 723 injected.
+    """Yield a path to a sibling-file copy of ``src_abs`` with PEP 723 injected.
 
     When ``enabled`` is False, yields ``None`` (callers fall back to the
     original path). When True, walks the notebook's AST, derives the
     dependency list, and writes a copy with a freshly-generated
-    ``# /// script`` block to a sibling tempdir of ``src_abs.parent``.
+    ``# /// script`` block to a sibling file in ``src_abs.parent`` (see
+    :func:`~marimo_book.transforms.marimo_export.staged_sibling_file`).
 
     When ``wasm_bootstrap=True`` (set for ``mode: wasm`` pages), also
     AST-injects ``await micropip.install([...])`` into the first
@@ -314,12 +315,14 @@ def _maybe_stage_with_pep723(
     is currently the only way to provision them. See
     :func:`~marimo_book.transforms.pep723.inject_micropip_bootstrap`.
 
-    The tempdir lives next to the original notebook (rather than under
+    The staged file lives next to the original notebook (rather than under
     ``.marimo_book_cache/``) so marimo's cell-execution cwd matches the
     original source location — relative imports (``from .util import x``,
-    ``open("./data/foo.csv")``) keep resolving as the author intended.
-    The tempdir is removed on context exit; the orphan-sweep at build
-    start handles process-interrupted leaks.
+    ``open("./data/foo.csv")``) keep resolving as the author intended — and
+    so ``Path(__file__).resolve().parent.parent``-style root detection in
+    WASM notebooks lands on the real repo root. The staged file is removed
+    on context exit; the orphan-sweep at build start handles
+    process-interrupted leaks.
     """
     if not enabled:
         yield None
@@ -366,9 +369,7 @@ def _maybe_stage_with_pep723(
         new_source = inject_micropip_bootstrap(new_source, deps)
     new_source = write_pep723_block(new_source, deps, requires_python=requires_python)
 
-    with tempfile.TemporaryDirectory(prefix="marimo_book_pep723_", dir=src_abs.parent) as tmp_dir:
-        staged = Path(tmp_dir) / src_abs.name
-        staged.write_text(new_source, encoding="utf-8")
+    with staged_sibling_file(src_abs, prefix="marimo_book_pep723_", content=new_source) as staged:
         yield staged
 
 

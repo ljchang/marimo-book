@@ -62,6 +62,50 @@ def test_wasm_page_contains_island_markup(tmp_path: Path) -> None:
     assert "marimo-slider" in staged or "marimo-ui-element" in staged
 
 
+def test_wasm_page_file_relative_path_resolves_to_book_root(tmp_path: Path) -> None:
+    """A WASM notebook's ``Path(__file__).resolve().parent.parent`` must
+    resolve to the real book root, not marimo-book's PEP 723 staging dir.
+
+    marimo-book stages a PEP 723 copy next to the source before handing it
+    to ``MarimoIslandGenerator.from_file`` (which, since marimo 0.23.6, sets
+    ``__file__`` to that staged path). If the copy lives in a sub-tempdir,
+    ``__file__`` gains an extra directory level and file-relative paths — the
+    dartbrains ``IMG_DIR = Path(__file__).resolve().parent.parent / "images"``
+    pattern — miss the repo root. The staged copy must be a sibling *file* of
+    the source so directory depth is preserved.
+    """
+    content = tmp_path / "content"
+    content.mkdir()
+    sidecar = tmp_path / "resolved_root.txt"
+    # A cell that records, at build time, the root that file-relative path
+    # logic would compute from ``__file__``.
+    (content / "demo.py").write_text(
+        "import marimo\n\n"
+        "__generated_with = '0.23.3'\n"
+        "app = marimo.App()\n\n"
+        "@app.cell\n"
+        "def _():\n"
+        "    from pathlib import Path\n"
+        f"    Path({str(sidecar)!r}).write_text(\n"
+        "        str(Path(__file__).resolve().parent.parent)\n"
+        "    )\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
+    )
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "toc": [{"file": "content/demo.py", "mode": "wasm"}],
+        }
+    )
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert not report.errors
+    resolved = Path(sidecar.read_text().strip()).resolve()
+    assert resolved == content.parent.resolve()  # == book root (tmp_path)
+
+
 def test_wasm_page_skips_precompute(tmp_path: Path) -> None:
     """Precompute is a no-op for WASM pages; marimo's runtime handles reactivity."""
     book = _wasm_book(tmp_path)

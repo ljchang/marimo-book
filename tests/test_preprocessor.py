@@ -341,30 +341,57 @@ def test_maybe_stage_disabled_yields_none(tmp_path: Path) -> None:
         assert staged is None
 
 
-def test_maybe_stage_writes_block_to_sibling_tempdir(tmp_path: Path) -> None:
-    """``enabled=True`` returns a sibling tempdir copy with PEP 723 injected.
+def test_maybe_stage_writes_block_to_sibling_file(tmp_path: Path) -> None:
+    """``enabled=True`` returns a sibling *file* copy with PEP 723 injected.
 
-    The sibling location matters: marimo's cell-execution cwd is the
-    notebook's parent dir, so a copy under
-    ``src.parent/marimo_book_pep723_*/<name>.py`` keeps cwd-based
-    relative imports (``open("./data/foo.csv")``) resolving the same way
-    as in the original notebook.
+    The staged copy must sit directly in the source's parent dir — same
+    directory depth, NOT inside a sub-tempdir. Two reasons it shares the
+    source's directory: marimo's cell-execution cwd is the notebook's
+    parent dir (so ``open("./data/foo.csv")`` resolves), and — since marimo
+    0.23.6 — ``MarimoIslandGenerator.from_file`` sets ``__file__`` to the
+    staged path, so an extra directory level would make
+    ``Path(__file__).resolve().parent.parent`` miss the repo root.
     """
     src = tmp_path / "nb.py"
     src.write_text("import marimo as mo\nimport numpy\nimport pandas\n")
     with _maybe_stage_with_pep723(src, Dependencies(), enabled=True) as staged:
         assert staged is not None
         assert staged.exists()
-        # Sibling tempdir: parent of the staged file is a tempdir whose
-        # parent is the original notebook's parent.
-        assert staged.parent.parent == src.parent
-        assert staged.parent.name.startswith("marimo_book_pep723_")
+        # Sibling FILE: same parent dir as the source (directory depth
+        # preserved, so __file__-relative path resolution is unaffected).
+        assert staged.parent == src.parent
+        assert staged.suffix == ".py"
+        assert staged.name.startswith("marimo_book_pep723_")
         rewritten = staged.read_text()
         assert has_pep723_block(rewritten)
         deps = read_existing_dependencies(rewritten)
         assert deps == ["numpy", "pandas"]
-    # Tempdir cleaned up after context exit.
-    assert not staged.parent.exists()
+    # Staged file cleaned up after context exit.
+    assert not staged.exists()
+
+
+def test_cleanup_orphan_sweeps_leaked_staged_files(tmp_path: Path) -> None:
+    """Interrupted builds can leak staged sibling *files* (and, from older
+    builds, sub-tempdirs); the orphan sweep removes both prefixes in either
+    form and leaves real notebooks untouched."""
+    from marimo_book.transforms.marimo_export import cleanup_orphan_precompute_dirs
+
+    keep = tmp_path / "real_notebook.py"
+    keep.write_text("# keep me\n")
+    leaked_pep723 = tmp_path / "marimo_book_pep723_abc123.py"
+    leaked_pep723.write_text("# leaked PEP 723 staged copy\n")
+    leaked_precompute = tmp_path / "marimo_book_precompute_def456.py"
+    leaked_precompute.write_text("# leaked precompute staged copy\n")
+    leaked_legacy_dir = tmp_path / "marimo_book_pep723_olddir"
+    leaked_legacy_dir.mkdir()
+
+    removed = cleanup_orphan_precompute_dirs(tmp_path)
+
+    assert removed == 3
+    assert keep.exists()
+    assert not leaked_pep723.exists()
+    assert not leaked_precompute.exists()
+    assert not leaked_legacy_dir.exists()
 
 
 def test_maybe_stage_applies_extras_and_overrides(tmp_path: Path) -> None:

@@ -460,12 +460,14 @@ on a static page is faster end-to-end.
 - First page load is heavy (~30 MB Pyodide download, cached after).
 - Not every Python package is in Pyodide's package set — check
   [pyodide.org/packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html).
-- File system access via relative paths needs care: marimo's
-  `__file__` and `mo.notebook_dir()` resolve to internal paths under
-  `MarimoIslandGenerator`. If a notebook does
-  `Path(__file__).parent / "data"` it won't find the file. Use a
-  cwd-walk pattern instead, or wait for
-  [marimo-team/marimo#9391](https://github.com/marimo-team/marimo/issues/9391).
+
+**Loading remote data.** WASM pages can pull datasets over HTTP with no
+server of their own. As of marimo 0.23.7, DuckDB reads CSV / Parquet /
+JSON / GeoJSON from a URL inside `mo.sql`, SQL cells, and the
+`duckdb.read_*` Python API — e.g.
+`SELECT * FROM read_csv('https://example.com/cars.csv')`. Polars network
+I/O (`pl.read_csv(url)` and friends) also works in WASM as of 0.23.5. So
+a fully interactive chapter can load its own data with zero backend.
 
 The `Authoring → WASM demo` page in this book is a working example.
 

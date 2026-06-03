@@ -35,7 +35,11 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "pybtex>=0.24",
-    "marimo>=0.23,<0.24",
+    # 0.23.6 ships marimo-team/marimo#9409, which makes
+    # `MarimoIslandGenerator.from_file()` propagate the notebook
+    # filename so `__file__` / `mo.notebook_dir()` resolve correctly on
+    # WASM pages (was: resolved to the host's `__main__`).
+    "marimo>=0.23.6,<0.24",
     # marimo declares nbformat as an optional extra; we always use
     # `marimo export ipynb` under the hood, so pin it as a hard dep.
     "nbformat>=5.0",

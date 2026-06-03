@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workaround. The corresponding caveat has been removed from the
   WASM-mode docs.
 
+### Documentation
+
+- **Document remote data loading on WASM pages.** The WASM-mode section
+  of `building.md` now notes that DuckDB can read CSV / Parquet / JSON /
+  GeoJSON over HTTP (marimo 0.23.7) and Polars network I/O works in the
+  browser (marimo 0.23.5), so an interactive chapter can fetch its own
+  data with no backend.
+
 ## [0.1.17] — 2026-04-29
 
 ### Fixed

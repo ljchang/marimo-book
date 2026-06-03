@@ -461,6 +461,14 @@ on a static page is faster end-to-end.
 - Not every Python package is in Pyodide's package set — check
   [pyodide.org/packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html).
 
+**Loading remote data.** WASM pages can pull datasets over HTTP with no
+server of their own. As of marimo 0.23.7, DuckDB reads CSV / Parquet /
+JSON / GeoJSON from a URL inside `mo.sql`, SQL cells, and the
+`duckdb.read_*` Python API — e.g.
+`SELECT * FROM read_csv('https://example.com/cars.csv')`. Polars network
+I/O (`pl.read_csv(url)` and friends) also works in WASM as of 0.23.5. So
+a fully interactive chapter can load its own data with zero backend.
+
 The `Authoring → WASM demo` page in this book is a working example.
 
 ## ePub / other formats?

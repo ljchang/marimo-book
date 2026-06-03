@@ -50,20 +50,41 @@ than waiting for auto-reload.
 Releases are tag-driven via `hatch-vcs`. There is **no `version` field
 in `pyproject.toml`** — the version is the latest `v*` git tag.
 
+`.github/workflows/publish.yml` triggers on **`push: tags: ["v*"]`**
+(not on publishing a GitHub Release). So the act that ships a release
+is **pushing a `v*` tag**; `hatch-vcs` reads the tag, builds a wheel
+versioned exactly to it (e.g. `v0.1.18` → `0.1.18`), and ships it to
+PyPI via OIDC Trusted Publisher.
+
 To cut a release:
 
 1. Open a tiny PR that dates the `[Unreleased]` section in
-   `CHANGELOG.md` to today (one-line change). Merge it.
-2. Go to <https://github.com/ljchang/marimo-book/releases>. The
-   `release-drafter` bot has been maintaining a draft populated with
-   bullets from every merged PR. Edit if needed, set the tag (e.g.
-   `v0.1.0a3`), and click **Publish release**.
-3. The `v*` tag fires `.github/workflows/publish.yml`. `hatch-vcs` reads
-   the tag, builds a wheel versioned exactly `0.1.0a3`, ships it to
-   PyPI via OIDC Trusted Publisher.
+   `CHANGELOG.md` to today (one-line change, e.g.
+   `## [0.1.18] — YYYY-MM-DD`). Merge it.
+2. Tag merged `main` at that commit and push the tag:
 
-That's it. **Never push version edits directly to main.** The version
-lives in exactly one place: the git tag.
+   ```bash
+   git checkout main && git pull
+   git tag -a v0.1.18 -m "Release 0.1.18"
+   git push origin v0.1.18
+   ```
+
+   The pushed tag fires `publish.yml` → PyPI. Watch the run:
+   `gh run watch --repo ljchang/marimo-book` (or the Actions tab).
+
+That's it. **Never push version edits directly to main**, and never
+push a `v*` tag you don't intend to publish — the tag *is* the
+release trigger. The version lives in exactly one place: the git tag.
+
+**Note (2026-06): the `release-drafter` GitHub-Release draft is stale**
+(stuck at `v0.1.11`) and is **not** part of the live flow — releases
+`v0.1.12`–`v0.1.17` were cut by direct tag push and have no GitHub
+Release object at all. Don't rely on "publish the draft"; push the tag.
+If you want GitHub Release notes too, run
+`gh release create v0.1.18 --generate-notes` *instead of* the manual
+`git push origin v0.1.18` (creating a release also creates+pushes the
+tag, which fires `publish.yml` the same way) — but the tag push is the
+only thing that actually publishes to PyPI.
 
 See `PUBLISHING.md` for full detail (one-time PyPI setup, label
 conventions for release-drafter categorisation, yanking, etc.).

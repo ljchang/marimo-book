@@ -6,18 +6,33 @@ token needed once the one-time setup is done.
 
 ## How releases work (the short version)
 
+`publish.yml` triggers on **`push: tags: ["v*"]`** — pushing a `v*` tag
+is what publishes a release.
+
 1. Open a tiny PR that dates the `[Unreleased]` section in
    `CHANGELOG.md` to today (one-line change). Merge it.
-2. Go to <https://github.com/ljchang/marimo-book/releases>. The
-   `release-drafter` bot has been maintaining a draft populated with
-   bullets from every merged PR. Edit if needed, set the tag to
-   `v0.1.0a3` (or whatever the next version is), and click **Publish
-   release**.
-3. The `v*` tag fires `publish.yml`. `hatch-vcs` reads the tag, builds
-   a wheel versioned `0.1.0a3`, ships it to PyPI via OIDC.
+2. Tag merged `main` and push the tag:
+
+   ```bash
+   git checkout main && git pull
+   git tag -a v0.1.18 -m "Release 0.1.18"   # next version
+   git push origin v0.1.18
+   ```
+
+3. The pushed `v*` tag fires `publish.yml`. `hatch-vcs` reads the tag,
+   builds a wheel versioned exactly to it (`v0.1.18` → `0.1.18`), ships
+   it to PyPI via OIDC.
 
 That's it. **No `pyproject.toml` edit, no `__init__.py` edit, no direct
 push to main.** The version is the tag.
+
+> **The `release-drafter` GitHub-Release draft is stale** (stuck at
+> `v0.1.11`) and is *not* part of the live flow — `v0.1.12`–`v0.1.17`
+> were cut by direct tag push and have no GitHub Release object. Push
+> the tag; don't "publish the draft." If you also want GitHub Release
+> notes, use `gh release create v0.1.18 --generate-notes` (it
+> creates+pushes the tag, firing `publish.yml` the same way) instead of
+> the bare `git push origin v0.1.18`.
 
 ## One-time setup
 
@@ -98,6 +113,14 @@ Untagged dev commits get versions like `0.1.0a3.dev5+gabc1234.d20260425`
 makes pre-release wheels distinguishable without needing a manual bump.
 
 ## Release-drafter
+
+> **Currently stale / out of the live flow.** The draft is stuck at
+> `v0.1.11`; recent releases were cut by direct tag push (see "How
+> releases work") and have no GitHub Release object. The label table
+> below still documents how categorisation *would* work if the draft is
+> revived, but publishing a release today does **not** go through it —
+> the tag push is what ships to PyPI. The `CHANGELOG.md` is the
+> authoritative, hand-maintained release notes.
 
 `.github/workflows/release-drafter.yml` runs on every merged PR and
 keeps a draft Release on github.com up to date. It groups entries by

@@ -30,6 +30,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -122,23 +124,50 @@ def export_notebook_with_overrides(
     notebook's source to substitute a widget's ``value=`` (one variant per
     combination), then re-exports to capture cell outputs at that value.
 
-    The rewritten source is written to a temp file inside ``py_path``'s
-    parent directory so relative imports resolve identically to the
-    original notebook. The temp file's stem matches the original (with a
-    suffix) so any user-facing path strings stay intuitive.
+    The rewritten source is written to a sibling file of ``py_path`` (same
+    directory) so relative imports resolve identically to the original
+    notebook and the notebook's ``__file__`` keeps the same directory depth.
     """
     py_path = Path(py_path)
-    with tempfile.TemporaryDirectory(
-        prefix="marimo_book_precompute_", dir=py_path.parent
-    ) as tmp_dir:
-        tmp_in = Path(tmp_dir) / py_path.name
-        tmp_in.write_text(rewritten_source, encoding="utf-8")
+    with staged_sibling_file(
+        py_path, prefix="marimo_book_precompute_", content=rewritten_source
+    ) as tmp_in:
         return export_notebook(
             tmp_in,
             include_outputs=include_outputs,
             sandbox=sandbox,
             suppress_warnings=suppress_warnings,
         )
+
+
+@contextmanager
+def staged_sibling_file(src: Path, *, prefix: str, content: str) -> Iterator[Path]:
+    """Write ``content`` to a temp ``.py`` file next to ``src`` and yield it.
+
+    The staged file is a *sibling* of ``src`` (created directly in
+    ``src.parent``), NOT a file inside a sub-tempdir. This matters for two
+    reasons:
+
+    - marimo runs a notebook's cells with cwd set to the notebook's parent
+      dir, so cwd-relative access (``open("./data/foo.csv")``) resolves the
+      same as in the original source; and
+    - since marimo 0.23.6, ``MarimoIslandGenerator.from_file`` sets a
+      notebook's ``__file__`` to the path it's handed. A sub-tempdir would
+      add a directory level, so ``Path(__file__).resolve().parent.parent``
+      (the common "find the repo root" idiom) would land one level too deep.
+      A sibling file preserves directory depth, keeping that idiom correct.
+
+    The file is removed on context exit. If the process is interrupted, the
+    ``prefix`` lets :func:`cleanup_orphan_precompute_dirs` sweep the leak.
+    """
+    fd, tmp = tempfile.mkstemp(prefix=prefix, suffix=".py", dir=src.parent)
+    staged = Path(tmp)
+    try:
+        os.close(fd)
+        staged.write_text(content, encoding="utf-8")
+        yield staged
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 _ORPHAN_TEMP_PREFIXES: tuple[str, ...] = (
@@ -148,28 +177,31 @@ _ORPHAN_TEMP_PREFIXES: tuple[str, ...] = (
 
 
 def cleanup_orphan_precompute_dirs(content_dir: Path) -> int:
-    """Remove leaked marimo-book temp dirs in ``content_dir``.
+    """Remove leaked marimo-book staging temp paths in ``content_dir``.
 
     Sweeps both ``marimo_book_precompute_*`` (from
     :func:`export_notebook_with_overrides`) and ``marimo_book_pep723_*``
-    (from the preprocessor's PEP 723 sibling-tempdir staging). These
-    are created next to the source notebook so marimo's cell-execution
-    cwd resolves relative imports correctly, and removed by their
-    ``TemporaryDirectory`` context managers on normal exit. If the
-    process is interrupted (Ctrl-C, watcher restart, OOM) the dir
-    leaks and pollutes the source tree. Called from the preprocessor
-    before each build.
+    (from the preprocessor's PEP 723 staging). These are created next to
+    the source notebook (see :func:`staged_sibling_file`) and removed on
+    normal context exit. If the process is interrupted (Ctrl-C, watcher
+    restart, OOM) the staged path leaks and pollutes the source tree.
+    Called from the preprocessor before each build.
 
-    The function name is preserved for back-compat with callers; the
-    sweep covers both prefixes regardless.
+    Current staging writes sibling *files*; older builds wrote sub-tempdirs.
+    Both forms (and both prefixes) are swept. The function name is preserved
+    for back-compat with callers.
     """
     if not content_dir.is_dir():
         return 0
     removed = 0
     for child in content_dir.iterdir():
-        if child.is_dir() and child.name.startswith(_ORPHAN_TEMP_PREFIXES):
-            shutil.rmtree(child, ignore_errors=True)
-            removed += 1
+        if not child.name.startswith(_ORPHAN_TEMP_PREFIXES):
+            continue
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)  # legacy sub-tempdir leak
+        else:
+            child.unlink(missing_ok=True)  # current sibling-file leak
+        removed += 1
     return removed
 
 

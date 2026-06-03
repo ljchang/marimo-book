@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`__file__`-relative paths now resolve to the repo root on WASM
+  pages.** The PEP 723 (and precompute) staging step copied each
+  notebook into a temp *sub-directory* next to the source before
+  handing it to `MarimoIslandGenerator.from_file()`. Since marimo
+  0.23.6 sets a notebook's `__file__` to that staged path, the extra
+  directory level made the common `Path(__file__).resolve().parent.parent`
+  root-detection idiom land one level too deep (e.g. resolving to
+  `content/` instead of the book root), so file-relative asset paths
+  like `IMG_DIR = _ROOT / "images"` missed their target. Staging now
+  writes a sibling *file* in the source's own directory (via the new
+  `staged_sibling_file()` helper), preserving directory depth. The
+  orphan-cleanup sweep handles both the new leaked files and legacy
+  leaked sub-tempdirs.
+
 ### Changed
 
 - **Require marimo ≥ 0.23.6.** That release ships

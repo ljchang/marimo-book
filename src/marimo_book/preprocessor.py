@@ -599,20 +599,14 @@ class Preprocessor:
                 if store.is_fresh(src_rel, src_abs):
                     report.pages_cached += 1
                 else:
-                    report.warnings.append(
-                        f"{entry.file}: {store.reason_stale(src_rel, src_abs)}"
-                    )
+                    report.warnings.append(f"{entry.file}: {store.reason_stale(src_rel, src_abs)}")
                 continue
             try:
-                body = render_py_body(
-                    self.book, self.book_dir, entry, sandbox=self.sandbox
-                )
+                body = render_py_body(self.book, self.book_dir, entry, sandbox=self.sandbox)
                 store.write(src_rel, src_abs, body)
                 report.pages_rendered += 1
             except Exception as exc:  # noqa: BLE001
-                report.errors.append(
-                    f"{entry.file}: {exc.__class__.__name__}: {exc}"
-                )
+                report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
         if not check_only:
             store.save()
         return report
@@ -1008,9 +1002,7 @@ def _finalize_page(
     return dst
 
 
-def render_py_body(
-    book: Book, book_dir: Path, entry: FileEntry, *, sandbox: bool = False
-) -> str:
+def render_py_body(book: Book, book_dir: Path, entry: FileEntry, *, sandbox: bool = False) -> str:
     """Execute a ``.py`` entry and return its rendered body (pre-finalize).
 
     This is the expensive, source-dependent output that ``mode: cached``

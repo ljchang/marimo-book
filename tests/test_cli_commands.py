@@ -196,3 +196,39 @@ def test_sync_deps_no_py_notebooks_in_toc(runner: CliRunner, tmp_path: Path) -> 
     result = runner.invoke(app, ["sync-deps", "-b", str(book_yml)])
     assert result.exit_code == 0
     assert "No marimo .py notebooks" in result.output
+
+
+def test_new_post_writes_md_stub(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from marimo_book.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["new-post", "Hello World", "--book-dir", str(tmp_path), "--date", "2026-06-04"],
+    )
+    assert result.exit_code == 0, result.output
+    post = tmp_path / "blog" / "posts" / "2026-06-04-hello-world.md"
+    assert post.exists()
+    text = post.read_text()
+    assert text.startswith("---\n")
+    assert "date: 2026-06-04" in text
+    assert "title: Hello World" in text
+
+
+def test_new_post_notebook_stub(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from marimo_book.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["new-post", "Demo", "--notebook", "--book-dir", str(tmp_path), "--date", "2026-06-04"],
+    )
+    assert result.exit_code == 0, result.output
+    post = tmp_path / "blog" / "posts" / "2026-06-04-demo.py"
+    assert post.exists()
+    assert "# /// blog" in post.read_text()
+    assert "import marimo" in post.read_text()

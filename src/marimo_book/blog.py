@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import re
+import subprocess
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -111,14 +112,36 @@ def _meta_from_dict(raw: dict, *, is_notebook: bool, body: str) -> PostMeta:
     )
 
 
+def _git_added_date(path: Path) -> date | None:
+    """Author date of the commit that added ``path``, or None if unavailable."""
+    try:
+        res = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--format=%aI", "--", path.name],
+            cwd=str(path.parent),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    lines = [ln for ln in res.stdout.splitlines() if ln.strip()]
+    if res.returncode != 0 or not lines:
+        return None
+    try:
+        return date.fromisoformat(lines[-1][:10])  # oldest add commit
+    except ValueError:
+        return None
+
+
 def resolve_meta(meta: PostMeta, path: Path, *, default_author: str | None) -> PostMeta:
-    """Fill required defaults: date (filename->mtime), title (first H1), default author."""
+    """Fill required defaults: date (filename->git->mtime), title (H1), default author."""
     if meta.date is None:
         fm = _FILENAME_DATE_RE.match(path.name)
         if fm:
             meta.date = date(int(fm.group(1)), int(fm.group(2)), int(fm.group(3)))
         else:
-            meta.date = datetime.fromtimestamp(path.stat().st_mtime).date()
+            meta.date = _git_added_date(path) or datetime.fromtimestamp(path.stat().st_mtime).date()
     if not meta.title:
         h1 = _H1_RE.search(meta.body) if not meta.is_notebook else None
         meta.title = h1.group(1) if h1 else path.stem
@@ -183,7 +206,7 @@ def insert_teaser(markdown: str) -> str:
     after the first non-heading paragraph (so a leading ``# H1`` stays in the
     teaser). If no blank-line-separated block is found, append at the end.
     """
-    if _MORE in markdown:
+    if not markdown.strip() or _MORE in markdown:
         return markdown
     blocks = markdown.split("\n\n")
     for i, block in enumerate(blocks):
@@ -205,7 +228,12 @@ def read_authors_yml(book_dir: Path) -> dict | None:
 
 
 def discover_posts(blog_dir: Path) -> list[Path]:
-    """Return all .md/.py post files under ``<blog_dir>/posts/`` (sorted)."""
+    """Return the .md/.py post files directly in ``<blog_dir>/posts/`` (sorted).
+
+    Discovery is one level deep: posts are flat files in ``posts/``. Staged
+    output names are derived from the file stem, so nesting is intentionally
+    not supported (it would risk stem collisions in the flattened output).
+    """
     posts_dir = blog_dir / "posts"
     if not posts_dir.is_dir():
         return []

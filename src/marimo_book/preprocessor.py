@@ -703,6 +703,7 @@ class Preprocessor:
             body = insert_teaser(body)
             staged = out_posts / (src.stem + ".md")
             staged.write_text(render_front_matter(meta) + "\n" + body, encoding="utf-8")
+            report.pages += 1
 
         index = out_blog / "index.md"
         if not index.exists():

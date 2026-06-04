@@ -232,3 +232,43 @@ def test_new_post_notebook_stub(tmp_path: Path) -> None:
     assert post.exists()
     assert "# /// blog" in post.read_text()
     assert "import marimo" in post.read_text()
+
+
+def test_new_post_colon_title_produces_valid_yaml(tmp_path: Path) -> None:
+    import yaml
+    from typer.testing import CliRunner
+
+    from marimo_book.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "new-post",
+            "marimo-book: New Features",
+            "--book-dir",
+            str(tmp_path),
+            "--date",
+            "2026-06-04",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    post = next((tmp_path / "blog" / "posts").glob("2026-06-04-*.md"))
+    fm = post.read_text().split("---")[1]
+    data = yaml.safe_load(fm)
+    assert data["title"] == "marimo-book: New Features"
+    assert str(data["date"]) == "2026-06-04"
+
+
+def test_new_post_respects_blog_dir_from_book_yml(tmp_path: Path) -> None:
+    (tmp_path / "book.yml").write_text("title: T\ntoc: []\nblog:\n  enabled: true\n  dir: news\n")
+    from typer.testing import CliRunner
+
+    from marimo_book.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["new-post", "Hi", "--book-dir", str(tmp_path), "--date", "2026-06-04"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "news" / "posts" / "2026-06-04-hi.md").exists()

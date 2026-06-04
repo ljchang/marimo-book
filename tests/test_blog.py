@@ -7,7 +7,14 @@ from pathlib import Path
 
 import yaml  # noqa: F401  (used in Task 6 tests below)
 
-from marimo_book.blog import parse_blog_block, parse_post_header, resolve_meta
+from marimo_book.blog import (
+    author_id,
+    build_author_roster,
+    parse_blog_block,
+    parse_post_header,
+    resolve_meta,
+)
+from marimo_book.config import Author
 
 
 def test_parse_blog_block_reads_fields() -> None:
@@ -58,3 +65,22 @@ def test_title_falls_back_to_first_h1(tmp_path: Path) -> None:
     meta = resolve_meta(parse_post_header(p), p, default_author=None)
     assert meta.title == "Real Title"
     assert meta.authors == []
+
+
+def test_author_id_slugifies() -> None:
+    assert author_id("Luke Chang") == "luke-chang"
+    assert author_id("Jane Q. Doe") == "jane-q-doe"
+
+
+def test_roster_from_book_authors_only() -> None:
+    roster = build_author_roster([Author(name="Luke Chang")], authors_yml=None)
+    assert "luke-chang" in roster
+    assert roster["luke-chang"]["name"] == "Luke Chang"
+
+
+def test_authors_yml_overrides_on_collision() -> None:
+    book_authors = [Author(name="Luke Chang", affiliation="Dartmouth")]
+    yml = {"authors": {"luke-chang": {"name": "Luke C.", "description": "Maintainer"}}}
+    roster = build_author_roster(book_authors, authors_yml=yml)
+    assert roster["luke-chang"]["name"] == "Luke C."
+    assert roster["luke-chang"]["description"] == "Maintainer"

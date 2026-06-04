@@ -15,6 +15,8 @@ from pathlib import Path
 
 import yaml
 
+from .config import Author
+
 _BLOG_BLOCK_RE = re.compile(
     r"^# /// blog[ \t]*\n(?P<body>(?:^#(?:[ \t].*)?\n)*?)^# ///[ \t]*\n",
     re.MULTILINE,
@@ -122,3 +124,31 @@ def resolve_meta(meta: PostMeta, path: Path, *, default_author: str | None) -> P
     if not meta.authors and default_author:
         meta.authors = [default_author]
     return meta
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def author_id(name: str) -> str:
+    return _SLUG_RE.sub("-", name.lower()).strip("-")
+
+
+def _derive_entry(a: Author) -> dict:
+    desc = a.affiliation or (f"ORCID {a.orcid}" if a.orcid else None)
+    entry = {"name": a.name}
+    if desc:
+        entry["description"] = desc
+    return entry
+
+
+def build_author_roster(book_authors: list[Author], authors_yml: dict | None) -> dict:
+    """Merge book.yml-derived authors with an optional .authors.yml roster.
+
+    Returns ``{id: {name, description?, avatar?, url?}}``. The explicit
+    .authors.yml entries win on id collision.
+    """
+    roster = {author_id(a.name): _derive_entry(a) for a in book_authors}
+    if authors_yml:
+        for id_, entry in (authors_yml.get("authors") or {}).items():
+            roster[id_] = entry
+    return roster

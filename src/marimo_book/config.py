@@ -278,7 +278,13 @@ class Defaults(BaseModel):
     #               become live and reactive without a server. Heavy
     #               (~2 MB JS + ~30 MB Pyodide on first load); use
     #               selectively per page rather than book-wide.
-    mode: Literal["static", "wasm"] = "static"
+    # ``cached``  — outputs come from a committed ``_rendered/`` artifact
+    #               instead of executing the notebook at build time. The
+    #               author regenerates with ``marimo-book render`` (which
+    #               executes), commits the result, and CI reuses it on a
+    #               plain runner — jupyter-book ``execute: off`` semantics
+    #               for heavy/GPU notebooks. See ``RenderedStore``.
+    mode: Literal["static", "wasm", "cached"] = "static"
     hide_author_line: bool = True
     show_source_link: bool = True
     # The first code cell in a marimo notebook is, by convention, the setup /
@@ -305,9 +311,10 @@ class FileEntry(BaseModel):
     title: str | None = None
     # Per-entry override. ``None`` = follow ``book.defaults.mode``. Setting
     # ``mode: wasm`` on a single ``.py`` entry routes that page through the
-    # islands renderer while every other page stays static. Markdown pages
-    # ignore this field.
-    mode: Literal["static", "wasm"] | None = None
+    # islands renderer while every other page stays static; ``mode: cached``
+    # sources that page's outputs from the committed ``_rendered/`` artifact
+    # (no execution at build). Markdown pages ignore this field.
+    mode: Literal["static", "wasm", "cached"] | None = None
     hidden: bool = False
 
     def effective_mode(self, default_mode: str) -> str:

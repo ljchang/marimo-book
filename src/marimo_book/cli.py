@@ -294,6 +294,59 @@ def build(
     typer.echo(f"Done. Site at {site_dir}")
 
 
+@app.command("render")
+def render(
+    book_file: Path = typer.Option(
+        Path("book.yml"),
+        "--book",
+        "-b",
+        help="Path to the book.yml config.",
+        exists=True,
+        dir_okay=False,
+    ),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help=(
+            "Verify every mode:cached page's committed output is current; exit "
+            "nonzero if any are stale/missing. Writes nothing — use in CI to "
+            "fail the build when _rendered/ is out of date."
+        ),
+    ),
+) -> None:
+    """Render ``mode: cached`` notebooks and commit them to ``_rendered/``.
+
+    Run this on a machine with the notebooks' real dependencies (e.g. a GPU
+    box) whenever a cached notebook's source changes, then commit ``_rendered/``.
+    A plain CI runner can then ``marimo-book build`` without executing anything.
+    """
+    book = _load_or_exit(book_file)
+    book_dir = book_file.resolve().parent
+    pre = Preprocessor(book, book_dir=book_dir)
+    report = pre.render_cached(check_only=check)
+
+    for warn in report.warnings:
+        typer.echo(f"  stale: {warn}", err=True)
+    for err in report.errors:
+        typer.echo(f"  error: {err}", err=True)
+
+    if check:
+        if report.warnings:
+            typer.echo(
+                f"{len(report.warnings)} cached page(s) out of date. "
+                f"Run `marimo-book render` and commit _rendered/.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.echo(f"All {report.pages} cached page(s) up to date.")
+        return
+
+    if report.errors:
+        typer.echo(f"Rendering failed ({len(report.errors)} errors).", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Rendered {report.pages_rendered} cached page(s) → _rendered/.")
+
+
 @app.command("serve")
 def serve(
     book_file: Path = typer.Option(

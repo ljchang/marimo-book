@@ -175,3 +175,28 @@ def insert_teaser(markdown: str) -> str:
         return markdown.rstrip("\n") + f"\n\n{_MORE}\n"
     blocks.insert(insert_at, _MORE)
     return "\n\n".join(blocks)
+
+
+def discover_posts(blog_dir: Path) -> list[Path]:
+    """Return all .md/.py post files under ``<blog_dir>/posts/`` (sorted)."""
+    posts_dir = blog_dir / "posts"
+    if not posts_dir.is_dir():
+        return []
+    return sorted(p for p in posts_dir.iterdir() if p.is_file() and p.suffix in (".md", ".py"))
+
+
+def render_front_matter(meta: PostMeta) -> str:
+    """Render the YAML front-matter block the staged post .md must lead with."""
+    data: dict = {"date": meta.date}
+    if meta.title:
+        data["title"] = meta.title
+    for key in ("authors", "categories", "tags"):
+        val = getattr(meta, key)
+        if val:
+            data[key] = val
+    if meta.draft:
+        data["draft"] = True
+    if meta.pin:
+        data["pin"] = True
+    dumped = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{dumped}\n---\n"

@@ -5,14 +5,17 @@ from __future__ import annotations
 from datetime import date as _date
 from pathlib import Path
 
-import yaml  # noqa: F401  (used in Task 6 tests below)
+import yaml
 
 from marimo_book.blog import (
+    PostMeta,
     author_id,
     build_author_roster,
+    discover_posts,
     insert_teaser,
     parse_blog_block,
     parse_post_header,
+    render_front_matter,
     resolve_meta,
 )
 from marimo_book.config import Author
@@ -107,3 +110,25 @@ def test_inserts_after_leading_heading_block() -> None:
     out = insert_teaser(md)
     assert out.index(MORE) < out.index("Second.")
     assert out.index("# Title") < out.index(MORE)
+
+
+def test_discover_posts_finds_md_and_py(tmp_path: Path) -> None:
+    posts = tmp_path / "blog" / "posts"
+    posts.mkdir(parents=True)
+    (posts / "2026-06-04-a.md").write_text("---\ndate: 2026-06-04\n---\nx\n")
+    (posts / "2026-06-03-b.py").write_text(
+        "# /// blog\n# date = 2026-06-03\n# ///\nimport marimo\n"
+    )
+    (posts / "ignore.txt").write_text("nope")
+    found = sorted(p.name for p in discover_posts(tmp_path / "blog"))
+    assert found == ["2026-06-03-b.py", "2026-06-04-a.md"]
+
+
+def test_render_front_matter_round_trips() -> None:
+    meta = PostMeta(title="Hi", date=_date(2026, 6, 4), authors=["luke"], tags=["release"])
+    fm = render_front_matter(meta)
+    assert fm.startswith("---\n") and fm.rstrip().endswith("---")
+    loaded = yaml.safe_load(fm.strip("-\n"))
+    assert loaded["title"] == "Hi"
+    assert loaded["date"] == _date(2026, 6, 4)
+    assert loaded["authors"] == ["luke"]

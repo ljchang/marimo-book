@@ -5,6 +5,21 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Blog / news module (`blog: {enabled: true}`).** Opt-in blog built on
+  Material's `blog` + `tags` plugins. Posts — Markdown `.md` or marimo `.py`
+  notebooks — drop by convention into `blog/posts/` (no TOC entry per post)
+  and render through the normal pipeline. Metadata via YAML front-matter or a
+  `# /// blog` block; `date` defaults from a `YYYY-MM-DD-…` filename, `title`
+  from the first heading. Bylines come from a merged roster of `book.yml`
+  authors plus an optional `.authors.yml`. A teaser is auto-inserted. RSS via
+  the new `marimo-book[blog]` extra. Scaffold a post with
+  `marimo-book new-post "Title"` (`--notebook` for `.py`). Off by default;
+  requires `mkdocs-material>=9.7.0`.
+
 ## [0.1.18] — 2026-06-03
 
 ### Fixed

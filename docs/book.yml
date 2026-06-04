@@ -47,6 +47,13 @@ cross_references: true
 # becomes a docs page, so readers can browse release history in-book.
 include_changelog: true
 
+# Opt-in blog / news module. Posts live in docs/blog/posts/ (.md or
+# marimo .py) and are auto-discovered by date — no TOC entry per post.
+# Dogfoods the feature on our own docs.
+blog:
+  enabled: true
+  title: News
+
 # Static reactivity for discrete marimo UI widgets. Enabled here so the
 # precompute_demo chapter actually demonstrates the feature live. The
 # defaults (50 values/widget, 200 combinations/page, 60s/page, 10MB/page)

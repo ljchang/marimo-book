@@ -117,6 +117,36 @@ def test_toc_entry_must_pick_one_shape() -> None:
         Book.model_validate({"title": "T", "toc": [{"unknown_kind": "oops"}]})
 
 
+def test_blog_defaults_off() -> None:
+    from marimo_book.config import Book
+
+    book = Book.model_validate({"title": "T", "toc": []})
+    assert book.blog.enabled is False
+    assert book.blog.title == "Blog"
+    assert book.blog.dir == "blog"
+    assert book.blog.rss is True
+    assert book.blog.default_author is None
+
+
+def test_blog_round_trip() -> None:
+    from marimo_book.config import Book
+
+    payload = {
+        "title": "T",
+        "toc": [],
+        "blog": {"enabled": True, "title": "News", "default_author": "luke"},
+    }
+    book = Book.model_validate(payload)
+    assert book.blog.enabled is True
+    assert book.blog.title == "News"
+    assert book.blog.default_author == "luke"
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Book.model_validate({"title": "T", "toc": [], "blog": {"nope": 1}})
+
+
 def test_defaults_suppress_warnings_round_trip() -> None:
     """``defaults.suppress_warnings`` is False by default and accepts True."""
     b = Book.model_validate({"title": "T", "toc": [{"file": "a.md"}]})

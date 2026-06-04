@@ -87,6 +87,23 @@ class Bibliography(BaseModel):
     files: list[Path] = Field(default_factory=list)
 
 
+class Blog(BaseModel):
+    """Opt-in blog / news module.
+
+    Posts live by convention in ``<book_root>/<dir>/posts/`` (``.md`` or
+    marimo ``.py``) and are rendered through the normal page pipeline, then
+    handed to Material's ``blog`` plugin. Off by default.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    title: str = "Blog"  # nav label
+    dir: str = "blog"  # source folder under the book root
+    rss: bool = True  # emit an RSS feed when enabled
+    default_author: str | None = None  # roster id used when a post omits authors
+
+
 class Precompute(BaseModel):
     """Static-reactivity opt-in for discrete marimo UI widgets.
 
@@ -398,6 +415,11 @@ class Book(BaseModel):
     # (~30 s for ~50 pages); turn off in ``serve`` and on in CI / for
     # release builds. Requires: ``pip install marimo-book[pdf]``.
     pdf_export: bool = False
+
+    # Opt-in blog / news module. See the :class:`Blog` docstring. Posts in
+    # ``<book_root>/<blog.dir>/posts/`` (.md or .py) are auto-discovered.
+    # RSS requires: ``pip install marimo-book[blog]``.
+    blog: Blog = Field(default_factory=Blog)
 
     # Opt-in static reactivity for marimo UI elements. When enabled, the
     # preprocessor scans each ``.py`` page for discrete widget candidates

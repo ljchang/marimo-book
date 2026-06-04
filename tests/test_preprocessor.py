@@ -522,3 +522,50 @@ def test_stage_page_static_mode_skips_staging_by_default(tmp_path: Path) -> None
 
     # Default static path receives the ORIGINAL source, not a staged copy.
     assert captured["args"] == nb.resolve()
+
+
+def test_blog_stages_posts_index_and_authors(tmp_path: Path) -> None:
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    posts = tmp_path / "blog" / "posts"
+    posts.mkdir(parents=True)
+    (posts / "2026-06-04-hello.md").write_text(
+        "---\ntitle: Hello\n---\n\nIntro para.\n\nMore body.\n", encoding="utf-8"
+    )
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/intro.md"}],
+            "authors": [{"name": "Luke Chang"}],
+            "blog": {"enabled": True},
+        }
+    )
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Intro\n")
+
+    out = tmp_path / "_site_src"
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
+    assert not report.errors
+
+    docs = out / "docs"
+    post = (docs / "blog" / "posts" / "2026-06-04-hello.md").read_text()
+    assert post.startswith("---\n")
+    assert "date: 2026-06-04" in post
+    assert "authors:\n- luke-chang" in post
+    assert "<!-- more -->" in post
+    assert (docs / "blog" / "index.md").exists()
+    authors = (docs / "blog" / ".authors.yml").read_text()
+    assert "luke-chang" in authors and "Luke Chang" in authors
+
+
+def test_blog_disabled_stages_nothing(tmp_path: Path) -> None:
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Intro\n")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/intro.md"}]})
+    out = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
+    assert not (out / "docs" / "blog").exists()

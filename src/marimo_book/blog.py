@@ -177,6 +177,14 @@ def insert_teaser(markdown: str) -> str:
     return "\n\n".join(blocks)
 
 
+def read_authors_yml(book_dir: Path) -> dict | None:
+    """Load ``<book_dir>/.authors.yml`` if present."""
+    p = book_dir / ".authors.yml"
+    if not p.is_file():
+        return None
+    return yaml.safe_load(p.read_text(encoding="utf-8"))
+
+
 def discover_posts(blog_dir: Path) -> list[Path]:
     """Return all .md/.py post files under ``<blog_dir>/posts/`` (sorted)."""
     posts_dir = blog_dir / "posts"

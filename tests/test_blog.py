@@ -10,6 +10,7 @@ import yaml  # noqa: F401  (used in Task 6 tests below)
 from marimo_book.blog import (
     author_id,
     build_author_roster,
+    insert_teaser,
     parse_blog_block,
     parse_post_header,
     resolve_meta,
@@ -84,3 +85,25 @@ def test_authors_yml_overrides_on_collision() -> None:
     roster = build_author_roster(book_authors, authors_yml=yml)
     assert roster["luke-chang"]["name"] == "Luke C."
     assert roster["luke-chang"]["description"] == "Maintainer"
+
+
+MORE = "<!-- more -->"
+
+
+def test_explicit_marker_preserved() -> None:
+    md = "Intro.\n<!-- more -->\nRest.\n"
+    assert insert_teaser(md) == md
+
+
+def test_inserts_after_first_paragraph() -> None:
+    md = "First para.\n\nSecond para.\n\nThird.\n"
+    out = insert_teaser(md)
+    assert out.count(MORE) == 1
+    assert out.index(MORE) < out.index("Second para.")
+
+
+def test_inserts_after_leading_heading_block() -> None:
+    md = "# Title\n\nFirst para.\n\nSecond.\n"
+    out = insert_teaser(md)
+    assert out.index(MORE) < out.index("Second.")
+    assert out.index("# Title") < out.index(MORE)

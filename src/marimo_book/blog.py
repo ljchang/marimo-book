@@ -152,3 +152,26 @@ def build_author_roster(book_authors: list[Author], authors_yml: dict | None) ->
         for id_, entry in (authors_yml.get("authors") or {}).items():
             roster[id_] = entry
     return roster
+
+
+_MORE = "<!-- more -->"
+
+
+def insert_teaser(markdown: str) -> str:
+    """Ensure a single ``<!-- more -->`` excerpt boundary.
+
+    If the author already placed one, return unchanged. Otherwise insert it
+    after the first non-heading paragraph (so a leading ``# H1`` stays in the
+    teaser). If no blank-line-separated block is found, append at the end.
+    """
+    if _MORE in markdown:
+        return markdown
+    blocks = markdown.split("\n\n")
+    for i, block in enumerate(blocks):
+        if block.strip() and not block.lstrip().startswith("#"):
+            insert_at = i + 1
+            break
+    else:
+        return markdown.rstrip("\n") + f"\n\n{_MORE}\n"
+    blocks.insert(insert_at, _MORE)
+    return "\n\n".join(blocks)

@@ -44,7 +44,7 @@ dependencies = [
     # `marimo export ipynb` under the hood, so pin it as a hard dep.
     "nbformat>=5.0",
     "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
+    "mkdocs-material>=9.7.0",
     # Cross-reference resolution by heading text. Pure Python, ~150 KB,
     # no system deps — the friction of remembering to `pip install
     # 'marimo-book[autorefs]'` was tripping up enough users that we
@@ -71,7 +71,7 @@ linkcheck = [
 # `social_cards: true` in book.yml and install this extra.
 # Pulls Pillow + cairosvg (~20 MB) for rasterising the template SVG.
 social = [
-    "mkdocs-material[imaging]>=9.5",
+    "mkdocs-material[imaging]>=9.7.0",
 ]
 # Compatibility alias — `mkdocs-autorefs` is now a base dep
 # (cross_references works without an extra). This entry is kept so
@@ -85,6 +85,13 @@ autorefs = []
 # pipeline (libcairo2 / libpango).
 pdf = [
     "mkdocs-with-pdf>=0.9",
+]
+# Opt-in blog / news module RSS feed. The blog itself (Material's `blog`
+# + `tags` plugins) needs no extra — they ship with mkdocs-material. This
+# extra only adds the RSS feed generator. Enable via `blog: {enabled:
+# true}` (and `rss: true`, the default) in book.yml.
+blog = [
+    "mkdocs-rss-plugin>=1.17",
 ]
 
 [project.urls]

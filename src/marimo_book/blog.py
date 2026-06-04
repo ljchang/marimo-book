@@ -8,6 +8,7 @@ Material `blog`-plugin inputs so it ports to zensical cleanly.
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -133,24 +134,42 @@ def author_id(name: str) -> str:
     return _SLUG_RE.sub("-", name.lower()).strip("-")
 
 
+# Generic placeholder avatar (Gravatar "mystery person"). Material's blog
+# plugin requires every author to have an avatar; book.yml authors rarely
+# carry one, so we fall back to this (or a Gravatar derived from email).
+_DEFAULT_AVATAR = "https://www.gravatar.com/avatar/?d=mp"
+
+
+def _gravatar(email: str) -> str:
+    digest = hashlib.md5(email.strip().lower().encode("utf-8")).hexdigest()  # noqa: S324
+    return f"https://www.gravatar.com/avatar/{digest}?d=identicon"
+
+
 def _derive_entry(a: Author) -> dict:
-    desc = a.affiliation or (f"ORCID {a.orcid}" if a.orcid else None)
-    entry = {"name": a.name}
-    if desc:
-        entry["description"] = desc
-    return entry
+    desc = a.affiliation or (f"ORCID {a.orcid}" if a.orcid else "")
+    avatar = _gravatar(a.email) if a.email else _DEFAULT_AVATAR
+    return {"name": a.name, "description": desc, "avatar": avatar}
+
+
+def _normalize_entry(entry: dict) -> dict:
+    """Ensure an explicit .authors.yml entry has the fields Material requires."""
+    out = dict(entry)
+    out.setdefault("description", "")
+    out.setdefault("avatar", _DEFAULT_AVATAR)
+    return out
 
 
 def build_author_roster(book_authors: list[Author], authors_yml: dict | None) -> dict:
     """Merge book.yml-derived authors with an optional .authors.yml roster.
 
-    Returns ``{id: {name, description?, avatar?, url?}}``. The explicit
-    .authors.yml entries win on id collision.
+    Every returned entry carries ``name``, ``description``, and ``avatar`` —
+    the three fields Material's blog plugin requires (it aborts the build
+    otherwise). Explicit ``.authors.yml`` entries win on id collision.
     """
     roster = {author_id(a.name): _derive_entry(a) for a in book_authors}
     if authors_yml:
         for id_, entry in (authors_yml.get("authors") or {}).items():
-            roster[id_] = entry
+            roster[id_] = _normalize_entry(entry)
     return roster
 
 

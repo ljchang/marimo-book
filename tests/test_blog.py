@@ -132,3 +132,17 @@ def test_render_front_matter_round_trips() -> None:
     assert loaded["title"] == "Hi"
     assert loaded["date"] == _date(2026, 6, 4)
     assert loaded["authors"] == ["luke"]
+
+
+def test_roster_entries_satisfy_material_schema() -> None:
+    # Material's blog plugin requires name + description + avatar on EVERY
+    # author entry (book-derived and explicit .authors.yml alike), or the
+    # mkdocs build aborts. Regression for that build-time validation.
+    roster = build_author_roster(
+        [Author(name="Luke Chang")],  # no affiliation/email/orcid
+        authors_yml={"authors": {"jane": {"name": "Jane"}}},  # minimal explicit entry
+    )
+    for entry in roster.values():
+        assert entry.get("name")
+        assert "description" in entry
+        assert "avatar" in entry

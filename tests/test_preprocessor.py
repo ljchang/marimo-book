@@ -569,3 +569,28 @@ def test_blog_disabled_stages_nothing(tmp_path: Path) -> None:
     out = tmp_path / "_site_src"
     Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
     assert not (out / "docs" / "blog").exists()
+
+
+def test_mkdocs_yml_wires_blog_plugins_and_nav(tmp_path: Path) -> None:
+    import yaml as _yaml
+
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Intro\n")
+    (tmp_path / "blog" / "posts").mkdir(parents=True)
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/intro.md"}],
+            "blog": {"enabled": True, "title": "News", "rss": True},
+        }
+    )
+    out = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
+    cfg = _yaml.safe_load((out / "mkdocs.yml").read_text())
+    names = [p if isinstance(p, str) else next(iter(p)) for p in cfg["plugins"]]
+    assert "blog" in names and "tags" in names and "rss" in names
+    assert names.index("blog") < names.index("rss")
+    assert any(isinstance(n, dict) and n.get("News") == "blog/index.md" for n in cfg["nav"])

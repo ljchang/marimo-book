@@ -149,6 +149,20 @@ def _build_config(
                 }
             }
         )
+    if book.blog.enabled:
+        # Material's blog + tags plugins (free since 9.7.0). rss (optional
+        # extra) must follow blog so it can read the generated posts.
+        plugins.append({"blog": {"blog_dir": book.blog.dir, "post_excerpt": "optional"}})
+        plugins.append("tags")
+        if book.blog.rss:
+            plugins.append(
+                {
+                    "rss": {
+                        "use_material_blog": True,
+                        "match_path": f"{book.blog.dir}/posts/.*",
+                    }
+                }
+            )
     cfg["plugins"] = plugins
 
     # Analytics

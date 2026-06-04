@@ -531,6 +531,8 @@ class Preprocessor:
             report.pages += 1
 
         self._stage_blog(docs_dir, report)
+        if self.book.blog.enabled:
+            nav.append({self.book.blog.title: f"{self.book.blog.dir}/index.md"})
 
         emit_mkdocs_yml(
             self.book,

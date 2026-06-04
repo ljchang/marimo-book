@@ -9,6 +9,11 @@ from __future__ import annotations
 
 import ast
 import re
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from pathlib import Path
+
+import yaml
 
 _BLOG_BLOCK_RE = re.compile(
     r"^# /// blog[ \t]*\n(?P<body>(?:^#(?:[ \t].*)?\n)*?)^# ///[ \t]*\n",
@@ -45,3 +50,75 @@ def _coerce(val: str):
         except (ValueError, SyntaxError):
             return val.strip("\"'")
     return val  # bare token (e.g. a date) kept as a string
+
+
+_FRONT_MATTER_RE = re.compile(r"^---[ \t]*\n(?P<yaml>.*?)\n---[ \t]*\n", re.DOTALL)
+_FILENAME_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-")
+_H1_RE = re.compile(r"^#[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
+
+@dataclass
+class PostMeta:
+    title: str | None = None
+    date: date | None = None
+    authors: list[str] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    draft: bool = False
+    pin: bool = False
+    is_notebook: bool = False
+    body: str = ""
+
+
+def parse_post_header(path: Path) -> PostMeta:
+    """Parse a post's header from either .md front-matter or a .py # /// blog block."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".py":
+        raw = parse_blog_block(text) or {}
+        return _meta_from_dict(raw, is_notebook=True, body="")
+    m = _FRONT_MATTER_RE.match(text)
+    raw = yaml.safe_load(m.group("yaml")) if m else {}
+    body = text[m.end() :] if m else text
+    return _meta_from_dict(raw or {}, is_notebook=False, body=body)
+
+
+def _meta_from_dict(raw: dict, *, is_notebook: bool, body: str) -> PostMeta:
+    def _list(v):
+        if v is None:
+            return []
+        return list(v) if isinstance(v, (list, tuple)) else [v]
+
+    d = raw.get("date")
+    parsed_date = None
+    if isinstance(d, date):
+        parsed_date = d
+    elif isinstance(d, str) and d:
+        parsed_date = datetime.strptime(d[:10], "%Y-%m-%d").date()
+
+    return PostMeta(
+        title=raw.get("title"),
+        date=parsed_date,
+        authors=_list(raw.get("authors")),
+        categories=_list(raw.get("categories")),
+        tags=_list(raw.get("tags")),
+        draft=bool(raw.get("draft", False)),
+        pin=bool(raw.get("pin", False)),
+        is_notebook=is_notebook,
+        body=body,
+    )
+
+
+def resolve_meta(meta: PostMeta, path: Path, *, default_author: str | None) -> PostMeta:
+    """Fill required defaults: date (filename->mtime), title (first H1), default author."""
+    if meta.date is None:
+        fm = _FILENAME_DATE_RE.match(path.name)
+        if fm:
+            meta.date = date(int(fm.group(1)), int(fm.group(2)), int(fm.group(3)))
+        else:
+            meta.date = datetime.fromtimestamp(path.stat().st_mtime).date()
+    if not meta.title:
+        h1 = _H1_RE.search(meta.body) if not meta.is_notebook else None
+        meta.title = h1.group(1) if h1 else path.stem
+    if not meta.authors and default_author:
+        meta.authors = [default_author]
+    return meta

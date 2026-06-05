@@ -123,6 +123,41 @@ def test_dotted_package_name_maps_to_path_and_keeps_full_label(tmp_path):
     assert section[0]["sample_pkg.sub"][0] == "api/sample_pkg/sub/index.md"
 
 
+def test_count_pages_counts_md_leaves(tmp_path):
+    from marimo_book.api_docs import count_pages
+
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    cfg = ApiDocs(enabled=True, packages=["sample_pkg"])
+    nav = stage_api_docs(cfg, search_paths=[FIXTURES], docs_dir=docs_dir)
+    # sample_pkg: index + core + sub/index + sub/widgets == 4 pages
+    assert count_pages(nav) == 4
+
+
+def test_preprocessor_counts_api_pages_in_report(tmp_path):
+    book_dir = tmp_path / "book"
+    (book_dir / "content").mkdir(parents=True)
+    (book_dir / "content" / "intro.md").write_text("# Intro\n", encoding="utf-8")
+
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/intro.md"}],
+            "api_docs": {
+                "enabled": True,
+                "packages": ["sample_pkg"],
+                "paths": [str(FIXTURES)],
+            },
+        }
+    )
+
+    out_dir = tmp_path / "_site_src"
+    pre = Preprocessor(book, book_dir=book_dir)
+    report = pre.build(out_dir=out_dir)
+    # 1 intro page + 4 API pages (index + core + sub/index + sub/widgets).
+    assert report.pages >= 1 + 4
+
+
 def _book_with_api(**api_kwargs):
     return Book(
         title="T",

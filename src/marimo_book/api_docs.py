@@ -104,6 +104,17 @@ def _build_module(
     return {key: page_rel}
 
 
+def count_pages(nav: object) -> int:
+    """Count staged ``.md`` pages referenced in a nav subtree."""
+    if isinstance(nav, str):
+        return 1 if nav.endswith(".md") else 0
+    if isinstance(nav, dict):
+        return sum(count_pages(v) for v in nav.values())
+    if isinstance(nav, list):
+        return sum(count_pages(v) for v in nav)
+    return 0
+
+
 def _write_page(path: Path, title: str, dotted: str) -> None:
     """Write a minimal ``::: dotted`` directive page."""
     path.parent.mkdir(parents=True, exist_ok=True)

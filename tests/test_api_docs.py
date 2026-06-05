@@ -103,3 +103,52 @@ def test_subpackage_with_all_children_excluded_collapses_to_leaf(tmp_path):
             ]
         }
     ]
+
+
+def _book_with_api(**api_kwargs):
+    from marimo_book.config import ApiDocs, Book
+
+    return Book(
+        title="T",
+        toc=[],
+        api_docs=ApiDocs(enabled=True, packages=["mypkg"], **api_kwargs),
+    )
+
+
+def test_mkdocstrings_plugin_emitted_when_enabled(tmp_path):
+    from marimo_book.shell import _build_config
+
+    book = _book_with_api(docstring_style="numpy", options={"members_order": "source"})
+    cfg = _build_config(
+        book,
+        docs_dir=tmp_path / "docs",
+        site_dir=tmp_path / "site",
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+        api_paths=["/abs/src"],
+    )
+    mkdocstrings = next(
+        p["mkdocstrings"] for p in cfg["plugins"] if isinstance(p, dict) and "mkdocstrings" in p
+    )
+    opts = mkdocstrings["handlers"]["python"]["options"]
+    assert opts["docstring_style"] == "numpy"
+    assert opts["show_submodules"] is False
+    assert opts["members_order"] == "source"  # user override merged in
+    assert mkdocstrings["handlers"]["python"]["paths"] == ["/abs/src"]
+
+
+def test_mkdocstrings_plugin_absent_when_disabled(tmp_path):
+    from marimo_book.config import Book
+    from marimo_book.shell import _build_config
+
+    book = Book(title="T", toc=[])
+    cfg = _build_config(
+        book,
+        docs_dir=tmp_path / "docs",
+        site_dir=tmp_path / "site",
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+    assert not any(isinstance(p, dict) and "mkdocstrings" in p for p in cfg["plugins"])

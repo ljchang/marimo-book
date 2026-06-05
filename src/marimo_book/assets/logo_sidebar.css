@@ -27,8 +27,12 @@
   .md-sidebar--primary .md-nav--primary > .md-nav__title {
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 1rem 0.6rem 0.75rem 0.6rem;
+    /* Left-align the logo: the header site-title and all nav items are
+     * left-aligned, so a centered logo reads as shoved to the right. The
+     * left padding matches Material's nav-link text inset so the logo's
+     * left edge lines up with the chapter list below it. */
+    justify-content: flex-start;
+    padding: 1rem 0.6rem 0.75rem 0.75rem;
     height: auto;
     background-color: var(--md-default-bg-color);
     box-shadow: none;

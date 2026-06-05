@@ -184,6 +184,8 @@ def _build_config(
             **book.api_docs.options,
         }
         python_handler: dict[str, Any] = {"options": handler_opts}
+        # ``paths`` is a handler-level key (source search dirs for Griffe),
+        # kept outside ``options`` on purpose.
         if api_paths:
             python_handler["paths"] = list(api_paths)
         if book.api_docs.inventories:

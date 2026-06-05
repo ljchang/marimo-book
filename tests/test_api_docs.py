@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from marimo_book.api_docs import resolve_search_paths, stage_api_docs
-from marimo_book.config import ApiDocs
+from marimo_book.config import ApiDocs, Book
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -106,8 +106,6 @@ def test_subpackage_with_all_children_excluded_collapses_to_leaf(tmp_path):
 
 
 def _book_with_api(**api_kwargs):
-    from marimo_book.config import ApiDocs, Book
-
     return Book(
         title="T",
         toc=[],
@@ -139,7 +137,6 @@ def test_mkdocstrings_plugin_emitted_when_enabled(tmp_path):
 
 
 def test_mkdocstrings_plugin_absent_when_disabled(tmp_path):
-    from marimo_book.config import Book
     from marimo_book.shell import _build_config
 
     book = Book(title="T", toc=[])
@@ -152,3 +149,40 @@ def test_mkdocstrings_plugin_absent_when_disabled(tmp_path):
         extra_javascript=[],
     )
     assert not any(isinstance(p, dict) and "mkdocstrings" in p for p in cfg["plugins"])
+
+
+def test_mkdocstrings_inventories_passthrough(tmp_path):
+    from marimo_book.shell import _build_config
+
+    book = _book_with_api(inventories=["https://docs.python.org/3/objects.inv"])
+    cfg = _build_config(
+        book,
+        docs_dir=tmp_path / "docs",
+        site_dir=tmp_path / "site",
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+    handler = next(
+        p["mkdocstrings"]["handlers"]["python"]
+        for p in cfg["plugins"]
+        if isinstance(p, dict) and "mkdocstrings" in p
+    )
+    assert handler["inventories"] == ["https://docs.python.org/3/objects.inv"]
+
+    # Omitted when empty (default).
+    book2 = _book_with_api()
+    cfg2 = _build_config(
+        book2,
+        docs_dir=tmp_path / "docs",
+        site_dir=tmp_path / "site",
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+    handler2 = next(
+        p["mkdocstrings"]["handlers"]["python"]
+        for p in cfg2["plugins"]
+        if isinstance(p, dict) and "mkdocstrings" in p
+    )
+    assert "inventories" not in handler2

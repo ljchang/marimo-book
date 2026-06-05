@@ -24,7 +24,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import re
 import shutil
 import sys
 from collections.abc import Iterator
@@ -40,6 +39,7 @@ from .blog import (
     author_id,
     build_author_roster,
     discover_posts,
+    first_heading,
     insert_teaser,
     parse_post_header,
     read_authors_yml,
@@ -79,8 +79,7 @@ _CONTENT_DIR = "content"
 
 
 def _first_markdown_heading(markdown: str) -> str | None:
-    m = re.search(r"^#[ \t]+(.+?)[ \t]*$", markdown, re.MULTILINE)
-    return m.group(1) if m else None
+    return first_heading(markdown)
 
 
 @dataclass

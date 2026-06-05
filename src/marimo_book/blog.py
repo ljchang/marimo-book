@@ -20,7 +20,7 @@ import yaml
 from .config import Author
 
 _BLOG_BLOCK_RE = re.compile(
-    r"^# /// blog[ \t]*\n(?P<body>(?:^#(?:[ \t].*)?\n)*?)^# ///[ \t]*\n",
+    r"^# /// blog[ \t]*\n(?P<body>(?:^#.*\n)*?)^# ///[ \t]*\n",
     re.MULTILINE,
 )
 
@@ -58,7 +58,26 @@ def _coerce(val: str):
 
 _FRONT_MATTER_RE = re.compile(r"^---[ \t]*\n(?P<yaml>.*?)\n---[ \t]*\n", re.DOTALL)
 _FILENAME_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-")
-_H1_RE = re.compile(r"^#[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
+
+def first_heading(markdown: str) -> str | None:
+    """First ATX H1 (``# ``) that is NOT inside a fenced code block."""
+    in_fence = False
+    fence = ""
+    for line in markdown.splitlines():
+        stripped = line.lstrip()
+        if in_fence:
+            if stripped.startswith(fence):
+                in_fence = False
+            continue
+        if stripped.startswith(("```", "~~~")):
+            in_fence = True
+            fence = stripped[:3]
+            continue
+        m = re.match(r"#[ \t]+(.+?)[ \t]*$", line)
+        if m:
+            return m.group(1)
+    return None
 
 
 @dataclass
@@ -134,17 +153,31 @@ def _git_added_date(path: Path) -> date | None:
         return None
 
 
+def _date_from_filename(path: Path) -> date | None:
+    fm = _FILENAME_DATE_RE.match(path.name)
+    if not fm:
+        return None
+    try:
+        return date(int(fm.group(1)), int(fm.group(2)), int(fm.group(3)))
+    except ValueError:
+        return None
+
+
+def _title_from_stem(stem: str) -> str:
+    return _FILENAME_DATE_RE.sub("", stem) or stem
+
+
 def resolve_meta(meta: PostMeta, path: Path, *, default_author: str | None) -> PostMeta:
     """Fill required defaults: date (filename->git->mtime), title (H1), default author."""
     if meta.date is None:
-        fm = _FILENAME_DATE_RE.match(path.name)
-        if fm:
-            meta.date = date(int(fm.group(1)), int(fm.group(2)), int(fm.group(3)))
-        else:
-            meta.date = _git_added_date(path) or datetime.fromtimestamp(path.stat().st_mtime).date()
+        meta.date = (
+            _date_from_filename(path)
+            or _git_added_date(path)
+            or datetime.fromtimestamp(path.stat().st_mtime).date()
+        )
     if not meta.title:
-        h1 = _H1_RE.search(meta.body) if not meta.is_notebook else None
-        meta.title = h1.group(1) if h1 else path.stem
+        h1 = first_heading(meta.body) if not meta.is_notebook else None
+        meta.title = h1 if h1 else _title_from_stem(path.stem)
     if not meta.authors and default_author:
         meta.authors = [default_author]
     return meta
@@ -204,19 +237,36 @@ def insert_teaser(markdown: str) -> str:
 
     If the author already placed one, return unchanged. Otherwise insert it
     after the first non-heading paragraph (so a leading ``# H1`` stays in the
-    teaser). If no blank-line-separated block is found, append at the end.
+    teaser), never inside a fenced code block. If no top-level paragraph
+    break is found, append at the end.
     """
     if not markdown.strip() or _MORE in markdown:
         return markdown
-    blocks = markdown.split("\n\n")
-    for i, block in enumerate(blocks):
-        if block.strip() and not block.lstrip().startswith("#"):
-            insert_at = i + 1
-            break
-    else:
-        return markdown.rstrip("\n") + f"\n\n{_MORE}\n"
-    blocks.insert(insert_at, _MORE)
-    return "\n\n".join(blocks)
+    lines = markdown.split("\n")
+    in_fence = False
+    fence = ""
+    seen_content = False  # seen a non-heading content line at top level
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if in_fence:
+            seen_content = True
+            if stripped.startswith(fence):
+                in_fence = False
+            continue
+        if stripped.startswith(("```", "~~~")):
+            in_fence = True
+            fence = stripped[:3]
+            seen_content = True
+            continue
+        if stripped == "":
+            if seen_content:
+                lines[i:i] = ["", _MORE]
+                return "\n".join(lines)
+            continue
+        if stripped.startswith("#"):
+            continue  # heading stays in the teaser
+        seen_content = True
+    return markdown.rstrip("\n") + f"\n\n{_MORE}\n"
 
 
 def read_authors_yml(book_dir: Path) -> dict | None:

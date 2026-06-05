@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from marimo_book.api_docs import resolve_search_paths, stage_api_docs
 from marimo_book.config import ApiDocs, Book
+from marimo_book.preprocessor import Preprocessor
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -189,11 +191,6 @@ def test_mkdocstrings_inventories_passthrough(tmp_path):
 
 
 def test_preprocessor_stages_api_section(tmp_path):
-    import yaml
-
-    from marimo_book.config import Book
-    from marimo_book.preprocessor import Preprocessor
-
     # Minimal book that documents the sample_pkg fixture by path.
     book_dir = tmp_path / "book"
     (book_dir / "content").mkdir(parents=True)

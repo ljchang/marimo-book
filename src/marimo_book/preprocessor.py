@@ -534,6 +534,8 @@ class Preprocessor:
         if self.book.blog.enabled:
             nav.append({self.book.blog.title: f"{self.book.blog.dir}/index.md"})
 
+        # Absolute source-search dirs handed to the mkdocstrings plugin;
+        # stays empty when no api_docs.paths are configured (import-only).
         api_paths: list[str] = []
         if self.book.api_docs.enabled:
             resolved = resolve_search_paths(self.book.api_docs, self.book_dir)

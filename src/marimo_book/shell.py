@@ -42,6 +42,7 @@ def emit_mkdocs_yml(
     nav: list[dict | str] | None = None,
     extra_css: list[str] | None = None,
     extra_javascript: list[str] | None = None,
+    api_paths: list[str] | None = None,
 ) -> None:
     """Write ``mkdocs.yml`` derived from ``book``."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,6 +53,7 @@ def emit_mkdocs_yml(
         nav=nav or _nav_from_toc(book.toc),
         extra_css=extra_css or [],
         extra_javascript=extra_javascript or [],
+        api_paths=api_paths,
     )
     with out_path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False)
@@ -65,6 +67,7 @@ def _build_config(
     nav: list,
     extra_css: list[str],
     extra_javascript: list[str],
+    api_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "site_name": book.title,
@@ -169,6 +172,25 @@ def _build_config(
                     }
                 }
             )
+    if book.api_docs.enabled:
+        # mkdocstrings renders the ``::: pkg.module`` directive pages the
+        # preprocessor staged. Handler defaults below are overridable via
+        # ``api_docs.options`` (user keys win on merge).
+        handler_opts: dict[str, Any] = {
+            "docstring_style": book.api_docs.docstring_style,
+            "show_source": True,
+            "show_root_heading": True,
+            "show_submodules": False,  # each submodule has its own page
+            **book.api_docs.options,
+        }
+        python_handler: dict[str, Any] = {"options": handler_opts}
+        # ``paths`` is a handler-level key (source search dirs for Griffe),
+        # kept outside ``options`` on purpose.
+        if api_paths:
+            python_handler["paths"] = list(api_paths)
+        if book.api_docs.inventories:
+            python_handler["inventories"] = list(book.api_docs.inventories)
+        plugins.append({"mkdocstrings": {"handlers": {"python": python_handler}}})
     cfg["plugins"] = plugins
 
     # Analytics
@@ -225,6 +247,12 @@ def _theme_block(book: Book) -> dict[str, Any]:
             "toc.follow",
         ],
     }
+    if book.api_docs.enabled:
+        # api_docs stages a section-index page (``index.md``) as the first child
+        # of each package/subpackage nav section. ``navigation.indexes`` attaches
+        # it to the section header instead of rendering a redundant child entry.
+        # No effect on books whose nav has no section-index pages.
+        theme["features"].append("navigation.indexes")
     if book.theme.font.text or book.theme.font.code:
         theme["font"] = {
             "text": book.theme.font.text or "Roboto",

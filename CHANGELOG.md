@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `api_docs` feature flag: auto-generate a Python "API Reference" section
+  from a companion package's docstrings via mkdocstrings + Griffe. Names
+  packages by import name and/or source `paths`; stages one page per public
+  module and a nested nav section. Opt in with `api_docs.enabled: true` and
+  install `marimo-book[api]`.
 - **Blog / news module (`blog: {enabled: true}`).** Opt-in blog built on
   Material's `blog` + `tags` plugins. Posts — Markdown `.md` or marimo `.py`
   notebooks — drop by convention into `blog/posts/` (no TOC entry per post)

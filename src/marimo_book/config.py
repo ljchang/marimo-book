@@ -21,7 +21,15 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    field_validator,
+    model_validator,
+)
 
 # --- leaf models -------------------------------------------------------------
 
@@ -154,6 +162,43 @@ class Analytics(BaseModel):
 
     provider: Literal["plausible", "google", "none"] = "none"
     property: str | None = None
+
+
+class ApiDocs(BaseModel):
+    """Opt-in auto-generated Python API reference.
+
+    When ``enabled``, the preprocessor loads each package in ``packages``
+    with Griffe (reading source from ``paths`` and/or the importable
+    environment), stages one ``::: pkg.module`` page per public module into
+    the ``dir`` subtree, and appends a nested ``title`` section to the nav.
+    The generated ``mkdocs.yml`` gains an ``mkdocstrings`` plugin block.
+    Requires ``pip install 'marimo-book[api]'``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    # Importable / dotted package names to document (e.g. ["mypkg"]).
+    packages: list[str] = Field(default_factory=list)
+    # Source search dirs, resolved relative to the book root. Griffe reads
+    # the AST directly from here, so the package need not be installed.
+    paths: list[Path] = Field(default_factory=list)
+    docstring_style: Literal["google", "numpy", "sphinx"] = "google"
+    title: str = "API Reference"  # nav section label
+    dir: str = "api"  # staged output subdir under the docs tree
+    # Dotted-path globs (fnmatch) of modules to skip, e.g. "mypkg.tests*".
+    exclude: list[str] = Field(default_factory=list)
+    # Passthrough to the mkdocstrings python handler ``options`` block;
+    # merged on top of marimo-book's defaults (user wins).
+    options: dict[str, Any] = Field(default_factory=dict)
+    # objects.inv URLs for cross-links to other libraries' docs.
+    inventories: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _require_packages(self) -> ApiDocs:
+        if self.enabled and not self.packages:
+            raise ValueError("api_docs.enabled is true but no packages were listed")
+        return self
 
 
 class Dependencies(BaseModel):
@@ -420,6 +465,10 @@ class Book(BaseModel):
     # ``<book_root>/<blog.dir>/posts/`` (.md or .py) are auto-discovered.
     # RSS requires: ``pip install marimo-book[blog]``.
     blog: Blog = Field(default_factory=Blog)
+
+    # Opt-in auto-generated Python API reference. See the :class:`ApiDocs`
+    # docstring. Requires: ``pip install 'marimo-book[api]'``.
+    api_docs: ApiDocs = Field(default_factory=ApiDocs)
 
     # Opt-in static reactivity for marimo UI elements. When enabled, the
     # preprocessor scans each ``.py`` page for discrete widget candidates

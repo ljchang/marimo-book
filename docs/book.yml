@@ -79,6 +79,7 @@ toc:
         mode: wasm
       - file: content/widgets.py
       - file: content/dependencies.md
+      - file: content/api-reference-guide.md
 
   - section: Publishing
     children:

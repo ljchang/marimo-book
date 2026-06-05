@@ -78,3 +78,28 @@ def test_unknown_package_raises_clear_error(tmp_path):
     cfg = ApiDocs(enabled=True, packages=["does_not_exist_xyz"])
     with pytest.raises(RuntimeError, match="could not load package 'does_not_exist_xyz'"):
         stage_api_docs(cfg, search_paths=[FIXTURES], docs_dir=docs_dir)
+
+
+def test_subpackage_with_all_children_excluded_collapses_to_leaf(tmp_path):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    # Exclude sub's *children* (sample_pkg.sub.widgets) but keep sub itself.
+    # With no public children, sub must collapse to a single leaf page.
+    cfg = ApiDocs(enabled=True, packages=["sample_pkg"], exclude=["sample_pkg.sub.*"])
+    nav = stage_api_docs(cfg, search_paths=[FIXTURES], docs_dir=docs_dir)
+
+    assert (docs_dir / "api/sample_pkg/sub.md").exists()
+    assert not (docs_dir / "api/sample_pkg/sub/index.md").exists()
+    assert nav == [
+        {
+            "API Reference": [
+                {
+                    "sample_pkg": [
+                        "api/sample_pkg/index.md",
+                        {"core": "api/sample_pkg/core.md"},
+                        {"sub": "api/sample_pkg/sub.md"},
+                    ]
+                }
+            ]
+        }
+    ]

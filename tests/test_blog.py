@@ -12,13 +12,14 @@ from marimo_book.blog import (
     author_id,
     build_author_roster,
     discover_posts,
+    first_heading,
     insert_teaser,
     parse_blog_block,
     parse_post_header,
     render_front_matter,
     resolve_meta,
 )
-from marimo_book.config import Author
+from marimo_book.config import Author, Blog, Book
 
 
 def test_parse_blog_block_reads_fields() -> None:
@@ -146,3 +147,132 @@ def test_roster_entries_satisfy_material_schema() -> None:
         assert entry.get("name")
         assert "description" in entry
         assert "avatar" in entry
+
+
+# --- Fix #1: malformed filename date must not crash the build ---
+
+
+def test_malformed_filename_date_does_not_crash(tmp_path: Path) -> None:
+    p = tmp_path / "2026-13-45-bad.md"
+    p.write_text("---\ntitle: Bad\n---\n\nbody\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    # falls through to git/mtime fallback rather than raising ValueError
+    assert isinstance(meta.date, _date)
+
+
+def test_valid_filename_date_still_parses(tmp_path: Path) -> None:
+    p = tmp_path / "2026-01-15-x.md"
+    p.write_text("---\ntitle: X\n---\n\nbody\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.date == _date(2026, 1, 15)
+
+
+# --- Fix #3: title fallback must strip the date prefix ---
+
+
+def test_title_fallback_strips_date_prefix(tmp_path: Path) -> None:
+    p = tmp_path / "2026-01-01-my-post.md"
+    p.write_text("---\ndate: 2026-01-01\n---\n\nNo heading here, just prose.\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.title == "my-post"
+
+
+# --- Fix #4: first-H1 detection must ignore fenced code blocks ---
+
+
+def test_first_heading_ignores_fenced_comment() -> None:
+    md = "```python\n# not a title\nx = 1\n```\n\nProse.\n"
+    assert first_heading(md) is None
+
+
+def test_first_heading_after_fence() -> None:
+    md = "```python\n# fake\n```\n\n# Real Title\n\nbody\n"
+    assert first_heading(md) == "Real Title"
+
+
+def test_title_fallback_ignores_fenced_comment(tmp_path: Path) -> None:
+    p = tmp_path / "2026-02-02-fenced.md"
+    p.write_text("---\ndate: 2026-02-02\n---\n\n```python\n# not a title\nx = 1\n```\n\nProse.\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.title == "fenced"
+
+
+def test_title_real_h1_after_fence(tmp_path: Path) -> None:
+    p = tmp_path / "2026-02-03-real.md"
+    p.write_text("---\ndate: 2026-02-03\n---\n\n```python\n# fake\n```\n\n# Real Title\n\nbody\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.title == "Real Title"
+
+
+# --- Fix #5: <!-- more --> must not land inside a code fence ---
+
+
+def test_teaser_not_inside_code_fence() -> None:
+    body = "```python\nx = 1\n\ny = 2\n```\n\nProse after.\n"
+    out = insert_teaser(body)
+    assert "```python\nx = 1\n\ny = 2\n```" in out
+    assert out.index(MORE) > out.index("```python\nx = 1\n\ny = 2\n```")
+
+
+def test_teaser_after_first_paragraph_with_heading() -> None:
+    md = "# Title\n\nFirst para.\n\nSecond.\n"
+    out = insert_teaser(md)
+    assert out.count(MORE) == 1
+    assert out.index("# Title") < out.index(MORE)
+    assert out.index(MORE) < out.index("Second.")
+    assert out.index("First para.") < out.index(MORE)
+
+
+def test_teaser_existing_marker_unchanged() -> None:
+    md = "Intro.\n<!-- more -->\nRest.\n"
+    assert insert_teaser(md) == md
+
+
+# --- Fix #6: a # /// blog body line without a space after # ---
+
+
+def test_blog_block_tolerates_no_space_comment() -> None:
+    src = '# /// blog\n# title = "Hi"\n#nospace\n# date = 2026-06-04\n# ///\nimport marimo\n'
+    meta = parse_blog_block(src)
+    assert meta is not None
+    assert meta["title"] == "Hi"
+    assert meta["date"] == "2026-06-04"
+
+
+# --- Fix #2 / #7: RSS item dates + escaped blog.dir in match_path ---
+
+
+def _cfg_with_blog(dir_: str = "blog"):
+    from marimo_book import shell
+
+    book = Book(
+        title="T",
+        toc=[],
+        blog=Blog(enabled=True, rss=True, dir=dir_),
+    )
+    return shell._build_config(
+        book,
+        docs_dir=Path("docs"),
+        site_dir=Path("site"),
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+
+
+def _rss_plugin(cfg: dict) -> dict:
+    for p in cfg["plugins"]:
+        if isinstance(p, dict) and "rss" in p:
+            return p["rss"]
+    raise AssertionError("rss plugin not found")
+
+
+def test_rss_uses_post_date_not_build_time() -> None:
+    rss = _rss_plugin(_cfg_with_blog())
+    assert rss["use_git"] is False
+    assert rss["date_from_meta"] == {"as_creation": "date", "as_update": "date"}
+
+
+def test_rss_match_path_escapes_blog_dir() -> None:
+    rss = _rss_plugin(_cfg_with_blog("news+updates"))
+    assert rss["match_path"] == "news\\+updates/posts/.*"

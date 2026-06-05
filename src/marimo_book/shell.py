@@ -11,6 +11,7 @@ only the build command changes when we port in v0.3.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +160,12 @@ def _build_config(
                 {
                     "rss": {
                         "use_material_blog": True,
-                        "match_path": f"{book.blog.dir}/posts/.*",
+                        "match_path": f"{re.escape(book.blog.dir)}/posts/.*",
+                        "use_git": False,
+                        "date_from_meta": {
+                            "as_creation": "date",
+                            "as_update": "date",
+                        },
                     }
                 }
             )

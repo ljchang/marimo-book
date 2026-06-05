@@ -42,6 +42,8 @@ def stage_api_docs(cfg: ApiDocs, *, search_paths: list[Path], docs_dir: Path) ->
 
     sp = [str(p) for p in search_paths]
     section: list[dict | str] = []
+    # Each root in ``cfg.packages`` is always documented; ``cfg.exclude``
+    # (and the underscore rule) only prune descendant modules, never a root.
     for name in cfg.packages:
         try:
             module = griffe.load(name, search_paths=sp)

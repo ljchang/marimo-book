@@ -162,9 +162,7 @@ def test_defaults_suppress_warnings_round_trip() -> None:
     assert b_on.defaults.suppress_warnings is True
 
 
-def test_api_docs_defaults_off():
-    from marimo_book.config import Book
-
+def test_api_docs_defaults_off() -> None:
     book = Book.model_validate({"title": "T", "toc": [{"file": "a.md"}]})
     assert book.api_docs.enabled is False
     assert book.api_docs.packages == []
@@ -173,12 +171,7 @@ def test_api_docs_defaults_off():
     assert book.api_docs.dir == "api"
 
 
-def test_api_docs_enabled_requires_packages():
-    import pytest
-    from pydantic import ValidationError
-
-    from marimo_book.config import Book
-
+def test_api_docs_enabled_requires_packages() -> None:
     with pytest.raises(ValidationError, match="no packages"):
         Book.model_validate(
             {
@@ -189,9 +182,7 @@ def test_api_docs_enabled_requires_packages():
         )
 
 
-def test_api_docs_full_roundtrip():
-    from marimo_book.config import Book
-
+def test_api_docs_full_roundtrip() -> None:
     book = Book.model_validate(
         {
             "title": "T",
@@ -208,6 +199,7 @@ def test_api_docs_full_roundtrip():
         }
     )
     assert book.api_docs.packages == ["mypkg"]
+    assert book.api_docs.paths == [Path("../src")]
     assert book.api_docs.docstring_style == "numpy"
     assert book.api_docs.options == {"members_order": "source"}
     assert book.api_docs.inventories == ["https://docs.python.org/3/objects.inv"]

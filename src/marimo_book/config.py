@@ -197,7 +197,7 @@ class ApiDocs(BaseModel):
     @model_validator(mode="after")
     def _require_packages(self) -> ApiDocs:
         if self.enabled and not self.packages:
-            raise ValueError("api_docs.enabled is true but no packages: were listed")
+            raise ValueError("api_docs.enabled is true but no packages were listed")
         return self
 
 

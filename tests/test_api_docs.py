@@ -153,6 +153,32 @@ def test_mkdocstrings_plugin_absent_when_disabled(tmp_path):
     assert not any(isinstance(p, dict) and "mkdocstrings" in p for p in cfg["plugins"])
 
 
+def test_navigation_indexes_enabled_with_api_docs(tmp_path):
+    # api_docs stages a section-index page per package; navigation.indexes
+    # renders it as the section landing instead of a redundant child entry.
+    from marimo_book.shell import _build_config
+
+    on = _build_config(
+        _book_with_api(),
+        docs_dir=tmp_path / "docs",
+        site_dir=tmp_path / "site",
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+    assert "navigation.indexes" in on["theme"]["features"]
+
+    off = _build_config(
+        Book(title="T", toc=[]),
+        docs_dir=tmp_path / "docs",
+        site_dir=tmp_path / "site",
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+    assert "navigation.indexes" not in off["theme"]["features"]
+
+
 def test_mkdocstrings_inventories_passthrough(tmp_path):
     from marimo_book.shell import _build_config
 

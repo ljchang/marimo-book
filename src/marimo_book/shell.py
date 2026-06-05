@@ -247,6 +247,12 @@ def _theme_block(book: Book) -> dict[str, Any]:
             "toc.follow",
         ],
     }
+    if book.api_docs.enabled:
+        # api_docs stages a section-index page (``index.md``) as the first child
+        # of each package/subpackage nav section. ``navigation.indexes`` attaches
+        # it to the section header instead of rendering a redundant child entry.
+        # No effect on books whose nav has no section-index pages.
+        theme["features"].append("navigation.indexes")
     if book.theme.font.text or book.theme.font.code:
         theme["font"] = {
             "text": book.theme.font.text or "Roboto",

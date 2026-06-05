@@ -54,7 +54,13 @@ def stage_api_docs(cfg: ApiDocs, *, search_paths: list[Path], docs_dir: Path) ->
                 f"{exc.__class__.__name__}: {exc}"
             ) from exc
         section.append(
-            _build_module(module, cfg, docs_dir=docs_dir, rel_prefix=f"{cfg.dir}/{name}")
+            _build_module(
+                module,
+                cfg,
+                docs_dir=docs_dir,
+                rel_prefix=f"{cfg.dir}/{name.replace('.', '/')}",
+                label=name,
+            )
         )
     return [{cfg.title: section}]
 
@@ -71,12 +77,19 @@ def _public_children(module: Module, cfg: ApiDocs) -> list[Module]:
     return out
 
 
-def _build_module(module: Module, cfg: ApiDocs, *, docs_dir: Path, rel_prefix: str) -> dict:
+def _build_module(
+    module: Module, cfg: ApiDocs, *, docs_dir: Path, rel_prefix: str, label: str | None = None
+) -> dict:
     """Stage a page for ``module`` and return its nav entry.
 
     A module with public submodules becomes a package node: an ``index.md``
     plus one child entry each. A leaf module becomes a single ``<name>.md``.
+
+    ``label`` overrides the nav key (used for dotted top-level package names so
+    the full dotted name labels the section); it defaults to ``module.name`` so
+    nested children keep their short-name keys.
     """
+    key = label or module.name
     children = _public_children(module, cfg)
     if children:
         page_rel = f"{rel_prefix}/index.md"
@@ -85,10 +98,21 @@ def _build_module(module: Module, cfg: ApiDocs, *, docs_dir: Path, rel_prefix: s
             _build_module(c, cfg, docs_dir=docs_dir, rel_prefix=f"{rel_prefix}/{c.name}")
             for c in children
         ]
-        return {module.name: [page_rel, *child_nav]}
+        return {key: [page_rel, *child_nav]}
     page_rel = f"{rel_prefix}.md"
     _write_page(docs_dir / page_rel, module.name, module.path)
-    return {module.name: page_rel}
+    return {key: page_rel}
+
+
+def count_pages(nav: object) -> int:
+    """Count staged ``.md`` pages referenced in a nav subtree."""
+    if isinstance(nav, str):
+        return 1 if nav.endswith(".md") else 0
+    if isinstance(nav, dict):
+        return sum(count_pages(v) for v in nav.values())
+    if isinstance(nav, list):
+        return sum(count_pages(v) for v in nav)
+    return 0
 
 
 def _write_page(path: Path, title: str, dotted: str) -> None:

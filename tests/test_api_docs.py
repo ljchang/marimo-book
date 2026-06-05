@@ -107,6 +107,22 @@ def test_subpackage_with_all_children_excluded_collapses_to_leaf(tmp_path):
     ]
 
 
+def test_dotted_package_name_maps_to_path_and_keeps_full_label(tmp_path):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    cfg = ApiDocs(enabled=True, packages=["sample_pkg.sub"])
+    nav = stage_api_docs(cfg, search_paths=[FIXTURES], docs_dir=docs_dir)
+
+    # Directory layout uses path segments, not a literal dotted dir.
+    assert (docs_dir / "api/sample_pkg/sub/index.md").exists()
+    assert (docs_dir / "api/sample_pkg/sub/widgets.md").exists()
+    assert not (docs_dir / "api/sample_pkg.sub").exists()
+    # Top-level nav key is the FULL dotted name (prevents same-last-segment collisions).
+    section = nav[0]["API Reference"]
+    assert list(section[0].keys()) == ["sample_pkg.sub"]
+    assert section[0]["sample_pkg.sub"][0] == "api/sample_pkg/sub/index.md"
+
+
 def _book_with_api(**api_kwargs):
     return Book(
         title="T",

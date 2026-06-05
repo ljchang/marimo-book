@@ -5,6 +5,20 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.20] — 2026-06-05
+
+### Fixed
+
+- Sidebar logo (`logo_placement: sidebar`) is now left-aligned with the nav
+  instead of centered — a centered logo read as shoved to the right next to
+  the left-aligned header title and chapter list.
+- Dotted `api_docs` package names (`packages: ['a.b']`) map to path segments
+  (`api/a/b/…`, not a literal-dotted `api/a.b/` dir) and use the full dotted
+  name as the nav label, so packages sharing a last segment (e.g.
+  `org_a.utils` + `org_b.utils`) no longer collide on the nav key.
+- Staged API reference pages are now counted in the build summary
+  (`BuildReport.pages`), consistent with blog and changelog pages.
+
 ## [0.1.19] — 2026-06-05
 
 ### Added

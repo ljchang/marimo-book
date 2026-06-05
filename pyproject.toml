@@ -93,6 +93,12 @@ pdf = [
 blog = [
     "mkdocs-rss-plugin>=1.17",
 ]
+# Opt-in auto-generated Python API reference. Enable via
+# `api_docs: {enabled: true, packages: [...]}` in book.yml. Pulls
+# mkdocstrings + the Python handler (which pulls Griffe).
+api = [
+    "mkdocstrings[python]>=1.0",
+]
 
 [project.urls]
 Homepage = "https://ljchang.github.io/marimo-book/"

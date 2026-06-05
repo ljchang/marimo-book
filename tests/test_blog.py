@@ -1,0 +1,278 @@
+"""Tests for src/marimo_book/blog.py — Tasks 2–6."""
+
+from __future__ import annotations
+
+from datetime import date as _date
+from pathlib import Path
+
+import yaml
+
+from marimo_book.blog import (
+    PostMeta,
+    author_id,
+    build_author_roster,
+    discover_posts,
+    first_heading,
+    insert_teaser,
+    parse_blog_block,
+    parse_post_header,
+    render_front_matter,
+    resolve_meta,
+)
+from marimo_book.config import Author, Blog, Book
+
+
+def test_parse_blog_block_reads_fields() -> None:
+    src = (
+        "# /// blog\n"
+        '# title = "marimo-book 0.2 released"\n'
+        "# date = 2026-06-04\n"
+        '# authors = ["luke", "jane"]\n'
+        '# tags = ["release"]\n'
+        "# draft = true\n"
+        "# ///\n"
+        "import marimo\n"
+    )
+    meta = parse_blog_block(src)
+    assert meta == {
+        "title": "marimo-book 0.2 released",
+        "date": "2026-06-04",
+        "authors": ["luke", "jane"],
+        "tags": ["release"],
+        "draft": True,
+    }
+
+
+def test_parse_blog_block_absent_returns_none() -> None:
+    assert parse_blog_block("import marimo\n") is None
+
+
+def test_md_front_matter_parsed(tmp_path: Path) -> None:
+    p = tmp_path / "2026-06-04-hello.md"
+    p.write_text("---\ntitle: Hello\nauthors: [luke]\n---\n\n# Body\n")
+    meta = parse_post_header(p)
+    assert meta.title == "Hello"
+    assert meta.authors == ["luke"]
+    assert meta.is_notebook is False
+
+
+def test_date_defaults_from_filename(tmp_path: Path) -> None:
+    p = tmp_path / "2026-06-04-hello.md"
+    p.write_text("---\ntitle: Hello\n---\n# Body\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author="luke")
+    assert meta.date == _date(2026, 6, 4)
+    assert meta.authors == ["luke"]
+
+
+def test_title_falls_back_to_first_h1(tmp_path: Path) -> None:
+    p = tmp_path / "2026-06-04-x.md"
+    p.write_text("---\ndate: 2026-06-04\n---\n\n# Real Title\n\nbody\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.title == "Real Title"
+    assert meta.authors == []
+
+
+def test_author_id_slugifies() -> None:
+    assert author_id("Luke Chang") == "luke-chang"
+    assert author_id("Jane Q. Doe") == "jane-q-doe"
+
+
+def test_roster_from_book_authors_only() -> None:
+    roster = build_author_roster([Author(name="Luke Chang")], authors_yml=None)
+    assert "luke-chang" in roster
+    assert roster["luke-chang"]["name"] == "Luke Chang"
+
+
+def test_authors_yml_overrides_on_collision() -> None:
+    book_authors = [Author(name="Luke Chang", affiliation="Dartmouth")]
+    yml = {"authors": {"luke-chang": {"name": "Luke C.", "description": "Maintainer"}}}
+    roster = build_author_roster(book_authors, authors_yml=yml)
+    assert roster["luke-chang"]["name"] == "Luke C."
+    assert roster["luke-chang"]["description"] == "Maintainer"
+
+
+MORE = "<!-- more -->"
+
+
+def test_explicit_marker_preserved() -> None:
+    md = "Intro.\n<!-- more -->\nRest.\n"
+    assert insert_teaser(md) == md
+
+
+def test_inserts_after_first_paragraph() -> None:
+    md = "First para.\n\nSecond para.\n\nThird.\n"
+    out = insert_teaser(md)
+    assert out.count(MORE) == 1
+    assert out.index(MORE) < out.index("Second para.")
+
+
+def test_inserts_after_leading_heading_block() -> None:
+    md = "# Title\n\nFirst para.\n\nSecond.\n"
+    out = insert_teaser(md)
+    assert out.index(MORE) < out.index("Second.")
+    assert out.index("# Title") < out.index(MORE)
+
+
+def test_discover_posts_finds_md_and_py(tmp_path: Path) -> None:
+    posts = tmp_path / "blog" / "posts"
+    posts.mkdir(parents=True)
+    (posts / "2026-06-04-a.md").write_text("---\ndate: 2026-06-04\n---\nx\n")
+    (posts / "2026-06-03-b.py").write_text(
+        "# /// blog\n# date = 2026-06-03\n# ///\nimport marimo\n"
+    )
+    (posts / "ignore.txt").write_text("nope")
+    found = sorted(p.name for p in discover_posts(tmp_path / "blog"))
+    assert found == ["2026-06-03-b.py", "2026-06-04-a.md"]
+
+
+def test_render_front_matter_round_trips() -> None:
+    meta = PostMeta(title="Hi", date=_date(2026, 6, 4), authors=["luke"], tags=["release"])
+    fm = render_front_matter(meta)
+    assert fm.startswith("---\n") and fm.rstrip().endswith("---")
+    loaded = yaml.safe_load(fm.strip("-\n"))
+    assert loaded["title"] == "Hi"
+    assert loaded["date"] == _date(2026, 6, 4)
+    assert loaded["authors"] == ["luke"]
+
+
+def test_roster_entries_satisfy_material_schema() -> None:
+    # Material's blog plugin requires name + description + avatar on EVERY
+    # author entry (book-derived and explicit .authors.yml alike), or the
+    # mkdocs build aborts. Regression for that build-time validation.
+    roster = build_author_roster(
+        [Author(name="Luke Chang")],  # no affiliation/email/orcid
+        authors_yml={"authors": {"jane": {"name": "Jane"}}},  # minimal explicit entry
+    )
+    for entry in roster.values():
+        assert entry.get("name")
+        assert "description" in entry
+        assert "avatar" in entry
+
+
+# --- Fix #1: malformed filename date must not crash the build ---
+
+
+def test_malformed_filename_date_does_not_crash(tmp_path: Path) -> None:
+    p = tmp_path / "2026-13-45-bad.md"
+    p.write_text("---\ntitle: Bad\n---\n\nbody\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    # falls through to git/mtime fallback rather than raising ValueError
+    assert isinstance(meta.date, _date)
+
+
+def test_valid_filename_date_still_parses(tmp_path: Path) -> None:
+    p = tmp_path / "2026-01-15-x.md"
+    p.write_text("---\ntitle: X\n---\n\nbody\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.date == _date(2026, 1, 15)
+
+
+# --- Fix #3: title fallback must strip the date prefix ---
+
+
+def test_title_fallback_strips_date_prefix(tmp_path: Path) -> None:
+    p = tmp_path / "2026-01-01-my-post.md"
+    p.write_text("---\ndate: 2026-01-01\n---\n\nNo heading here, just prose.\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.title == "my-post"
+
+
+# --- Fix #4: first-H1 detection must ignore fenced code blocks ---
+
+
+def test_first_heading_ignores_fenced_comment() -> None:
+    md = "```python\n# not a title\nx = 1\n```\n\nProse.\n"
+    assert first_heading(md) is None
+
+
+def test_first_heading_after_fence() -> None:
+    md = "```python\n# fake\n```\n\n# Real Title\n\nbody\n"
+    assert first_heading(md) == "Real Title"
+
+
+def test_title_fallback_ignores_fenced_comment(tmp_path: Path) -> None:
+    p = tmp_path / "2026-02-02-fenced.md"
+    p.write_text("---\ndate: 2026-02-02\n---\n\n```python\n# not a title\nx = 1\n```\n\nProse.\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.title == "fenced"
+
+
+def test_title_real_h1_after_fence(tmp_path: Path) -> None:
+    p = tmp_path / "2026-02-03-real.md"
+    p.write_text("---\ndate: 2026-02-03\n---\n\n```python\n# fake\n```\n\n# Real Title\n\nbody\n")
+    meta = resolve_meta(parse_post_header(p), p, default_author=None)
+    assert meta.title == "Real Title"
+
+
+# --- Fix #5: <!-- more --> must not land inside a code fence ---
+
+
+def test_teaser_not_inside_code_fence() -> None:
+    body = "```python\nx = 1\n\ny = 2\n```\n\nProse after.\n"
+    out = insert_teaser(body)
+    assert "```python\nx = 1\n\ny = 2\n```" in out
+    assert out.index(MORE) > out.index("```python\nx = 1\n\ny = 2\n```")
+
+
+def test_teaser_after_first_paragraph_with_heading() -> None:
+    md = "# Title\n\nFirst para.\n\nSecond.\n"
+    out = insert_teaser(md)
+    assert out.count(MORE) == 1
+    assert out.index("# Title") < out.index(MORE)
+    assert out.index(MORE) < out.index("Second.")
+    assert out.index("First para.") < out.index(MORE)
+
+
+def test_teaser_existing_marker_unchanged() -> None:
+    md = "Intro.\n<!-- more -->\nRest.\n"
+    assert insert_teaser(md) == md
+
+
+# --- Fix #6: a # /// blog body line without a space after # ---
+
+
+def test_blog_block_tolerates_no_space_comment() -> None:
+    src = '# /// blog\n# title = "Hi"\n#nospace\n# date = 2026-06-04\n# ///\nimport marimo\n'
+    meta = parse_blog_block(src)
+    assert meta is not None
+    assert meta["title"] == "Hi"
+    assert meta["date"] == "2026-06-04"
+
+
+# --- Fix #2 / #7: RSS item dates + escaped blog.dir in match_path ---
+
+
+def _cfg_with_blog(dir_: str = "blog"):
+    from marimo_book import shell
+
+    book = Book(
+        title="T",
+        toc=[],
+        blog=Blog(enabled=True, rss=True, dir=dir_),
+    )
+    return shell._build_config(
+        book,
+        docs_dir=Path("docs"),
+        site_dir=Path("site"),
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+
+
+def _rss_plugin(cfg: dict) -> dict:
+    for p in cfg["plugins"]:
+        if isinstance(p, dict) and "rss" in p:
+            return p["rss"]
+    raise AssertionError("rss plugin not found")
+
+
+def test_rss_uses_post_date_not_build_time() -> None:
+    rss = _rss_plugin(_cfg_with_blog())
+    assert rss["use_git"] is False
+    assert rss["date_from_meta"] == {"as_creation": "date", "as_update": "date"}
+
+
+def test_rss_match_path_escapes_blog_dir() -> None:
+    rss = _rss_plugin(_cfg_with_blog("news+updates"))
+    assert rss["match_path"] == "news\\+updates/posts/.*"

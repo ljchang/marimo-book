@@ -10,12 +10,15 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import typer
+import yaml
 from pydantic import ValidationError
 
 from marimo_book import __version__
+from marimo_book.blog import author_id
 from marimo_book.config import load_book
 from marimo_book.preprocessor import Preprocessor
 from marimo_book.transforms.pep723 import derive_dependencies, write_pep723_block
@@ -105,6 +108,100 @@ def _copy_scaffold(src: Path, dst: Path) -> None:
         else:
             out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, out)
+
+
+@app.command("new-post")
+def new_post(
+    title: str = typer.Argument(..., help="Post title."),
+    notebook: bool = typer.Option(
+        False, "--notebook", help="Create a marimo .py notebook post instead of .md."
+    ),
+    book_dir: Path = typer.Option(Path("."), "--book-dir", help="Book root directory."),
+    date: str | None = typer.Option(None, "--date", help="Post date YYYY-MM-DD (default: today)."),
+    author: str | None = typer.Option(
+        None, "--author", help="Author id (defaults to the book's default author)."
+    ),
+) -> None:
+    """Scaffold a new blog post in ``<book_dir>/<blog.dir>/posts/``.
+
+    Pre-fills the header (front-matter for ``.md``, a ``# /// blog`` block for
+    ``.py``) with the date, title, and — when given — author. Almost every
+    field is optional in a real post; the scaffold just gives a working start.
+    The destination directory follows ``blog.dir`` from ``book.yml`` when one
+    is present (default ``blog``).
+    """
+    if date:
+        try:
+            day = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            typer.secho(
+                f"error: --date must be YYYY-MM-DD, got {date!r}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1) from None
+    else:
+        day = datetime.now().date()
+    day_str = day.isoformat()
+
+    # Resolve the blog directory from book.yml when present (default "blog").
+    blog_dir = "blog"
+    book_yml = book_dir / "book.yml"
+    if book_yml.is_file():
+        try:
+            book = load_book(book_yml)
+        except (ValidationError, OSError, ValueError):
+            book = None
+        if book is not None:
+            blog_dir = book.blog.dir
+            if not book.blog.enabled:
+                typer.secho(
+                    "note: blog is not enabled in book.yml — set "
+                    "`blog: {enabled: true}` to publish posts.",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
+
+    slug = author_id(title)
+    posts = book_dir / blog_dir / "posts"
+    posts.mkdir(parents=True, exist_ok=True)
+    ext = ".py" if notebook else ".md"
+    dest = posts / f"{day_str}-{slug}{ext}"
+    if dest.exists():
+        typer.secho(f"error: refusing to overwrite {dest}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    if notebook:
+        authors_line = f'# authors = ["{author}"]' if author else "# authors = []"
+        dest.write_text(
+            "# /// blog\n"
+            f'# title = "{title}"\n'
+            f"# date = {day_str}\n"
+            f"{authors_line}\n"
+            "# ///\n"
+            "import marimo\n\n"
+            "app = marimo.App()\n\n"
+            "@app.cell\n"
+            "def _():\n"
+            "    import marimo as mo\n"
+            f'    mo.md(r"""\n# {title}\n\nWrite your intro here.\n""")\n'
+            "    return (mo,)\n\n"
+            'if __name__ == "__main__":\n'
+            "    app.run()\n",
+            encoding="utf-8",
+        )
+    else:
+        # Build the front-matter via yaml.safe_dump so titles with colons,
+        # quotes, or Unicode can't produce malformed YAML.
+        front: dict = {"title": title, "date": day}
+        if author:
+            front["authors"] = [author]
+        fm_block = yaml.safe_dump(front, sort_keys=False, allow_unicode=True).strip()
+        dest.write_text(
+            f"---\n{fm_block}\n---\n\nWrite your intro here.\n\n<!-- more -->\n\nFull post body.\n",
+            encoding="utf-8",
+        )
+    typer.secho(f"Created {dest}", fg=typer.colors.GREEN)
 
 
 @app.command("build")

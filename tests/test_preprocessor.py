@@ -522,3 +522,75 @@ def test_stage_page_static_mode_skips_staging_by_default(tmp_path: Path) -> None
 
     # Default static path receives the ORIGINAL source, not a staged copy.
     assert captured["args"] == nb.resolve()
+
+
+def test_blog_stages_posts_index_and_authors(tmp_path: Path) -> None:
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    posts = tmp_path / "blog" / "posts"
+    posts.mkdir(parents=True)
+    (posts / "2026-06-04-hello.md").write_text(
+        "---\ntitle: Hello\n---\n\nIntro para.\n\nMore body.\n", encoding="utf-8"
+    )
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/intro.md"}],
+            "authors": [{"name": "Luke Chang"}],
+            "blog": {"enabled": True},
+        }
+    )
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Intro\n")
+
+    out = tmp_path / "_site_src"
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
+    assert not report.errors
+
+    docs = out / "docs"
+    post = (docs / "blog" / "posts" / "2026-06-04-hello.md").read_text()
+    assert post.startswith("---\n")
+    assert "date: 2026-06-04" in post
+    assert "authors:\n- luke-chang" in post
+    assert "<!-- more -->" in post
+    assert (docs / "blog" / "index.md").exists()
+    authors = (docs / "blog" / ".authors.yml").read_text()
+    assert "luke-chang" in authors and "Luke Chang" in authors
+
+
+def test_blog_disabled_stages_nothing(tmp_path: Path) -> None:
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Intro\n")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/intro.md"}]})
+    out = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
+    assert not (out / "docs" / "blog").exists()
+
+
+def test_mkdocs_yml_wires_blog_plugins_and_nav(tmp_path: Path) -> None:
+    import yaml as _yaml
+
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Intro\n")
+    (tmp_path / "blog" / "posts").mkdir(parents=True)
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/intro.md"}],
+            "blog": {"enabled": True, "title": "News", "rss": True},
+        }
+    )
+    out = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
+    cfg = _yaml.safe_load((out / "mkdocs.yml").read_text())
+    names = [p if isinstance(p, str) else next(iter(p)) for p in cfg["plugins"]]
+    assert "blog" in names and "tags" in names and "rss" in names
+    assert names.index("blog") < names.index("rss")
+    assert any(isinstance(n, dict) and n.get("News") == "blog/index.md" for n in cfg["nav"])

@@ -1,0 +1,307 @@
+"""Blog / news module domain logic.
+
+Pure-ish helpers used by the preprocessor (rendering/staging), shell
+(plugin wiring), and CLI (scaffold). Everything here produces standard
+Material `blog`-plugin inputs so it ports to zensical cleanly.
+"""
+
+from __future__ import annotations
+
+import ast
+import hashlib
+import re
+import subprocess
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from pathlib import Path
+
+import yaml
+
+from .config import Author
+
+_BLOG_BLOCK_RE = re.compile(
+    r"^# /// blog[ \t]*\n(?P<body>(?:^#.*\n)*?)^# ///[ \t]*\n",
+    re.MULTILINE,
+)
+
+
+def parse_blog_block(source: str) -> dict | None:
+    """Parse a leading ``# /// blog`` metadata block from a .py post.
+
+    Returns a dict of the declared keys, or ``None`` if no block is present.
+    Recognised value forms: ``"string"``, ``["a", "b"]``, ``true``/``false``,
+    and bare ``YYYY-MM-DD`` dates (returned as the raw string).
+    """
+    m = _BLOG_BLOCK_RE.search(source)
+    if m is None:
+        return None
+    out: dict = {}
+    for raw in m.group("body").splitlines():
+        line = raw.lstrip("#").strip()
+        if not line or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        out[key.strip()] = _coerce(val.strip())
+    return out
+
+
+def _coerce(val: str):
+    if val in ("true", "false"):
+        return val == "true"
+    if val.startswith(("[", '"', "'")):
+        try:
+            return ast.literal_eval(val)
+        except (ValueError, SyntaxError):
+            return val.strip("\"'")
+    return val  # bare token (e.g. a date) kept as a string
+
+
+_FRONT_MATTER_RE = re.compile(r"^---[ \t]*\n(?P<yaml>.*?)\n---[ \t]*\n", re.DOTALL)
+_FILENAME_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-")
+
+
+def first_heading(markdown: str) -> str | None:
+    """First ATX H1 (``# ``) that is NOT inside a fenced code block."""
+    in_fence = False
+    fence = ""
+    for line in markdown.splitlines():
+        stripped = line.lstrip()
+        if in_fence:
+            if stripped.startswith(fence):
+                in_fence = False
+            continue
+        if stripped.startswith(("```", "~~~")):
+            in_fence = True
+            fence = stripped[:3]
+            continue
+        m = re.match(r"#[ \t]+(.+?)[ \t]*$", line)
+        if m:
+            return m.group(1)
+    return None
+
+
+@dataclass
+class PostMeta:
+    title: str | None = None
+    date: date | None = None
+    authors: list[str] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    draft: bool = False
+    pin: bool = False
+    is_notebook: bool = False
+    body: str = ""
+
+
+def parse_post_header(path: Path) -> PostMeta:
+    """Parse a post's header from either .md front-matter or a .py # /// blog block."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".py":
+        raw = parse_blog_block(text) or {}
+        return _meta_from_dict(raw, is_notebook=True, body="")
+    m = _FRONT_MATTER_RE.match(text)
+    raw = yaml.safe_load(m.group("yaml")) if m else {}
+    body = text[m.end() :] if m else text
+    return _meta_from_dict(raw or {}, is_notebook=False, body=body)
+
+
+def _meta_from_dict(raw: dict, *, is_notebook: bool, body: str) -> PostMeta:
+    def _list(v):
+        if v is None:
+            return []
+        return list(v) if isinstance(v, (list, tuple)) else [v]
+
+    d = raw.get("date")
+    parsed_date = None
+    if isinstance(d, date):
+        parsed_date = d
+    elif isinstance(d, str) and d:
+        parsed_date = datetime.strptime(d[:10], "%Y-%m-%d").date()
+
+    return PostMeta(
+        title=raw.get("title"),
+        date=parsed_date,
+        authors=_list(raw.get("authors")),
+        categories=_list(raw.get("categories")),
+        tags=_list(raw.get("tags")),
+        draft=bool(raw.get("draft", False)),
+        pin=bool(raw.get("pin", False)),
+        is_notebook=is_notebook,
+        body=body,
+    )
+
+
+def _git_added_date(path: Path) -> date | None:
+    """Author date of the commit that added ``path``, or None if unavailable."""
+    try:
+        res = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--format=%aI", "--", path.name],
+            cwd=str(path.parent),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    lines = [ln for ln in res.stdout.splitlines() if ln.strip()]
+    if res.returncode != 0 or not lines:
+        return None
+    try:
+        return date.fromisoformat(lines[-1][:10])  # oldest add commit
+    except ValueError:
+        return None
+
+
+def _date_from_filename(path: Path) -> date | None:
+    fm = _FILENAME_DATE_RE.match(path.name)
+    if not fm:
+        return None
+    try:
+        return date(int(fm.group(1)), int(fm.group(2)), int(fm.group(3)))
+    except ValueError:
+        return None
+
+
+def _title_from_stem(stem: str) -> str:
+    return _FILENAME_DATE_RE.sub("", stem) or stem
+
+
+def resolve_meta(meta: PostMeta, path: Path, *, default_author: str | None) -> PostMeta:
+    """Fill required defaults: date (filename->git->mtime), title (H1), default author."""
+    if meta.date is None:
+        meta.date = (
+            _date_from_filename(path)
+            or _git_added_date(path)
+            or datetime.fromtimestamp(path.stat().st_mtime).date()
+        )
+    if not meta.title:
+        h1 = first_heading(meta.body) if not meta.is_notebook else None
+        meta.title = h1 if h1 else _title_from_stem(path.stem)
+    if not meta.authors and default_author:
+        meta.authors = [default_author]
+    return meta
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def author_id(name: str) -> str:
+    return _SLUG_RE.sub("-", name.lower()).strip("-")
+
+
+# Generic placeholder avatar (Gravatar "mystery person"). Material's blog
+# plugin requires every author to have an avatar; book.yml authors rarely
+# carry one, so we fall back to this (or a Gravatar derived from email).
+_DEFAULT_AVATAR = "https://www.gravatar.com/avatar/?d=mp"
+
+
+def _gravatar(email: str) -> str:
+    digest = hashlib.md5(email.strip().lower().encode("utf-8")).hexdigest()  # noqa: S324
+    return f"https://www.gravatar.com/avatar/{digest}?d=identicon"
+
+
+def _derive_entry(a: Author) -> dict:
+    desc = a.affiliation or (f"ORCID {a.orcid}" if a.orcid else "")
+    avatar = _gravatar(a.email) if a.email else _DEFAULT_AVATAR
+    return {"name": a.name, "description": desc, "avatar": avatar}
+
+
+def _normalize_entry(entry: dict) -> dict:
+    """Ensure an explicit .authors.yml entry has the fields Material requires."""
+    out = dict(entry)
+    out.setdefault("description", "")
+    out.setdefault("avatar", _DEFAULT_AVATAR)
+    return out
+
+
+def build_author_roster(book_authors: list[Author], authors_yml: dict | None) -> dict:
+    """Merge book.yml-derived authors with an optional .authors.yml roster.
+
+    Every returned entry carries ``name``, ``description``, and ``avatar`` —
+    the three fields Material's blog plugin requires (it aborts the build
+    otherwise). Explicit ``.authors.yml`` entries win on id collision.
+    """
+    roster = {author_id(a.name): _derive_entry(a) for a in book_authors}
+    if authors_yml:
+        for id_, entry in (authors_yml.get("authors") or {}).items():
+            roster[id_] = _normalize_entry(entry)
+    return roster
+
+
+_MORE = "<!-- more -->"
+
+
+def insert_teaser(markdown: str) -> str:
+    """Ensure a single ``<!-- more -->`` excerpt boundary.
+
+    If the author already placed one, return unchanged. Otherwise insert it
+    after the first non-heading paragraph (so a leading ``# H1`` stays in the
+    teaser), never inside a fenced code block. If no top-level paragraph
+    break is found, append at the end.
+    """
+    if not markdown.strip() or _MORE in markdown:
+        return markdown
+    lines = markdown.split("\n")
+    in_fence = False
+    fence = ""
+    seen_content = False  # seen a non-heading content line at top level
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if in_fence:
+            seen_content = True
+            if stripped.startswith(fence):
+                in_fence = False
+            continue
+        if stripped.startswith(("```", "~~~")):
+            in_fence = True
+            fence = stripped[:3]
+            seen_content = True
+            continue
+        if stripped == "":
+            if seen_content:
+                lines[i:i] = ["", _MORE]
+                return "\n".join(lines)
+            continue
+        if stripped.startswith("#"):
+            continue  # heading stays in the teaser
+        seen_content = True
+    return markdown.rstrip("\n") + f"\n\n{_MORE}\n"
+
+
+def read_authors_yml(book_dir: Path) -> dict | None:
+    """Load ``<book_dir>/.authors.yml`` if present."""
+    p = book_dir / ".authors.yml"
+    if not p.is_file():
+        return None
+    return yaml.safe_load(p.read_text(encoding="utf-8"))
+
+
+def discover_posts(blog_dir: Path) -> list[Path]:
+    """Return the .md/.py post files directly in ``<blog_dir>/posts/`` (sorted).
+
+    Discovery is one level deep: posts are flat files in ``posts/``. Staged
+    output names are derived from the file stem, so nesting is intentionally
+    not supported (it would risk stem collisions in the flattened output).
+    """
+    posts_dir = blog_dir / "posts"
+    if not posts_dir.is_dir():
+        return []
+    return sorted(p for p in posts_dir.iterdir() if p.is_file() and p.suffix in (".md", ".py"))
+
+
+def render_front_matter(meta: PostMeta) -> str:
+    """Render the YAML front-matter block the staged post .md must lead with."""
+    data: dict = {"date": meta.date}
+    if meta.title:
+        data["title"] = meta.title
+    for key in ("authors", "categories", "tags"):
+        val = getattr(meta, key)
+        if val:
+            data[key] = val
+    if meta.draft:
+        data["draft"] = True
+    if meta.pin:
+        data["pin"] = True
+    dumped = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{dumped}\n---\n"

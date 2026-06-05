@@ -33,6 +33,19 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
+import yaml
+
+from .blog import (
+    author_id,
+    build_author_roster,
+    discover_posts,
+    first_heading,
+    insert_teaser,
+    parse_post_header,
+    read_authors_yml,
+    render_front_matter,
+    resolve_meta,
+)
 from .config import Book, Dependencies, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .shell import _nav_from_toc, emit_mkdocs_yml
@@ -63,6 +76,10 @@ _ASSET_DIRS: tuple[str, ...] = ("images", "Code", "data")
 
 # Filename prefix stripped when computing the docs-relative path.
 _CONTENT_DIR = "content"
+
+
+def _first_markdown_heading(markdown: str) -> str | None:
+    return first_heading(markdown)
 
 
 @dataclass
@@ -512,6 +529,10 @@ class Preprocessor:
             nav.append({"Changelog": "changelog.md"})
             report.pages += 1
 
+        self._stage_blog(docs_dir, report)
+        if self.book.blog.enabled:
+            nav.append({self.book.blog.title: f"{self.book.blog.dir}/index.md"})
+
         emit_mkdocs_yml(
             self.book,
             docs_dir=docs_dir.relative_to(out_dir),
@@ -645,6 +666,54 @@ class Preprocessor:
                 )
                 return True
         return False
+
+    def _render_notebook_body(self, src: Path) -> str:
+        """Render a .py blog post to static markdown (reuses the page path)."""
+        needs_pep723 = self.book.dependencies.auto_pep723
+        with _maybe_stage_with_pep723(
+            src, self.book.dependencies, enabled=needs_pep723, wasm_bootstrap=False
+        ) as staged:
+            return _render_marimo(staged or src, self.book, sandbox=False)
+
+    def _stage_blog(self, docs_dir: Path, report: BuildReport) -> None:
+        """Render and stage blog posts + index + merged .authors.yml."""
+        if not self.book.blog.enabled:
+            return
+        blog_src = self.book_dir / self.book.blog.dir
+        posts = discover_posts(blog_src)
+        out_blog = docs_dir / self.book.blog.dir
+        out_posts = out_blog / "posts"
+        out_posts.mkdir(parents=True, exist_ok=True)
+
+        default_author = self.book.blog.default_author
+        if default_author is None and len(self.book.authors) == 1:
+            default_author = author_id(self.book.authors[0].name)
+
+        for src in posts:
+            meta = resolve_meta(parse_post_header(src), src, default_author=default_author)
+            if src.suffix == ".py":
+                body = self._render_notebook_body(src)
+                if meta.title == src.stem:
+                    h1 = _first_markdown_heading(body)
+                    if h1:
+                        meta.title = h1
+            else:
+                body = meta.body
+            body = insert_teaser(body)
+            staged = out_posts / (src.stem + ".md")
+            staged.write_text(render_front_matter(meta) + "\n" + body, encoding="utf-8")
+            report.pages += 1
+
+        index = out_blog / "index.md"
+        if not index.exists():
+            index.write_text(f"# {self.book.blog.title}\n", encoding="utf-8")
+
+        roster = build_author_roster(self.book.authors, read_authors_yml(self.book_dir))
+        if roster:
+            (out_blog / ".authors.yml").write_text(
+                yaml.safe_dump({"authors": roster}, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
 
     def _write_defaults(self, docs_dir: Path) -> None:
         """Copy the built-in default CSS / JS into the staging tree."""

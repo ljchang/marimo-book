@@ -34,7 +34,7 @@ jobs:
       - name: Install system deps for social-card generation
         run: sudo apt-get update -y && sudo apt-get install -y libcairo2 libpango-1.0-0 libpangocairo-1.0-0
       - name: Install marimo-book + extras for docs build
-        run: pip install -e '.[linkcheck,social,autorefs,pdf]'
+        run: pip install -e '.[linkcheck,social,autorefs,pdf,blog]'
       - name: Install demo notebook deps (drawdata used by anywidget_demo.py)
         run: pip install drawdata anywidget
       # Restore the marimo-book build cache so unchanged chapters skip

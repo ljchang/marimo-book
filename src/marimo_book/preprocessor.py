@@ -35,6 +35,7 @@ from pathlib import Path
 
 import yaml
 
+from .api_docs import resolve_search_paths, stage_api_docs
 from .blog import (
     author_id,
     build_author_roster,
@@ -533,12 +534,19 @@ class Preprocessor:
         if self.book.blog.enabled:
             nav.append({self.book.blog.title: f"{self.book.blog.dir}/index.md"})
 
+        api_paths: list[str] = []
+        if self.book.api_docs.enabled:
+            resolved = resolve_search_paths(self.book.api_docs, self.book_dir)
+            api_paths = [str(p) for p in resolved]
+            nav.extend(stage_api_docs(self.book.api_docs, search_paths=resolved, docs_dir=docs_dir))
+
         emit_mkdocs_yml(
             self.book,
             docs_dir=docs_dir.relative_to(out_dir),
             site_dir=site_dir,
             out_path=out_dir / "mkdocs.yml",
             nav=nav,
+            api_paths=api_paths or None,
         )
 
         return report

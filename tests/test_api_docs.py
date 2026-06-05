@@ -186,3 +186,44 @@ def test_mkdocstrings_inventories_passthrough(tmp_path):
         if isinstance(p, dict) and "mkdocstrings" in p
     )
     assert "inventories" not in handler2
+
+
+def test_preprocessor_stages_api_section(tmp_path):
+    import yaml
+
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    # Minimal book that documents the sample_pkg fixture by path.
+    book_dir = tmp_path / "book"
+    (book_dir / "content").mkdir(parents=True)
+    (book_dir / "content" / "intro.md").write_text("# Intro\n", encoding="utf-8")
+
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/intro.md"}],
+            "api_docs": {
+                "enabled": True,
+                "packages": ["sample_pkg"],
+                "paths": [str(FIXTURES)],
+            },
+        }
+    )
+
+    out_dir = tmp_path / "_site_src"
+    pre = Preprocessor(book, book_dir=book_dir)
+    pre.build(out_dir=out_dir)
+
+    docs_dir = out_dir / "docs"
+    assert (docs_dir / "api/sample_pkg/index.md").exists()
+    assert (docs_dir / "api/sample_pkg/core.md").exists()
+
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text())
+    assert any(isinstance(p, dict) and "mkdocstrings" in p for p in mkdocs["plugins"])
+    # nav contains the API Reference section
+    assert any(isinstance(n, dict) and "API Reference" in n for n in mkdocs["nav"])
+    # paths in the plugin are absolute
+    plugin = next(p for p in mkdocs["plugins"] if isinstance(p, dict) and "mkdocstrings" in p)
+    paths = plugin["mkdocstrings"]["handlers"]["python"]["paths"]
+    assert all(Path(p).is_absolute() for p in paths)

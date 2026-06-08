@@ -81,8 +81,14 @@ def _build_config(
     if book.repo:
         cfg["repo_url"] = book.repo
         cfg["edit_uri"] = _edit_uri_from_repo(book.repo)
-    if book.copyright:
-        cfg["copyright"] = book.copyright
+    # Always credit marimo-book in the footer (alongside any user copyright),
+    # linking back to the project site. Material renders HTML in `copyright`
+    # and shows it next to its own "Made with Material for MkDocs" notice.
+    _attribution = (
+        'Made with <a href="https://marimobook.org" target="_blank" '
+        'rel="noopener">Marimo-Book</a>'
+    )
+    cfg["copyright"] = f"{book.copyright} · {_attribution}" if book.copyright else _attribution
 
     cfg["theme"] = _theme_block(book)
     base_css = ["stylesheets/extra.css"]

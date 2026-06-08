@@ -72,7 +72,10 @@
 }
 
 /* Wider content column — Material's default ~61rem feels cramped. */
-.md-grid { max-width: 68rem; }
+/* `padding-inline` keeps a gutter so the layout never hugs the window edge:
+   the 68rem grid only centers above ~1360px, so without this the sidebar and
+   TOC sit flush against the viewport in the 1220–1360px band (and below). */
+.md-grid { max-width: 68rem; padding-inline: 1rem; }
 
 /* --- Sidebar hierarchy: distinguish sections from leaf links ------------- */
 /* Material renders top-level section labels as `<label class="md-nav__link">`

@@ -5,6 +5,22 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Footer now always credits marimo-book — a "Made with
+  [Marimo-Book](https://marimobook.org)" link is appended to the footer
+  copyright (alongside any `copyright:` set in `book.yml`), beside Material's
+  own "Made with Material for MkDocs" notice.
+
+### Fixed
+
+- Layout no longer hugs the window edge. The content grid (`max-width: 68rem`)
+  only centers above ~1360px, so between the sidebar-dock breakpoint (~1220px)
+  and 1360px the sidebar and table-of-contents sat flush against the viewport.
+  A `padding-inline` gutter on `.md-grid` keeps a margin at every width.
+
 ## [0.1.21] — 2026-06-08
 
 ### Added

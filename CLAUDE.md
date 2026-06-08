@@ -61,30 +61,34 @@ To cut a release:
 1. Open a tiny PR that dates the `[Unreleased]` section in
    `CHANGELOG.md` to today (one-line change, e.g.
    `## [0.1.18] — YYYY-MM-DD`). Merge it.
-2. Tag merged `main` at that commit and push the tag:
+2. Tag merged `main` at that commit **via `gh release create`** — this
+   creates+pushes the `v*` tag (which fires `publish.yml` → PyPI) **and**
+   creates the matching GitHub Release object, so the repo's Releases page
+   stays current:
 
    ```bash
    git checkout main && git pull
-   git tag -a v0.1.18 -m "Release 0.1.18"
-   git push origin v0.1.18
+   # Notes = that version's CHANGELOG section.
+   gh release create v0.1.21 --target main --title v0.1.21 \
+     --notes "$(awk '/## \[0\.1\.21\]/{f=1;next} /^## \[/{if(f)exit} f' CHANGELOG.md)"
    ```
 
-   The pushed tag fires `publish.yml` → PyPI. Watch the run:
-   `gh run watch --repo ljchang/marimo-book` (or the Actions tab).
+   Watch the publish run: `gh run watch --repo ljchang/marimo-book`
+   (or the Actions tab). A bare `git tag … && git push origin v0.1.21`
+   still works and still publishes to PyPI — but it leaves **no** GitHub
+   Release object, which is why the Releases page used to lag. Prefer
+   `gh release create`.
 
 That's it. **Never push version edits directly to main**, and never
 push a `v*` tag you don't intend to publish — the tag *is* the
 release trigger. The version lives in exactly one place: the git tag.
 
-**Note (2026-06): the `release-drafter` GitHub-Release draft is stale**
-(stuck at `v0.1.11`) and is **not** part of the live flow — releases
-`v0.1.12`–`v0.1.17` were cut by direct tag push and have no GitHub
-Release object at all. Don't rely on "publish the draft"; push the tag.
-If you want GitHub Release notes too, run
-`gh release create v0.1.18 --generate-notes` *instead of* the manual
-`git push origin v0.1.18` (creating a release also creates+pushes the
-tag, which fires `publish.yml` the same way) — but the tag push is the
-only thing that actually publishes to PyPI.
+**Note (2026-06): `gh release create` is now the standard.** Earlier
+releases (`v0.1.12`–`v0.1.20`) were cut by bare tag push and had no
+GitHub Release object; they've since been backfilled from the CHANGELOG,
+so every `v0.1.x` tag now has a Release. Use `gh release create` going
+forward so this never drifts again. The old `release-drafter` draft
+(stuck at `v0.1.11`) is **not** part of the live flow — ignore it.
 
 See `PUBLISHING.md` for full detail (one-time PyPI setup, label
 conventions for release-drafter categorisation, yanking, etc.).

@@ -66,10 +66,18 @@ def stage_api_docs(cfg: ApiDocs, *, search_paths: list[Path], docs_dir: Path) ->
 
 
 def _public_children(module: Module, cfg: ApiDocs) -> list[Module]:
-    """Submodules that get their own page: non-underscore, not excluded."""
+    """Submodules that get their own page: non-underscore, not excluded.
+
+    Skips Griffe *alias* members — these are ``import pkg`` references (e.g.
+    ``feat.utils.io`` doing ``import feat``), not submodules owned by this
+    package. Following them recurses back into the imported package, an
+    infinite cycle when the import targets an ancestor.
+    """
     out: list[Module] = []
     for child_name, child in sorted(module.modules.items()):
         if child_name.startswith("_"):
+            continue
+        if child.is_alias:
             continue
         if any(fnmatch.fnmatch(child.path, pat) for pat in cfg.exclude):
             continue

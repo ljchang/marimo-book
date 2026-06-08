@@ -107,6 +107,13 @@
   font-size: 0.78rem;
   font-weight: 500;
 }
+/* A collapsible item (e.g. an API package like `feat.utils`) wraps its link in
+   a `.md-nav__container` that already carries the leaf indent; the inner link
+   must not add it again, or the parent label ends up indented *further* than
+   its own nested children. Zero the inner padding so the container's wins. */
+.md-nav--primary .md-nav__container > .md-nav__link {
+  padding-left: 0;
+}
 
 /* --- Footer: airy light mode, blended dark mode -------------------------- */
 /* Material's default footer is a heavy dark bar in both schemes — fights

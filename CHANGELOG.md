@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Nested nav packages (e.g. an API-reference package like `feat.utils` with
+  submodules) no longer over-indent. Their collapsible link wraps an `<a>` in a
+  padded `.md-nav__container`, and the leaf-indent rule applied to *both* —
+  double-padding the parent label further right than its own children. The
+  inner link's padding is now zeroed so it lines up with its sibling entries.
 - Plotly **animations now play** in the rendered site. The hydration shim
   called `Plotly.newPlot(mount, data, layout)` but never registered the
   figure's `frames`, so animations rendered only frame 0 and the play/pause

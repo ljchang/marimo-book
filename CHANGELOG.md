@@ -5,7 +5,7 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.21] — 2026-06-08
 
 ### Added
 
@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warns and falls back to a live render so local authoring still works — but
   under `--strict` it is a hard error with no execution, so a CI build never
   silently re-runs a notebook the author forgot to render.
+
+### Fixed
+
+- `api_docs` no longer follows Griffe import-alias members when walking a
+  package's submodules. A submodule doing `import <root_pkg>` (e.g. py-feat's
+  `feat.utils.io` doing `import feat`) surfaced as a resolvable alias that the
+  walk recursed into forever, crashing the build with `OSError: File name too
+  long`. Such aliases are now skipped; package-owned submodules are unaffected.
 
 ## [0.1.20] — 2026-06-05
 

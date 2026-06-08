@@ -301,3 +301,34 @@ def test_preprocessor_stages_api_section(tmp_path):
     plugin = next(p for p in mkdocs["plugins"] if isinstance(p, dict) and "mkdocstrings" in p)
     paths = plugin["mkdocstrings"]["handlers"]["python"]["paths"]
     assert all(Path(p).is_absolute() for p in paths)
+
+
+def test_imported_ancestor_module_is_not_followed(tmp_path):
+    """A submodule that does ``import <root_pkg>`` must not be walked.
+
+    Griffe surfaces such an import as a resolvable *alias* module member.
+    Following it recurses back through the package forever (regression seen
+    with py-feat's ``feat.utils.io`` doing ``import feat``). The alias must be
+    skipped, leaving the importing module a normal leaf page.
+    """
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    cfg = ApiDocs(enabled=True, packages=["alias_cycle_pkg"])
+
+    nav = stage_api_docs(cfg, search_paths=[FIXTURES], docs_dir=docs_dir)
+
+    # leaf stays a leaf page; the `import alias_cycle_pkg` alias is ignored
+    assert (docs_dir / "api/alias_cycle_pkg/leaf.md").exists()
+    assert not (docs_dir / "api/alias_cycle_pkg/leaf").is_dir()
+    assert nav == [
+        {
+            "API Reference": [
+                {
+                    "alias_cycle_pkg": [
+                        "api/alias_cycle_pkg/index.md",
+                        {"leaf": "api/alias_cycle_pkg/leaf.md"},
+                    ]
+                }
+            ]
+        }
+    ]

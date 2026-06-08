@@ -49,6 +49,7 @@ from .blog import (
 )
 from .config import Book, Dependencies, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
+from .rendered_store import RenderedStore
 from .shell import _nav_from_toc, emit_mkdocs_yml
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import (
@@ -245,6 +246,28 @@ def _book_signature(book: Book) -> str:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _render_body_signature(book: Book) -> str:
+    """Hash the fields that change a notebook's *rendered body*.
+
+    Narrower than :func:`_book_signature`: the committed ``_rendered/`` body is
+    pre-button and pre-link-rewrite, so it does NOT depend on ``launch_buttons``
+    / ``repo`` / ``branch`` / the TOC. It DOES depend on ``defaults``
+    (e.g. ``hide_first_code_cell``, ``suppress_warnings``), ``dependencies``
+    (which mutate the executed source), ``widget_defaults`` (anywidget seed
+    state), and the marimo-book version (export output can change across
+    releases). Stored with each ``RenderedStore`` entry so a build can tell a
+    committed body is stale even when the source bytes are unchanged.
+    """
+    relevant: dict = {
+        "defaults": book.defaults.model_dump(mode="json"),
+        "dependencies": book.dependencies.model_dump(mode="json"),
+        "widget_defaults": book.widget_defaults,
+        "marimo_book_version": _resolve_tool_version(),
+    }
+    payload = json.dumps(relevant, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _splice_precomputed_body(original_page: str, result) -> str:
     """Replace the staged page's body with the precomputed version.
 
@@ -426,6 +449,10 @@ class Preprocessor:
         # When True, every TOC entry is re-rendered regardless of cache state.
         # The cache is still updated so future builds without --rebuild benefit.
         self.rebuild = rebuild
+        # Signature of render-affecting config + tool version, stored with each
+        # committed ``_rendered/`` body so a stale artifact is detected even
+        # when the notebook source bytes are unchanged.
+        self.body_signature = _render_body_signature(book)
 
     @property
     def sandbox(self) -> bool:
@@ -436,11 +463,19 @@ class Preprocessor:
 
     # --- public API ----------------------------------------------------------
 
-    def build(self, *, out_dir: Path, site_dir: Path | None = None) -> BuildReport:
+    def build(
+        self, *, out_dir: Path, site_dir: Path | None = None, strict: bool = False
+    ) -> BuildReport:
         """Stage ``docs/`` and emit ``mkdocs.yml`` under ``out_dir``.
 
         ``site_dir`` is where ``mkdocs build`` will later emit the finished
         HTML. It defaults to a sibling of ``out_dir`` called ``_site``.
+
+        With ``strict=True`` a stale or missing ``mode: cached`` artifact is a
+        hard error (``report.errors``) with no live-render fallback — so a CI
+        build never silently re-executes a notebook the author forgot to
+        ``marimo-book render``. Without it, the stale path warns and falls back
+        to a live render so local authoring still works.
         """
         out_dir = Path(out_dir).resolve()
         docs_dir = out_dir / "docs"
@@ -482,12 +517,32 @@ class Preprocessor:
         }
 
         cache = BuildCache(self.book_dir, self.book, force_rebuild=self.rebuild)
+        rendered_store = RenderedStore(self.book_dir)
 
         for entry in file_entries:
             src_rel = str(entry.file)
             src_abs = (self.book_dir / entry.file).resolve()
             out_rel = _doc_relpath_for(entry.file, index_source=index_source).as_posix()
+            mode = entry.effective_mode(self.book.defaults.mode)
             try:
+                # mode=cached: source outputs from the committed _rendered/
+                # artifact instead of executing the notebook. Never touches the
+                # transient cache or precompute (the committed body is final).
+                if entry.file.suffix == ".py" and mode == "cached":
+                    self._stage_cached(
+                        entry,
+                        src_rel,
+                        src_abs,
+                        docs_dir,
+                        rendered_store,
+                        md_basenames=md_basenames,
+                        index_source=index_source,
+                        report=report,
+                        strict=strict,
+                    )
+                    report.pages += 1
+                    continue
+
                 # Notebook entries are the only ones worth caching: marimo
                 # export takes seconds-to-minutes, vs ~10 ms for Markdown.
                 if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs, docs_dir):
@@ -555,7 +610,106 @@ class Preprocessor:
 
         return report
 
+    def render_cached(self, *, check_only: bool = False) -> BuildReport:
+        """Regenerate (and commit) ``_rendered/`` for every ``mode: cached`` page.
+
+        This is what ``marimo-book render`` runs — on the author's machine, with
+        the notebook's real dependencies — so that CI can later build without
+        executing anything. With ``check_only=True`` nothing is written; pages
+        whose committed output is stale/missing land in ``report.warnings`` (for
+        a CI ``--check`` gate).
+        """
+        report = BuildReport()
+        store = RenderedStore(self.book_dir)
+        default_mode = self.book.defaults.mode
+        for entry in _iter_file_entries(self.book.toc):
+            if entry.file.suffix != ".py":
+                continue
+            if entry.effective_mode(default_mode) != "cached":
+                continue
+            src_rel = str(entry.file)
+            src_abs = (self.book_dir / entry.file).resolve()
+            report.pages += 1
+            if check_only:
+                if store.is_fresh(src_rel, src_abs, body_sig=self.body_signature):
+                    report.pages_cached += 1
+                else:
+                    report.warnings.append(
+                        f"{entry.file}: "
+                        f"{store.reason_stale(src_rel, src_abs, body_sig=self.body_signature)}"
+                    )
+                continue
+            try:
+                body = render_py_body(self.book, self.book_dir, entry, sandbox=self.sandbox)
+                store.write(src_rel, src_abs, body, body_sig=self.body_signature)
+                report.pages_rendered += 1
+            except Exception as exc:  # noqa: BLE001
+                report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
+        if not check_only:
+            store.save()
+        return report
+
     # --- internals -----------------------------------------------------------
+
+    def _stage_cached(
+        self,
+        entry: FileEntry,
+        src_rel: str,
+        src_abs: Path,
+        docs_dir: Path,
+        store: RenderedStore,
+        *,
+        md_basenames: set[str],
+        index_source: Path | None,
+        report: BuildReport,
+        strict: bool = False,
+    ) -> None:
+        """Stage a ``mode: cached`` page from the committed ``_rendered/`` body.
+
+        On a fresh committed artifact, no notebook executes. On a stale/missing
+        one: under ``strict`` it is a hard error with no execution (the CI
+        guarantee); otherwise it warns and falls back to a live render so local
+        authoring still works.
+        """
+        if store.is_fresh(src_rel, src_abs, body_sig=self.body_signature):
+            _finalize_page(
+                self.book,
+                self.book_dir,
+                entry,
+                docs_dir,
+                store.read_body(src_rel),
+                apply_rewrites=True,
+                md_basenames=md_basenames,
+                index_source=index_source,
+            )
+            report.pages_cached += 1
+            return
+
+        reason = store.reason_stale(src_rel, src_abs, body_sig=self.body_signature)
+        if strict:
+            # CI / release build: never execute a notebook the author forgot to
+            # render. Fail loudly instead of falling back to a live render.
+            report.errors.append(
+                f"{entry.file}: mode=cached but {reason}; refusing to execute "
+                f"under --strict. Run `marimo-book render` and commit _rendered/."
+            )
+            return
+
+        report.warnings.append(
+            f"{entry.file}: mode=cached but {reason}; "
+            f"rendering fresh (executes). Run `marimo-book render` and commit "
+            f"_rendered/ so CI need not execute."
+        )
+        stage_page(
+            self.book,
+            self.book_dir,
+            entry,
+            docs_dir,
+            md_basenames=md_basenames,
+            sandbox=self.sandbox,
+            index_source=index_source,
+        )
+        report.pages_rendered += 1
 
     def _stage_assets(self, docs_dir: Path, report: BuildReport) -> None:
         for name in _ASSET_DIRS:
@@ -816,14 +970,6 @@ def stage_page(
     if not src_abs.exists():
         raise FileNotFoundError(f"TOC references missing file: {entry.file}")
 
-    rel_under_docs = _doc_relpath_for(entry.file, index_source=index_source)
-    dst = docs_dir / rel_under_docs
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    buttons = render_button_row(
-        book, Path(entry.file), repo_subpath=_book_subpath_in_repo(book_dir)
-    )
-
     mode = entry.effective_mode(book.defaults.mode)
     if src_abs.suffix == ".py":
         # WASM pages always get the staging pipeline (PEP 723 block +
@@ -859,16 +1005,70 @@ def stage_page(
     else:
         raise ValueError(f"Unsupported file type for TOC entry: {entry.file}")
 
-    # Link-rewrites run after both static render paths so in-notebook
-    # prose and hand-authored Markdown get the same treatment. WASM
-    # pages skip rewrites: the body is marimo's own HTML, not our
-    # Markdown — there's nothing for our rewriter to safely touch.
+    return _finalize_page(
+        book,
+        book_dir,
+        entry,
+        docs_dir,
+        body,
+        apply_rewrites=apply_rewrites,
+        md_basenames=md_basenames,
+        index_source=index_source,
+    )
+
+
+def _finalize_page(
+    book: Book,
+    book_dir: Path,
+    entry: FileEntry,
+    docs_dir: Path,
+    body: str,
+    *,
+    apply_rewrites: bool,
+    md_basenames: set[str] | None = None,
+    index_source: Path | None = None,
+) -> Path:
+    """Attach buttons + link-rewrites to a rendered ``body`` and write it.
+
+    Split out of :func:`stage_page` so ``mode: cached`` pages run the exact
+    same finishing pipeline on a body read from ``_rendered/`` as a freshly
+    executed page does. Buttons and link-rewrites are applied here (not baked
+    into the committed artifact) so config/TOC changes never invalidate it.
+
+    Link-rewrites run for both static notebook prose and hand-authored
+    Markdown; WASM bodies pass ``apply_rewrites=False`` because the body is
+    marimo's own HTML, not our Markdown.
+    """
+    rel_under_docs = _doc_relpath_for(entry.file, index_source=index_source)
+    dst = docs_dir / rel_under_docs
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    buttons = render_button_row(
+        book, Path(entry.file), repo_subpath=_book_subpath_in_repo(book_dir)
+    )
     if apply_rewrites:
         body = apply_link_rewrites(body, md_basenames=md_basenames)
-
-    full = _compose_page(buttons, body)
-    dst.write_text(full, encoding="utf-8")
+    dst.write_text(_compose_page(buttons, body), encoding="utf-8")
     return dst
+
+
+def render_py_body(book: Book, book_dir: Path, entry: FileEntry, *, sandbox: bool = False) -> str:
+    """Execute a ``.py`` entry and return its rendered body (pre-finalize).
+
+    This is the expensive, source-dependent output that ``mode: cached``
+    commits to ``_rendered/``. It excludes buttons and link-rewrites so the
+    committed artifact stays stable against config/TOC changes — those are
+    re-applied cheaply at build time by :func:`_finalize_page`.
+    """
+    src_abs = (book_dir / entry.file).resolve()
+    if not src_abs.exists():
+        raise FileNotFoundError(f"TOC references missing file: {entry.file}")
+    with _maybe_stage_with_pep723(
+        src_abs,
+        book.dependencies,
+        enabled=book.dependencies.auto_pep723,
+        wasm_bootstrap=False,
+    ) as staged:
+        return _render_marimo(staged or src_abs, book, sandbox=sandbox)
 
 
 def _render_marimo(src: Path, book: Book, *, sandbox: bool = False) -> str:

@@ -5,6 +5,27 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`mode: cached` — committed, no-execute notebook outputs.** A new per-page
+  (and book-default) render mode for heavy notebooks that shouldn't re-execute on
+  every docs deploy (GPU models, long-running pipelines). The author runs
+  `marimo-book render` once — which executes the `mode: cached` notebooks with
+  their real dependencies and commits the rendered bodies under `_rendered/`
+  (a version-controlled artifact, keyed by source hash **plus** the
+  render-affecting config — `defaults`, `dependencies`, `widget_defaults` — and
+  the marimo-book version) — and a plain CI runner can then `marimo-book build`
+  without executing anything. This is the marimo-book analogue of jupyter-book's
+  `execute: off`. Only the notebook *body* is committed (not buttons/link-rewrites),
+  so changing `launch_buttons`, the repo URL, or the TOC never invalidates the
+  artifact. `marimo-book render --check` exits nonzero when any committed output
+  is stale, for a CI freshness gate. During `build`, a stale/missing artifact
+  warns and falls back to a live render so local authoring still works — but
+  under `--strict` it is a hard error with no execution, so a CI build never
+  silently re-runs a notebook the author forgot to render.
+
 ## [0.1.20] — 2026-06-05
 
 ### Fixed

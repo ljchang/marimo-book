@@ -33,7 +33,9 @@ from pathlib import Path
 
 _DIR_NAME = "_rendered"
 _MANIFEST_NAME = "manifest.json"
-_SCHEMA_VERSION = 1
+# v2 adds ``body_sig`` to each entry (render-affecting config + tool version).
+# Bumping the schema invalidates any v1 manifest wholesale, forcing a re-render.
+_SCHEMA_VERSION = 2
 
 
 def _sha256(path: Path) -> str:
@@ -61,26 +63,38 @@ class RenderedStore:
 
     # --- read side (build) ---------------------------------------------------
 
-    def is_fresh(self, src_rel: str, src_abs: Path) -> bool:
-        """True when a committed body exists and matches the current source."""
+    def is_fresh(self, src_rel: str, src_abs: Path, *, body_sig: str | None = None) -> bool:
+        """True when a committed body exists and matches the current source.
+
+        When ``body_sig`` is given it must also equal the signature stored at
+        render time — a hash of the render-affecting config (``defaults``,
+        ``dependencies``, ``widget_defaults``) plus the marimo-book version. A
+        change there means the committed body would render differently now, so
+        the artifact is stale even though the source bytes are unchanged.
+        ``body_sig=None`` skips that check (source-hash only).
+        """
         entry = self.entries.get(src_rel)
         if entry is None:
             return False
         body_abs = self.root / entry["body_path"]
         if not body_abs.exists():
             return False
+        if body_sig is not None and entry.get("body_sig") != body_sig:
+            return False
         try:
             return _sha256(src_abs) == entry["src_hash"]
         except OSError:
             return False
 
-    def reason_stale(self, src_rel: str, src_abs: Path) -> str:
+    def reason_stale(self, src_rel: str, src_abs: Path, *, body_sig: str | None = None) -> str:
         """Human-readable explanation for a non-fresh entry (for warnings)."""
         entry = self.entries.get(src_rel)
         if entry is None:
             return "no committed output"
         if not (self.root / entry["body_path"]).exists():
             return "committed body file is missing"
+        if body_sig is not None and entry.get("body_sig") != body_sig:
+            return "render configuration or marimo-book version changed since it was last rendered"
         return "source has changed since it was last rendered"
 
     def read_body(self, src_rel: str) -> str:
@@ -90,12 +104,14 @@ class RenderedStore:
 
     # --- write side (`marimo-book render`) -----------------------------------
 
-    def write(self, src_rel: str, src_abs: Path, body: str) -> None:
+    def write(self, src_rel: str, src_abs: Path, body: str, *, body_sig: str | None = None) -> None:
         """Persist a freshly rendered ``body`` and record its source hash.
 
         The body file mirrors the source path with a ``.md`` suffix so the
         committed tree is human-recognizable and collision-free even when the
-        page maps to ``index.md`` in the built site.
+        page maps to ``index.md`` in the built site. ``body_sig`` records the
+        render-affecting config + tool version so a later build can detect a
+        stale artifact even when the source bytes are unchanged.
         """
         body_rel = Path(src_rel).with_suffix(".md").as_posix()
         body_abs = self.root / body_rel
@@ -104,6 +120,7 @@ class RenderedStore:
         self.entries[src_rel] = {
             "src_hash": _sha256(src_abs),
             "body_path": body_rel,
+            "body_sig": body_sig,
             "rendered_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "marimo_book_version": _tool_version(),
         }

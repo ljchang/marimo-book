@@ -271,7 +271,7 @@ def build(
         f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages, "
         f"deps={'sandbox' if pre.sandbox else 'env'})..."
     )
-    report = pre.build(out_dir=site_src, site_dir=site_dir)
+    report = pre.build(out_dir=site_src, site_dir=site_dir, strict=strict)
 
     for warn in report.warnings:
         typer.echo(f"  warning: {warn}", err=True)

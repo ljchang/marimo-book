@@ -94,12 +94,16 @@ def test_store_missing_entry_is_not_fresh(tmp_path: Path) -> None:
 def test_build_cached_fresh_does_not_execute(tmp_path: Path) -> None:
     book = _book_with_cached_nb(tmp_path)
     src_abs = (tmp_path / "content" / "nb.py").resolve()
-    RenderedStore(tmp_path)  # ensure dir machinery works
+    pre = Preprocessor(book, book_dir=tmp_path)
     store = RenderedStore(tmp_path)
-    store.write("content/nb.py", src_abs, "# Cached Body\n\nHello from cache.\n")
+    store.write(
+        "content/nb.py",
+        src_abs,
+        "# Cached Body\n\nHello from cache.\n",
+        body_sig=pre.body_signature,
+    )
     store.save()
 
-    pre = Preprocessor(book, book_dir=tmp_path)
     out_dir = tmp_path / "_site_src"
     # If anything tries to execute a notebook, this blows up the build.
     with patch(
@@ -176,3 +180,74 @@ def test_render_cached_check_only_flags_then_passes(tmp_path: Path) -> None:
     report2 = pre.render_cached(check_only=True)
     assert not report2.warnings
     assert report2.pages_cached == 1
+
+
+# --- freshness key: render-affecting config (not just source) ----------------
+
+
+def test_store_goes_stale_when_body_sig_changes(tmp_path: Path) -> None:
+    src = tmp_path / "nb.py"
+    src.write_text("x")
+    store = RenderedStore(tmp_path)
+    store.write("nb.py", src, "BODY", body_sig="sig-A")
+
+    # Same signature → fresh; different signature → stale, even though the
+    # source bytes are identical.
+    assert store.is_fresh("nb.py", src, body_sig="sig-A")
+    assert not store.is_fresh("nb.py", src, body_sig="sig-B")
+    assert "configuration" in store.reason_stale("nb.py", src, body_sig="sig-B")
+
+
+def test_build_cached_stale_when_render_config_changes(tmp_path: Path) -> None:
+    """A committed body must invalidate when render-affecting config changes."""
+    book = _book_with_cached_nb(tmp_path)
+    src_abs = (tmp_path / "content" / "nb.py").resolve()
+
+    # Commit a body under the default config.
+    pre1 = Preprocessor(book, book_dir=tmp_path)
+    store = RenderedStore(tmp_path)
+    store.write("content/nb.py", src_abs, "# Cached\n\nbody.\n", body_sig=pre1.body_signature)
+    store.save()
+
+    # Build with a DIFFERENT render-affecting config (toggle hide_first_code_cell).
+    book2 = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [
+                {"file": "content/intro.md"},
+                {"file": "content/nb.py", "mode": "cached"},
+            ],
+            "defaults": {"hide_first_code_cell": False},
+        }
+    )
+    pre2 = Preprocessor(book2, book_dir=tmp_path)
+    assert pre2.body_signature != pre1.body_signature
+    out_dir = tmp_path / "_site_src"
+    with patch(
+        "marimo_book.preprocessor._render_marimo",
+        return_value="# Fresh\n\nre-rendered.\n",
+    ) as m:
+        report = pre2.build(out_dir=out_dir, site_dir=tmp_path / "_site")
+
+    assert report.pages_cached == 0
+    assert any("configuration" in w for w in report.warnings)
+    m.assert_called()  # stale → fell back to a live render
+
+
+# --- strict gate: a stale cached page must fail CI, not silently execute -----
+
+
+def test_build_cached_stale_under_strict_errors_without_executing(tmp_path: Path) -> None:
+    book = _book_with_cached_nb(tmp_path)  # nothing committed → stale/missing
+    pre = Preprocessor(book, book_dir=tmp_path)
+    out_dir = tmp_path / "_site_src"
+    with patch(
+        "marimo_book.preprocessor._render_marimo",
+        side_effect=AssertionError("notebook executed under --strict cached build"),
+    ):
+        report = pre.build(out_dir=out_dir, site_dir=tmp_path / "_site", strict=True)
+
+    assert not report.ok
+    assert any("refusing to execute under --strict" in e for e in report.errors)
+    assert report.pages_cached == 0
+    assert report.pages_rendered == 1  # only the markdown index rendered

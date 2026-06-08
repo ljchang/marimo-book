@@ -246,6 +246,28 @@ def _book_signature(book: Book) -> str:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _render_body_signature(book: Book) -> str:
+    """Hash the fields that change a notebook's *rendered body*.
+
+    Narrower than :func:`_book_signature`: the committed ``_rendered/`` body is
+    pre-button and pre-link-rewrite, so it does NOT depend on ``launch_buttons``
+    / ``repo`` / ``branch`` / the TOC. It DOES depend on ``defaults``
+    (e.g. ``hide_first_code_cell``, ``suppress_warnings``), ``dependencies``
+    (which mutate the executed source), ``widget_defaults`` (anywidget seed
+    state), and the marimo-book version (export output can change across
+    releases). Stored with each ``RenderedStore`` entry so a build can tell a
+    committed body is stale even when the source bytes are unchanged.
+    """
+    relevant: dict = {
+        "defaults": book.defaults.model_dump(mode="json"),
+        "dependencies": book.dependencies.model_dump(mode="json"),
+        "widget_defaults": book.widget_defaults,
+        "marimo_book_version": _resolve_tool_version(),
+    }
+    payload = json.dumps(relevant, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _splice_precomputed_body(original_page: str, result) -> str:
     """Replace the staged page's body with the precomputed version.
 
@@ -427,6 +449,10 @@ class Preprocessor:
         # When True, every TOC entry is re-rendered regardless of cache state.
         # The cache is still updated so future builds without --rebuild benefit.
         self.rebuild = rebuild
+        # Signature of render-affecting config + tool version, stored with each
+        # committed ``_rendered/`` body so a stale artifact is detected even
+        # when the notebook source bytes are unchanged.
+        self.body_signature = _render_body_signature(book)
 
     @property
     def sandbox(self) -> bool:
@@ -437,11 +463,19 @@ class Preprocessor:
 
     # --- public API ----------------------------------------------------------
 
-    def build(self, *, out_dir: Path, site_dir: Path | None = None) -> BuildReport:
+    def build(
+        self, *, out_dir: Path, site_dir: Path | None = None, strict: bool = False
+    ) -> BuildReport:
         """Stage ``docs/`` and emit ``mkdocs.yml`` under ``out_dir``.
 
         ``site_dir`` is where ``mkdocs build`` will later emit the finished
         HTML. It defaults to a sibling of ``out_dir`` called ``_site``.
+
+        With ``strict=True`` a stale or missing ``mode: cached`` artifact is a
+        hard error (``report.errors``) with no live-render fallback — so a CI
+        build never silently re-executes a notebook the author forgot to
+        ``marimo-book render``. Without it, the stale path warns and falls back
+        to a live render so local authoring still works.
         """
         out_dir = Path(out_dir).resolve()
         docs_dir = out_dir / "docs"
@@ -504,6 +538,7 @@ class Preprocessor:
                         md_basenames=md_basenames,
                         index_source=index_source,
                         report=report,
+                        strict=strict,
                     )
                     report.pages += 1
                     continue
@@ -596,14 +631,17 @@ class Preprocessor:
             src_abs = (self.book_dir / entry.file).resolve()
             report.pages += 1
             if check_only:
-                if store.is_fresh(src_rel, src_abs):
+                if store.is_fresh(src_rel, src_abs, body_sig=self.body_signature):
                     report.pages_cached += 1
                 else:
-                    report.warnings.append(f"{entry.file}: {store.reason_stale(src_rel, src_abs)}")
+                    report.warnings.append(
+                        f"{entry.file}: "
+                        f"{store.reason_stale(src_rel, src_abs, body_sig=self.body_signature)}"
+                    )
                 continue
             try:
                 body = render_py_body(self.book, self.book_dir, entry, sandbox=self.sandbox)
-                store.write(src_rel, src_abs, body)
+                store.write(src_rel, src_abs, body, body_sig=self.body_signature)
                 report.pages_rendered += 1
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
@@ -624,15 +662,16 @@ class Preprocessor:
         md_basenames: set[str],
         index_source: Path | None,
         report: BuildReport,
+        strict: bool = False,
     ) -> None:
         """Stage a ``mode: cached`` page from the committed ``_rendered/`` body.
 
         On a fresh committed artifact, no notebook executes. On a stale/missing
-        one, warn and fall back to a live render so local authoring still works;
-        on CI (no deps) that fallback fails loudly — the intended signal that
-        the author forgot to ``marimo-book render`` and commit.
+        one: under ``strict`` it is a hard error with no execution (the CI
+        guarantee); otherwise it warns and falls back to a live render so local
+        authoring still works.
         """
-        if store.is_fresh(src_rel, src_abs):
+        if store.is_fresh(src_rel, src_abs, body_sig=self.body_signature):
             _finalize_page(
                 self.book,
                 self.book_dir,
@@ -646,8 +685,18 @@ class Preprocessor:
             report.pages_cached += 1
             return
 
+        reason = store.reason_stale(src_rel, src_abs, body_sig=self.body_signature)
+        if strict:
+            # CI / release build: never execute a notebook the author forgot to
+            # render. Fail loudly instead of falling back to a live render.
+            report.errors.append(
+                f"{entry.file}: mode=cached but {reason}; refusing to execute "
+                f"under --strict. Run `marimo-book render` and commit _rendered/."
+            )
+            return
+
         report.warnings.append(
-            f"{entry.file}: mode=cached but {store.reason_stale(src_rel, src_abs)}; "
+            f"{entry.file}: mode=cached but {reason}; "
             f"rendering fresh (executes). Run `marimo-book render` and commit "
             f"_rendered/ so CI need not execute."
         )

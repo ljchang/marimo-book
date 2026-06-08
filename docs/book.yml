@@ -80,6 +80,7 @@ toc:
       - file: content/widgets.py
       - file: content/dependencies.md
       - file: content/api-reference-guide.md
+      - file: content/blog-guide.md
 
   - section: Publishing
     children:

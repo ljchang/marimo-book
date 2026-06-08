@@ -85,8 +85,7 @@ def _build_config(
     # linking back to the project site. Material renders HTML in `copyright`
     # and shows it next to its own "Made with Material for MkDocs" notice.
     _attribution = (
-        'Made with <a href="https://marimobook.org" target="_blank" '
-        'rel="noopener">Marimo-Book</a>'
+        'Made with <a href="https://marimobook.org" target="_blank" rel="noopener">Marimo-Book</a>'
     )
     cfg["copyright"] = f"{book.copyright} · {_attribution}" if book.copyright else _attribution
 

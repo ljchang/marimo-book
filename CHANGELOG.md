@@ -5,6 +5,23 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Nested API package nav alignment (for real this time).** 0.1.22's fix was
+  ineffective — its selector had lower specificity than the leaf-indent rule,
+  so a collapsible package label (e.g. `feat.utils`) still rendered indented
+  *further* than its own children. The override now outspecifies the leaf rule.
+- **Links no longer disappear when clicked.** Footer and content links lacked
+  explicit `focus`/`active`/`visited` colors, so a clicked link could render
+  with a near-invisible color. All interactive states are now pinned visible.
+
+### Changed
+
+- Drop Material's "Made with Material for MkDocs" footer notice
+  (`extra.generator: false`); the "Made with Marimo-Book" credit remains.
+
 ## [0.1.22] — 2026-06-08
 
 ### Added

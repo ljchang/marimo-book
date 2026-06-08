@@ -110,8 +110,10 @@
 /* A collapsible item (e.g. an API package like `feat.utils`) wraps its link in
    a `.md-nav__container` that already carries the leaf indent; the inner link
    must not add it again, or the parent label ends up indented *further* than
-   its own nested children. Zero the inner padding so the container's wins. */
-.md-nav--primary .md-nav__container > .md-nav__link {
+   its own nested children. Zero the inner padding so only the container's
+   indent applies. The selector mirrors the leaf-indent rule above plus
+   `.md-nav__container` (6 classes) so it outspecifies it and actually wins. */
+.md-nav--primary .md-nav__item--section .md-nav__list .md-nav__item .md-nav__container > .md-nav__link {
   padding-left: 0;
 }
 
@@ -207,9 +209,25 @@
   text-decoration-color: var(--md-default-fg-color--lighter);
   transition: color 0.12s, text-decoration-color 0.12s;
 }
-.md-typeset a:not(.md-button):not(.headerlink):hover {
+.md-typeset a:not(.md-button):not(.headerlink):hover,
+.md-typeset a:not(.md-button):not(.headerlink):focus,
+.md-typeset a:not(.md-button):not(.headerlink):active {
   color: var(--md-primary-fg-color);
   text-decoration-color: var(--md-primary-fg-color);
+}
+/* Pin every interactive state to a visible color. Without explicit
+   focus/active/visited rules a *clicked* link could briefly render with an
+   unset/near-invisible color (Material's base accent handling), so the text
+   vanished on click. */
+.md-typeset a:not(.md-button):not(.headerlink):visited {
+  color: var(--md-default-fg-color);
+}
+.md-footer-meta.md-typeset a:focus,
+.md-footer-meta.md-typeset a:visited {
+  color: var(--md-default-fg-color--light);
+}
+.md-footer-meta.md-typeset a:active {
+  color: var(--md-primary-fg-color);
 }
 
 /* --- Code: sharp corners, hairline border (not chunky) ------------------- */

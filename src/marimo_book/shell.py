@@ -88,6 +88,9 @@ def _build_config(
         'Made with <a href="https://marimobook.org" target="_blank" rel="noopener">Marimo-Book</a>'
     )
     cfg["copyright"] = f"{book.copyright} · {_attribution}" if book.copyright else _attribution
+    # Drop Material's "Made with Material for MkDocs" footer notice — the
+    # Marimo-Book credit in `copyright` above is the attribution we keep.
+    cfg.setdefault("extra", {})["generator"] = False
 
     cfg["theme"] = _theme_block(book)
     base_css = ["stylesheets/extra.css"]

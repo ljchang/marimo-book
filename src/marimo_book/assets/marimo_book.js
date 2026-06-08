@@ -681,7 +681,14 @@
         }
         const layout = figure.layout || {};
         const responsive = { responsive: true, displaylogo: false, ...config };
-        Plotly.newPlot(mount, figure.data || [], layout, responsive);
+        // Register animation frames after the initial plot — without this the
+        // serialized `figure.frames` are dropped, so play/pause buttons and the
+        // slider have nothing to animate (the figure renders only frame 0).
+        Plotly.newPlot(mount, figure.data || [], layout, responsive).then(() => {
+          if (Array.isArray(figure.frames) && figure.frames.length) {
+            Plotly.addFrames(mount, figure.frames);
+          }
+        });
       });
     }).catch((e) => console.warn("marimo-book: plotly hydration failed", e));
   }

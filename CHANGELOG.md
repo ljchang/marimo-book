@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Plotly **animations now play** in the rendered site. The hydration shim
+  called `Plotly.newPlot(mount, data, layout)` but never registered the
+  figure's `frames`, so animations rendered only frame 0 and the play/pause
+  and slider controls did nothing. Frames are now applied via
+  `Plotly.addFrames` after the initial plot.
 - Layout no longer hugs the window edge. The content grid (`max-width: 68rem`)
   only centers above ~1360px, so between the sidebar-dock breakpoint (~1220px)
   and 1360px the sidebar and table-of-contents sat flush against the viewport.

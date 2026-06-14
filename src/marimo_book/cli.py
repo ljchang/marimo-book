@@ -671,9 +671,7 @@ def sync_releases(
         raise typer.Exit(code=1)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(markdown, encoding="utf-8")
-    typer.secho(
-        f"Wrote {len(releases)} release(s) to {cfg.output}", fg=typer.colors.GREEN
-    )
+    typer.secho(f"Wrote {len(releases)} release(s) to {cfg.output}", fg=typer.colors.GREEN)
 
 
 @app.command("clean")

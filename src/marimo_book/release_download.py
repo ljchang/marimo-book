@@ -63,16 +63,12 @@ def normalize_repo(repo: str) -> str:
         parsed = urlparse(repo if "://" in repo else f"https://{repo}")
         host = parsed.netloc.lower()
         if host not in ("github.com", "www.github.com"):
-            raise ValueError(
-                f"release_download: only github.com URLs are supported, got {repo!r}"
-            )
+            raise ValueError(f"release_download: only github.com URLs are supported, got {repo!r}")
         parts = [p for p in parsed.path.split("/") if p]
     else:
         parts = [p for p in repo.split("/") if p]
         if any(":" in p for p in parts):  # a scheme leaked into the shorthand
-            raise ValueError(
-                f"release_download: could not parse owner/repo from {repo!r}"
-            )
+            raise ValueError(f"release_download: could not parse owner/repo from {repo!r}")
     if len(parts) < 2:
         raise ValueError(
             f"release_download: could not parse owner/repo from {repo!r} "
@@ -131,9 +127,7 @@ def release_download(
     importable; otherwise returns the raw HTML string (still usable inside
     ``mo.Html(...)`` or a Markdown raw-HTML block).
     """
-    markup = render_release_download_html(
-        repo, platforms=platforms, app_name=app_name
-    )
+    markup = render_release_download_html(repo, platforms=platforms, app_name=app_name)
     try:
         import marimo as mo
     except ImportError:

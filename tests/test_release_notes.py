@@ -186,9 +186,7 @@ def test_fetch_releases_paginates_and_filters(monkeypatch):
     page1[0]["draft"] = True  # dropped
     page1[1]["prerelease"] = True  # kept by default, dropped when excluded
     page2 = [{"tag_name": "v100", "draft": False, "prerelease": False}]
-    monkeypatch.setattr(
-        rn.urllib.request, "urlopen", _fake_urlopen_factory([page1, page2])
-    )
+    monkeypatch.setattr(rn.urllib.request, "urlopen", _fake_urlopen_factory([page1, page2]))
 
     all_rel = rn.fetch_releases("o/r")
     # 100 on page 1 minus 1 draft = 99, plus 1 on page 2 = 100.
@@ -201,9 +199,7 @@ def test_fetch_releases_paginates_and_filters(monkeypatch):
 
 def test_fetch_releases_limit_stops_early(monkeypatch):
     page1 = [{"tag_name": f"v{i}", "draft": False, "prerelease": False} for i in range(100)]
-    monkeypatch.setattr(
-        rn.urllib.request, "urlopen", _fake_urlopen_factory([page1, []])
-    )
+    monkeypatch.setattr(rn.urllib.request, "urlopen", _fake_urlopen_factory([page1, []]))
     assert len(rn.fetch_releases("o/r", limit=5)) == 5
 
 

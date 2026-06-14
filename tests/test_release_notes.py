@@ -150,6 +150,71 @@ def test_sync_releases_requires_block(runner, tmp_path):
     assert "release_notes" in result.output
 
 
+# --- fetch_releases (pagination + filtering, urlopen monkeypatched) ----------
+
+
+class _FakeResp:
+    def __init__(self, payload: str):
+        self._payload = payload.encode("utf-8")
+
+    def read(self):
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _fake_urlopen_factory(pages):
+    """Return a urlopen stub that serves successive JSON pages by ?page=N."""
+    import json as _json
+
+    def _open(req, timeout=None):
+        # req is a urllib Request; pull the page number from the URL.
+        url = req.full_url
+        page = int(url.split("&page=")[1]) if "&page=" in url else 1
+        body = pages[page - 1] if page - 1 < len(pages) else []
+        return _FakeResp(_json.dumps(body))
+
+    return _open
+
+
+def test_fetch_releases_paginates_and_filters(monkeypatch):
+    page1 = [{"tag_name": f"v{i}", "draft": False, "prerelease": False} for i in range(100)]
+    page1[0]["draft"] = True  # dropped
+    page1[1]["prerelease"] = True  # kept by default, dropped when excluded
+    page2 = [{"tag_name": "v100", "draft": False, "prerelease": False}]
+    monkeypatch.setattr(
+        rn.urllib.request, "urlopen", _fake_urlopen_factory([page1, page2])
+    )
+
+    all_rel = rn.fetch_releases("o/r")
+    # 100 on page 1 minus 1 draft = 99, plus 1 on page 2 = 100.
+    assert len(all_rel) == 100
+    assert all(not r["draft"] for r in all_rel)
+
+    no_pre = rn.fetch_releases("o/r", include_prereleases=False)
+    assert len(no_pre) == 99  # the one prerelease also dropped
+
+
+def test_fetch_releases_limit_stops_early(monkeypatch):
+    page1 = [{"tag_name": f"v{i}", "draft": False, "prerelease": False} for i in range(100)]
+    monkeypatch.setattr(
+        rn.urllib.request, "urlopen", _fake_urlopen_factory([page1, []])
+    )
+    assert len(rn.fetch_releases("o/r", limit=5)) == 5
+
+
+def test_fetch_releases_rejects_non_list(monkeypatch):
+    monkeypatch.setattr(
+        rn.urllib.request, "urlopen", lambda req, timeout=None: _FakeResp('{"message":"boom"}')
+    )
+    with pytest.raises(ValueError):
+        rn.fetch_releases("o/r")
+
+
 def test_sync_releases_falls_back_to_book_repo(runner, tmp_path, monkeypatch):
     import yaml
 

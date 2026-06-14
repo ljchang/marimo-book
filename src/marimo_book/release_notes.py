@@ -56,6 +56,11 @@ def fetch_releases(
         req = urllib.request.Request(url, headers=headers)  # noqa: S310 (https only)
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             batch = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(batch, list):
+            raise ValueError(
+                f"unexpected GitHub API response for {owner_repo} "
+                f"(expected a list of releases, got {type(batch).__name__})"
+            )
         if not batch:
             break
         for rel in batch:
@@ -101,7 +106,9 @@ def render_changelog_markdown(
         html_url = rel.get("html_url") or f"https://github.com/{owner_repo}/releases"
         prerelease = rel.get("prerelease", False)
 
-        heading = name
+        # Collapse any whitespace/newlines so a multi-line release name can't
+        # break the heading into a heading + stray body line.
+        heading = " ".join(str(name).split()) or "(untitled release)"
         lines.append(f"## {heading}")
         lines.append("")
         meta = []

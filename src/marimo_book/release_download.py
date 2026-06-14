@@ -51,16 +51,28 @@ DEFAULT_PLATFORMS: list[dict[str, str]] = [
 def normalize_repo(repo: str) -> str:
     """Return ``owner/name`` from either that shorthand or a GitHub URL.
 
-    Accepts ``"owner/name"``, ``"https://github.com/owner/name"``,
-    ``"github.com/owner/name(.git)"``. Raises ``ValueError`` on anything
-    that doesn't yield exactly two path segments.
+    Accepts ``"owner/name"``, ``"https://github.com/owner/name"`` (any case),
+    ``"github.com/owner/name(.git)"``. Raises ``ValueError`` on a non-github
+    host, an embedded scheme, or anything that doesn't yield two path
+    segments — so a typo fails loudly at config time rather than silently
+    producing a wrong API URL.
     """
     repo = repo.strip()
-    if "github.com" in repo:
-        parsed = urlparse(repo if "//" in repo else f"https://{repo}")
+    is_url = "://" in repo or repo.lower().startswith("github.com/")
+    if is_url:
+        parsed = urlparse(repo if "://" in repo else f"https://{repo}")
+        host = parsed.netloc.lower()
+        if host not in ("github.com", "www.github.com"):
+            raise ValueError(
+                f"release_download: only github.com URLs are supported, got {repo!r}"
+            )
         parts = [p for p in parsed.path.split("/") if p]
     else:
         parts = [p for p in repo.split("/") if p]
+        if any(":" in p for p in parts):  # a scheme leaked into the shorthand
+            raise ValueError(
+                f"release_download: could not parse owner/repo from {repo!r}"
+            )
     if len(parts) < 2:
         raise ValueError(
             f"release_download: could not parse owner/repo from {repo!r} "
@@ -87,8 +99,8 @@ def render_release_download_html(
     plats = platforms if platforms is not None else DEFAULT_PLATFORMS
 
     # JSON lives in a single-quoted attribute; html-escape so embedded
-    # double quotes / ampersands survive. The browser un-escapes on
-    # ``dataset`` read, handing the JS clean JSON.
+    # double quotes / ampersands survive. The browser un-escapes when the
+    # hydrator reads the attribute, handing the JS clean JSON.
     platforms_attr = html.escape(json.dumps(plats), quote=True)
     repo_attr = html.escape(owner_repo, quote=True)
     name_attr = html.escape(label, quote=True)

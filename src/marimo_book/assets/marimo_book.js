@@ -723,16 +723,25 @@
     return ext.toUpperCase();
   }
 
-  function rdGetCached(repo) {
+  // Raw read, ignoring TTL. The TTL only decides whether to *revalidate*
+  // (send If-None-Match) — a 304 means our stored payload is still current,
+  // so the 304 path reads it raw rather than re-erroring as "expired".
+  function rdReadRaw(repo) {
     try {
       const raw = sessionStorage.getItem("mb-rd-" + repo);
       if (!raw) return null;
-      const { data, ts } = JSON.parse(raw);
-      if (Date.now() - ts > RD_CACHE_TTL_MS) return null;
-      return data;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj.ts !== "number") return null;
+      return obj;
     } catch (_e) {
       return null;
     }
+  }
+
+  function rdGetCached(repo) {
+    const obj = rdReadRaw(repo);
+    if (!obj) return null;
+    return Date.now() - obj.ts > RD_CACHE_TTL_MS ? null : obj.data;
   }
 
   function rdSetCached(repo, data) {
@@ -743,6 +752,29 @@
       );
     } catch (_e) {
       /* storage full / unavailable — non-fatal */
+    }
+  }
+
+  // Short-lived negative cache: after a failed fetch (offline, rate-limited,
+  // private repo) don't re-hit the API on every instant-nav / reload for a
+  // while — just show the fallback. Unauthenticated GitHub allows only
+  // 60 req/hr/IP, so a docs site without this could lock itself out.
+  const RD_NEG_TTL_MS = 10 * 60 * 1000;
+
+  function rdNegativeCached(repo) {
+    try {
+      const ts = parseInt(sessionStorage.getItem("mb-rd-neg-" + repo) || "", 10);
+      return !isNaN(ts) && Date.now() - ts < RD_NEG_TTL_MS;
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function rdSetNegative(repo) {
+    try {
+      sessionStorage.setItem("mb-rd-neg-" + repo, String(Date.now()));
+    } catch (_e) {
+      /* non-fatal */
     }
   }
 
@@ -810,6 +842,13 @@
     }
     const detected = rdDetectPlatform();
     const single = release.assets.length === 1;
+    // UA can't reliably distinguish Apple Silicon from Intel, so when a
+    // release ships BOTH mac builds we can't honestly recommend one — show
+    // neither as "recommended" rather than steering Intel users to arm64.
+    const macCount = release.assets.filter(
+      (a) => a.key === "mac-arm" || a.key === "mac-intel"
+    ).length;
+    const macAmbiguous = detected === "mac-arm" && macCount > 1;
 
     rdClear(el);
 
@@ -829,7 +868,7 @@
         (single ? " marimo-book-release-download__grid--single" : "")
     );
     release.assets.forEach((a) => {
-      const recommended = a.key === detected && !single;
+      const recommended = a.key === detected && !single && !macAmbiguous;
       const card = rdEl(
         "a",
         "marimo-book-release-card" +
@@ -876,6 +915,10 @@
         rdRender(el, cached, appName);
         return;
       }
+      if (rdNegativeCached(repo)) {
+        rdRenderFallback(el, repo, appName);
+        return;
+      }
 
       const api = "https://api.github.com/repos/" + repo + "/releases/latest";
       const headers = { Accept: "application/vnd.github+json" };
@@ -890,12 +933,14 @@
       fetch(api, { headers })
         .then((res) => {
           if (res.status === 304) {
-            const c = rdGetCached(repo);
-            if (c) {
-              rdSetCached(repo, c); // refresh TTL
-              return c;
+            // Our stored payload is still current — read it RAW (ignoring
+            // the TTL that triggered this revalidation) and refresh the TTL.
+            const raw = rdReadRaw(repo);
+            if (raw) {
+              rdSetCached(repo, raw.data);
+              return raw.data;
             }
-            throw new Error("304 with empty cache");
+            throw new Error("304 without a cached payload");
           }
           if (!res.ok) throw new Error("HTTP " + res.status);
           const tag = res.headers.get("ETag");
@@ -913,7 +958,10 @@
           });
         })
         .then((data) => rdRender(el, data, appName))
-        .catch(() => rdRenderFallback(el, repo, appName));
+        .catch(() => {
+          rdSetNegative(repo);
+          rdRenderFallback(el, repo, appName);
+        });
     });
   }
 

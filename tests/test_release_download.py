@@ -26,15 +26,25 @@ ASSETS = Path(__file__).resolve().parents[1] / "src" / "marimo_book" / "assets"
         ("https://github.com/cosanlab/pyfeat-live.git", "cosanlab/pyfeat-live"),
         ("github.com/cosanlab/pyfeat-live", "cosanlab/pyfeat-live"),
         ("https://github.com/cosanlab/pyfeat-live/releases", "cosanlab/pyfeat-live"),
+        # uppercase scheme/host must still resolve, not silently mangle
+        ("HTTPS://GitHub.com/cosanlab/pyfeat-live", "cosanlab/pyfeat-live"),
     ],
 )
 def test_normalize_repo(value, expected):
     assert normalize_repo(value) == expected
 
 
-def test_normalize_repo_rejects_garbage():
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "not-a-repo",  # single segment
+        "https://example.com/owner/name",  # non-github host
+        "https://gitlab.com/owner/name",  # non-github host
+    ],
+)
+def test_normalize_repo_rejects(bad):
     with pytest.raises(ValueError):
-        normalize_repo("not-a-repo")
+        normalize_repo(bad)
 
 
 # --- HTML builder ------------------------------------------------------------

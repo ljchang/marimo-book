@@ -82,6 +82,7 @@ toc:
       - file: content/api-reference-guide.md
       - file: content/blog-guide.md
       - file: content/cached-mode-guide.md
+      - file: content/release-download-guide.md
 
   - section: Publishing
     children:

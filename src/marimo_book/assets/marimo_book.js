@@ -693,12 +693,285 @@
     }).catch((e) => console.warn("marimo-book: plotly hydration failed", e));
   }
 
+  // --- Release-download component ------------------------------------------
+  //
+  // Placeholders `<div data-mb-release-download data-repo data-app-name
+  // data-platforms>` are hydrated client-side: fetch the repo's latest
+  // GitHub release, match assets to platforms, render OS-aware download
+  // cards. Build stays hermetic; data is always current. Falls back to a
+  // plain releases link on any error (network, rate-limit, private repo).
+  const RD_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+  function rdDetectPlatform() {
+    if (typeof navigator === "undefined") return "unknown";
+    const ua = navigator.userAgent;
+    if (/Mac/.test(ua)) return "mac-arm"; // default Apple Silicon
+    if (/Win/.test(ua)) return "windows";
+    if (/Linux/.test(ua) && !/Android/.test(ua)) return "linux";
+    return "unknown";
+  }
+
+  function rdFormatSize(bytes) {
+    if (!bytes) return "";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function rdExtension(name) {
+    if (/\.AppImage$/i.test(name)) return "APPIMAGE";
+    if (/\.tar\.gz$/i.test(name)) return "TAR.GZ";
+    const ext = name.split(".").pop() || "";
+    return ext.toUpperCase();
+  }
+
+  // Raw read, ignoring TTL. The TTL only decides whether to *revalidate*
+  // (send If-None-Match) — a 304 means our stored payload is still current,
+  // so the 304 path reads it raw rather than re-erroring as "expired".
+  function rdReadRaw(repo) {
+    try {
+      const raw = sessionStorage.getItem("mb-rd-" + repo);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj.ts !== "number") return null;
+      return obj;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  function rdGetCached(repo) {
+    const obj = rdReadRaw(repo);
+    if (!obj) return null;
+    return Date.now() - obj.ts > RD_CACHE_TTL_MS ? null : obj.data;
+  }
+
+  function rdSetCached(repo, data) {
+    try {
+      sessionStorage.setItem(
+        "mb-rd-" + repo,
+        JSON.stringify({ data, ts: Date.now() })
+      );
+    } catch (_e) {
+      /* storage full / unavailable — non-fatal */
+    }
+  }
+
+  // Short-lived negative cache: after a failed fetch (offline, rate-limited,
+  // private repo) don't re-hit the API on every instant-nav / reload for a
+  // while — just show the fallback. Unauthenticated GitHub allows only
+  // 60 req/hr/IP, so a docs site without this could lock itself out.
+  const RD_NEG_TTL_MS = 10 * 60 * 1000;
+
+  function rdNegativeCached(repo) {
+    try {
+      const ts = parseInt(sessionStorage.getItem("mb-rd-neg-" + repo) || "", 10);
+      return !isNaN(ts) && Date.now() - ts < RD_NEG_TTL_MS;
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function rdSetNegative(repo) {
+    try {
+      sessionStorage.setItem("mb-rd-neg-" + repo, String(Date.now()));
+    } catch (_e) {
+      /* non-fatal */
+    }
+  }
+
+  function rdMatchAssets(json, platforms) {
+    const assets = Array.isArray(json.assets) ? json.assets : [];
+    const out = [];
+    platforms.forEach((p) => {
+      const needle = (p.match || "").toLowerCase();
+      const hit = assets.find(
+        (a) => a.name && a.name.toLowerCase().includes(needle)
+      );
+      if (hit) {
+        out.push({
+          key: p.key || p.label,
+          label: p.label,
+          url: hit.browser_download_url,
+          name: hit.name,
+          size: hit.size,
+        });
+      }
+    });
+    return { version: json.tag_name, assets: out };
+  }
+
+  // Build elements via the DOM (textContent, not innerHTML) so externally-
+  // influenced strings (release tag names, asset filenames from the GitHub
+  // API) can never inject markup. hrefs are scheme-guarded to http(s).
+  function rdEl(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  function rdSafeHref(url) {
+    try {
+      const u = new URL(url, window.location.href);
+      return u.protocol === "https:" || u.protocol === "http:" ? u.href : "#";
+    } catch (_e) {
+      return "#";
+    }
+  }
+
+  function rdClear(el) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+  }
+
+  function rdRenderFallback(el, repo, appName) {
+    rdClear(el);
+    const a = rdEl(
+      "a",
+      "marimo-book-release-download__fallback",
+      "Download the latest " + (appName || "release") + " on GitHub"
+    );
+    a.href = rdSafeHref("https://github.com/" + repo + "/releases/latest");
+    a.target = "_blank";
+    a.rel = "noopener";
+    el.appendChild(a);
+  }
+
+  function rdRender(el, release, appName) {
+    if (!release || !release.assets || release.assets.length === 0) {
+      rdRenderFallback(el, el.getAttribute("data-repo"), appName);
+      return;
+    }
+    const detected = rdDetectPlatform();
+    const single = release.assets.length === 1;
+    // UA can't reliably distinguish Apple Silicon from Intel, so when a
+    // release ships BOTH mac builds we can't honestly recommend one — show
+    // neither as "recommended" rather than steering Intel users to arm64.
+    const macCount = release.assets.filter(
+      (a) => a.key === "mac-arm" || a.key === "mac-intel"
+    ).length;
+    const macAmbiguous = detected === "mac-arm" && macCount > 1;
+
+    rdClear(el);
+
+    const head = rdEl("div", "marimo-book-release-download__head");
+    head.appendChild(
+      rdEl(
+        "span",
+        "marimo-book-release-download__version",
+        "Latest: " + (release.version || "")
+      )
+    );
+    el.appendChild(head);
+
+    const grid = rdEl(
+      "div",
+      "marimo-book-release-download__grid" +
+        (single ? " marimo-book-release-download__grid--single" : "")
+    );
+    release.assets.forEach((a) => {
+      const recommended = a.key === detected && !single && !macAmbiguous;
+      const card = rdEl(
+        "a",
+        "marimo-book-release-card" +
+          (recommended ? " marimo-book-release-card--recommended" : "")
+      );
+      card.href = rdSafeHref(a.url);
+      card.setAttribute(
+        "aria-label",
+        "Download " + (appName || "") + " for " + a.label
+      );
+      if (recommended) {
+        card.appendChild(
+          rdEl("span", "marimo-book-release-card__rec", "Recommended for you")
+        );
+      }
+      card.appendChild(rdEl("span", "marimo-book-release-card__plat", a.label));
+      const meta = rdExtension(a.name) + (a.size ? " · " + rdFormatSize(a.size) : "");
+      card.appendChild(rdEl("span", "marimo-book-release-card__meta", meta));
+      grid.appendChild(card);
+    });
+    el.appendChild(grid);
+  }
+
+  function hydrateReleaseDownloads(scope) {
+    const mounts = scope.querySelectorAll(
+      "[data-mb-release-download]:not([data-mb-rd-init])"
+    );
+    mounts.forEach((el) => {
+      el.setAttribute("data-mb-rd-init", "");
+      const repo = el.getAttribute("data-repo");
+      const appName = el.getAttribute("data-app-name") || "";
+      if (!repo) {
+        return;
+      }
+      let platforms = [];
+      try {
+        platforms = JSON.parse(el.getAttribute("data-platforms") || "[]");
+      } catch (_e) {
+        platforms = [];
+      }
+
+      const cached = rdGetCached(repo);
+      if (cached) {
+        rdRender(el, cached, appName);
+        return;
+      }
+      if (rdNegativeCached(repo)) {
+        rdRenderFallback(el, repo, appName);
+        return;
+      }
+
+      const api = "https://api.github.com/repos/" + repo + "/releases/latest";
+      const headers = { Accept: "application/vnd.github+json" };
+      let etag = null;
+      try {
+        etag = sessionStorage.getItem("mb-rd-etag-" + repo);
+      } catch (_e) {
+        /* no storage */
+      }
+      if (etag) headers["If-None-Match"] = etag;
+
+      fetch(api, { headers })
+        .then((res) => {
+          if (res.status === 304) {
+            // Our stored payload is still current — read it RAW (ignoring
+            // the TTL that triggered this revalidation) and refresh the TTL.
+            const raw = rdReadRaw(repo);
+            if (raw) {
+              rdSetCached(repo, raw.data);
+              return raw.data;
+            }
+            throw new Error("304 without a cached payload");
+          }
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const tag = res.headers.get("ETag");
+          if (tag) {
+            try {
+              sessionStorage.setItem("mb-rd-etag-" + repo, tag);
+            } catch (_e) {
+              /* no storage */
+            }
+          }
+          return res.json().then((json) => {
+            const data = rdMatchAssets(json, platforms);
+            rdSetCached(repo, data);
+            return data;
+          });
+        })
+        .then((data) => rdRender(el, data, appName))
+        .catch(() => {
+          rdSetNegative(repo);
+          rdRenderFallback(el, repo, appName);
+        });
+    });
+  }
+
   function bootAll(root) {
     const scope = root || document;
     hydrateAll(scope);
     initPrecomputeOnce(scope);
     mountHeaderButtons(scope);
     hydratePlotly(scope);
+    hydrateReleaseDownloads(scope);
     installAnywidgetRuntimeIntercept(document);
   }
 

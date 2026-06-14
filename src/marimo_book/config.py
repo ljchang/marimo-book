@@ -201,6 +201,30 @@ class ApiDocs(BaseModel):
         return self
 
 
+class ReleaseNotes(BaseModel):
+    """Opt-in changelog page generated from a repo's GitHub Releases.
+
+    ``marimo-book sync-releases`` fetches the releases of ``repo`` (defaults
+    to the book's own ``repo``) and writes a Markdown changelog to ``output``
+    (relative to the book root). Add ``output`` to your ``toc`` once; the
+    command rewrites its contents. This is a *generate-then-build* step (like
+    ``sync-deps``) so the regular ``build`` makes no network calls — run it in
+    CI, e.g. on a ``repository_dispatch`` from the app repo's release workflow.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # ``owner/name`` or a github.com URL. ``None`` → use the book's ``repo``.
+    repo: str | None = None
+    # Markdown file to (over)write, relative to the book root. Add it to the TOC.
+    output: Path = Path("changelog.md")
+    title: str = "Changelog"
+    # Cap the number of releases rendered (newest first). ``None`` → all.
+    limit: int | None = Field(default=None, ge=1)
+    # Include prereleases. Drafts are always excluded.
+    include_prereleases: bool = True
+
+
 class Dependencies(BaseModel):
     """How notebooks get their Python dependencies at build time.
 
@@ -476,6 +500,10 @@ class Book(BaseModel):
     # Opt-in auto-generated Python API reference. See the :class:`ApiDocs`
     # docstring. Requires: ``pip install 'marimo-book[api]'``.
     api_docs: ApiDocs = Field(default_factory=ApiDocs)
+
+    # Opt-in changelog generated from a repo's GitHub Releases via
+    # ``marimo-book sync-releases``. See the :class:`ReleaseNotes` docstring.
+    release_notes: ReleaseNotes | None = None
 
     # Opt-in static reactivity for marimo UI elements. When enabled, the
     # preprocessor scans each ``.py`` page for discrete widget candidates

@@ -693,12 +693,237 @@
     }).catch((e) => console.warn("marimo-book: plotly hydration failed", e));
   }
 
+  // --- Release-download component ------------------------------------------
+  //
+  // Placeholders `<div data-mb-release-download data-repo data-app-name
+  // data-platforms>` are hydrated client-side: fetch the repo's latest
+  // GitHub release, match assets to platforms, render OS-aware download
+  // cards. Build stays hermetic; data is always current. Falls back to a
+  // plain releases link on any error (network, rate-limit, private repo).
+  const RD_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+  function rdDetectPlatform() {
+    if (typeof navigator === "undefined") return "unknown";
+    const ua = navigator.userAgent;
+    if (/Mac/.test(ua)) return "mac-arm"; // default Apple Silicon
+    if (/Win/.test(ua)) return "windows";
+    if (/Linux/.test(ua) && !/Android/.test(ua)) return "linux";
+    return "unknown";
+  }
+
+  function rdFormatSize(bytes) {
+    if (!bytes) return "";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function rdExtension(name) {
+    if (/\.AppImage$/i.test(name)) return "APPIMAGE";
+    if (/\.tar\.gz$/i.test(name)) return "TAR.GZ";
+    const ext = name.split(".").pop() || "";
+    return ext.toUpperCase();
+  }
+
+  function rdGetCached(repo) {
+    try {
+      const raw = sessionStorage.getItem("mb-rd-" + repo);
+      if (!raw) return null;
+      const { data, ts } = JSON.parse(raw);
+      if (Date.now() - ts > RD_CACHE_TTL_MS) return null;
+      return data;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  function rdSetCached(repo, data) {
+    try {
+      sessionStorage.setItem(
+        "mb-rd-" + repo,
+        JSON.stringify({ data, ts: Date.now() })
+      );
+    } catch (_e) {
+      /* storage full / unavailable — non-fatal */
+    }
+  }
+
+  function rdMatchAssets(json, platforms) {
+    const assets = Array.isArray(json.assets) ? json.assets : [];
+    const out = [];
+    platforms.forEach((p) => {
+      const needle = (p.match || "").toLowerCase();
+      const hit = assets.find(
+        (a) => a.name && a.name.toLowerCase().includes(needle)
+      );
+      if (hit) {
+        out.push({
+          key: p.key || p.label,
+          label: p.label,
+          url: hit.browser_download_url,
+          name: hit.name,
+          size: hit.size,
+        });
+      }
+    });
+    return { version: json.tag_name, assets: out };
+  }
+
+  // Build elements via the DOM (textContent, not innerHTML) so externally-
+  // influenced strings (release tag names, asset filenames from the GitHub
+  // API) can never inject markup. hrefs are scheme-guarded to http(s).
+  function rdEl(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  function rdSafeHref(url) {
+    try {
+      const u = new URL(url, window.location.href);
+      return u.protocol === "https:" || u.protocol === "http:" ? u.href : "#";
+    } catch (_e) {
+      return "#";
+    }
+  }
+
+  function rdClear(el) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+  }
+
+  function rdRenderFallback(el, repo, appName) {
+    rdClear(el);
+    const a = rdEl(
+      "a",
+      "marimo-book-release-download__fallback",
+      "Download the latest " + (appName || "release") + " on GitHub"
+    );
+    a.href = rdSafeHref("https://github.com/" + repo + "/releases/latest");
+    a.target = "_blank";
+    a.rel = "noopener";
+    el.appendChild(a);
+  }
+
+  function rdRender(el, release, appName) {
+    if (!release || !release.assets || release.assets.length === 0) {
+      rdRenderFallback(el, el.getAttribute("data-repo"), appName);
+      return;
+    }
+    const detected = rdDetectPlatform();
+    const single = release.assets.length === 1;
+
+    rdClear(el);
+
+    const head = rdEl("div", "marimo-book-release-download__head");
+    head.appendChild(
+      rdEl(
+        "span",
+        "marimo-book-release-download__version",
+        "Latest: " + (release.version || "")
+      )
+    );
+    el.appendChild(head);
+
+    const grid = rdEl(
+      "div",
+      "marimo-book-release-download__grid" +
+        (single ? " marimo-book-release-download__grid--single" : "")
+    );
+    release.assets.forEach((a) => {
+      const recommended = a.key === detected && !single;
+      const card = rdEl(
+        "a",
+        "marimo-book-release-card" +
+          (recommended ? " marimo-book-release-card--recommended" : "")
+      );
+      card.href = rdSafeHref(a.url);
+      card.setAttribute(
+        "aria-label",
+        "Download " + (appName || "") + " for " + a.label
+      );
+      if (recommended) {
+        card.appendChild(
+          rdEl("span", "marimo-book-release-card__rec", "Recommended for you")
+        );
+      }
+      card.appendChild(rdEl("span", "marimo-book-release-card__plat", a.label));
+      const meta = rdExtension(a.name) + (a.size ? " · " + rdFormatSize(a.size) : "");
+      card.appendChild(rdEl("span", "marimo-book-release-card__meta", meta));
+      grid.appendChild(card);
+    });
+    el.appendChild(grid);
+  }
+
+  function hydrateReleaseDownloads(scope) {
+    const mounts = scope.querySelectorAll(
+      "[data-mb-release-download]:not([data-mb-rd-init])"
+    );
+    mounts.forEach((el) => {
+      el.setAttribute("data-mb-rd-init", "");
+      const repo = el.getAttribute("data-repo");
+      const appName = el.getAttribute("data-app-name") || "";
+      if (!repo) {
+        return;
+      }
+      let platforms = [];
+      try {
+        platforms = JSON.parse(el.getAttribute("data-platforms") || "[]");
+      } catch (_e) {
+        platforms = [];
+      }
+
+      const cached = rdGetCached(repo);
+      if (cached) {
+        rdRender(el, cached, appName);
+        return;
+      }
+
+      const api = "https://api.github.com/repos/" + repo + "/releases/latest";
+      const headers = { Accept: "application/vnd.github+json" };
+      let etag = null;
+      try {
+        etag = sessionStorage.getItem("mb-rd-etag-" + repo);
+      } catch (_e) {
+        /* no storage */
+      }
+      if (etag) headers["If-None-Match"] = etag;
+
+      fetch(api, { headers })
+        .then((res) => {
+          if (res.status === 304) {
+            const c = rdGetCached(repo);
+            if (c) {
+              rdSetCached(repo, c); // refresh TTL
+              return c;
+            }
+            throw new Error("304 with empty cache");
+          }
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const tag = res.headers.get("ETag");
+          if (tag) {
+            try {
+              sessionStorage.setItem("mb-rd-etag-" + repo, tag);
+            } catch (_e) {
+              /* no storage */
+            }
+          }
+          return res.json().then((json) => {
+            const data = rdMatchAssets(json, platforms);
+            rdSetCached(repo, data);
+            return data;
+          });
+        })
+        .then((data) => rdRender(el, data, appName))
+        .catch(() => rdRenderFallback(el, repo, appName));
+    });
+  }
+
   function bootAll(root) {
     const scope = root || document;
     hydrateAll(scope);
     initPrecomputeOnce(scope);
     mountHeaderButtons(scope);
     hydratePlotly(scope);
+    hydrateReleaseDownloads(scope);
     installAnywidgetRuntimeIntercept(document);
   }
 

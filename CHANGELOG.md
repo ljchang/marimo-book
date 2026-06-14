@@ -5,6 +5,23 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Release-download button.** A client-hydrated component for books that
+  document a downloadable app: drop `release_download("owner/repo")` (Python)
+  or `<div data-mb-release-download data-repo="owner/repo">` (raw HTML) on a
+  page and the browser fetches the repo's latest GitHub release, matches assets
+  to platforms, and renders OS-aware download cards with a "Recommended for
+  you" highlight. The build stays hermetic (no network); responses are cached
+  in `sessionStorage` with `ETag` revalidation to respect the GitHub API rate
+  limit; any error (offline, rate-limited, private repo) falls back to a plain
+  releases link, and a `<noscript>` link keeps it working without JS. Cards are
+  built with DOM APIs (no `innerHTML`) and hrefs are scheme-guarded. See the
+  [Release-download button](https://marimobook.org/release-download-guide/)
+  guide.
+
 ## [0.1.23] — 2026-06-08
 
 ### Fixed

@@ -582,3 +582,78 @@ marimo-island[data-cell-id]:first-of-type marimo-cell-output svg.animate-spin {
   /* Reactive cell wrapper — invisible chrome, just a swap target. */
   display: block;
 }
+
+/* --- Release-download component ------------------------------------------ */
+/* Hydrated client-side from a repo's latest GitHub release (see
+   marimo_book.js / release_download.py). Uses the Material color variables
+   above so light/dark both work without per-scheme rules. */
+.marimo-book-release-download {
+  margin: 1.25rem 0;
+}
+.marimo-book-release-download__head {
+  margin-bottom: 0.6rem;
+}
+.marimo-book-release-download__version {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--md-default-fg-color--light);
+  background: var(--md-default-bg-color--light);
+  font-variant-numeric: tabular-nums;
+}
+.marimo-book-release-download__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.6rem;
+}
+.marimo-book-release-download__grid--single {
+  grid-template-columns: minmax(190px, 320px);
+}
+.marimo-book-release-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  background: var(--md-default-bg-color--light);
+  text-decoration: none !important;
+  transition: border-color 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
+}
+.marimo-book-release-card:hover {
+  border-color: var(--md-primary-fg-color);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+}
+.marimo-book-release-card:active {
+  transform: translateY(1px);
+}
+.marimo-book-release-card--recommended {
+  border-color: var(--md-primary-fg-color);
+  box-shadow: 0 0 0 1px var(--md-primary-fg-color) inset;
+}
+.marimo-book-release-card__rec {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--md-primary-fg-color);
+}
+.marimo-book-release-card__plat {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--md-default-fg-color);
+}
+.marimo-book-release-card__meta {
+  font-size: 0.72rem;
+  color: var(--md-default-fg-color--lighter);
+  font-variant-numeric: tabular-nums;
+}
+.marimo-book-release-download__loading,
+.marimo-book-release-download__fallback {
+  font-size: 0.82rem;
+  color: var(--md-default-fg-color--lighter);
+}

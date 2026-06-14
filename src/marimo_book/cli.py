@@ -589,6 +589,93 @@ def sync_deps(
         typer.echo(f"sync-deps: {verb} {len(changed)} of {len(py_entries)} notebook(s).")
 
 
+@app.command("sync-releases")
+def sync_releases(
+    book_file: Path = typer.Option(
+        Path("book.yml"),
+        "--book",
+        "-b",
+        help="Path to the book.yml config.",
+        exists=True,
+        dir_okay=False,
+    ),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help=(
+            "Don't write. Exit non-zero if the changelog is out of date "
+            "relative to the live Releases. Suitable for a CI hook."
+        ),
+    ),
+) -> None:
+    """Generate the changelog page from a repo's GitHub Releases.
+
+    Reads the ``release_notes`` block in ``book.yml``, fetches the releases of
+    ``release_notes.repo`` (or the book's ``repo``), and writes a Markdown
+    changelog to ``release_notes.output`` (relative to the book root). Add that
+    file to your ``toc`` once; this command rewrites its contents.
+
+    A *generate-then-build* step — it makes the only network call, so the
+    regular ``build`` stays hermetic. Set ``GITHUB_TOKEN`` for private repos or
+    to lift the API rate limit. Run it in CI (e.g. on a ``repository_dispatch``
+    from the app repo's release workflow) and commit the result. With
+    ``--check`` it writes nothing and exits 1 when the page is stale.
+    """
+    from .release_notes import fetch_releases, render_changelog_markdown
+
+    book = _load_or_exit(book_file)
+    cfg = book.release_notes
+    if cfg is None:
+        typer.secho(
+            "error: book.yml has no `release_notes:` block — nothing to sync.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    repo = cfg.repo or book.repo
+    if not repo:
+        typer.secho(
+            "error: set `release_notes.repo` (or the book's `repo`).",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    book_dir = book_file.resolve().parent
+    out_path = (book_dir / cfg.output).resolve()
+
+    try:
+        releases = fetch_releases(
+            repo, limit=cfg.limit, include_prereleases=cfg.include_prereleases
+        )
+    except (OSError, ValueError) as e:
+        typer.secho(
+            f"error: could not fetch releases for {repo}: {e}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from None
+
+    markdown = render_changelog_markdown(releases, repo=repo, title=cfg.title)
+    before = out_path.read_text(encoding="utf-8") if out_path.exists() else None
+
+    if markdown == before:
+        typer.echo(f"Changelog up to date ({len(releases)} release(s)): {cfg.output}")
+        return
+    if check:
+        typer.secho(
+            f"sync-releases --check: {cfg.output} is out of date.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(markdown, encoding="utf-8")
+    typer.secho(
+        f"Wrote {len(releases)} release(s) to {cfg.output}", fg=typer.colors.GREEN
+    )
+
+
 @app.command("clean")
 def clean(
     book_file: Path = typer.Option(

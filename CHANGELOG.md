@@ -19,8 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   limit; any error (offline, rate-limited, private repo) falls back to a plain
   releases link, and a `<noscript>` link keeps it working without JS. Cards are
   built with DOM APIs (no `innerHTML`) and hrefs are scheme-guarded. See the
-  [Release-download button](https://marimobook.org/release-download-guide/)
-  guide.
+  [GitHub Releases](https://marimobook.org/release-download-guide/) guide.
+- **Changelog from GitHub Releases.** `marimo-book sync-releases` fetches a
+  repo's releases (config: a `release_notes:` block in `book.yml`) and writes a
+  Markdown changelog page — one section per release with date, link, and body.
+  A *generate-then-build* step (like `sync-deps`), so `build` stays hermetic;
+  run it in CI on a `repository_dispatch` from the app repo's release workflow.
+  `--check` is a CI staleness gate; `GITHUB_TOKEN` is honored for private repos
+  / rate limits. Uses only the standard library (no new dependency).
 
 ## [0.1.23] — 2026-06-08
 

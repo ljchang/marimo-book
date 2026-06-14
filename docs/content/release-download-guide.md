@@ -1,14 +1,20 @@
-# Release-download button
+# GitHub Releases
 
-`marimo-book` ships a **download-the-latest-release** component for books that
-document a downloadable app (a desktop binary, a CLI, an installer). Drop a
-placeholder on a page; at view time the browser fetches the repo's latest
-[GitHub release](https://docs.github.com/rest/releases/releases#get-the-latest-release),
-matches assets to platforms, and renders OS-aware download cards.
+For books that document a downloadable app (a desktop binary, a CLI, an
+installer), `marimo-book` turns a repo's [GitHub
+Releases](https://docs.github.com/rest/releases) into two things:
 
-Nothing happens at build time — the build stays **hermetic and offline-safe**,
-and the cards always reflect the current latest release without rebuilding the
-site. It's the same client-hydration pattern marimo-book uses for anywidgets.
+- a **download button** that shows OS-aware "get the latest version" cards, and
+- an auto-generated **changelog page**.
+
+Both keep the regular `build` **hermetic** (no network at build time).
+
+## Download button
+
+Drop a placeholder on a page; at view time the browser fetches the repo's
+latest release, matches assets to platforms, and renders download cards. The
+cards always reflect the current latest release without rebuilding the site —
+the same client-hydration pattern marimo-book uses for anywidgets.
 
 ## Use it
 
@@ -73,3 +79,46 @@ release_download(
 - **Safe by construction.** Cards are built with DOM APIs (no `innerHTML`) and
   hrefs are scheme-guarded to `http(s)`, so a release tag or asset name can
   never inject markup.
+
+## Changelog page
+
+`marimo-book sync-releases` generates a Markdown changelog from a repo's
+releases. Configure it in `book.yml` and add the output file to your `toc`:
+
+```yaml
+# book.yml
+release_notes:
+  repo: cosanlab/pyfeat-live   # owner/name or URL; defaults to the book's `repo`
+  output: changelog.md         # written here (relative to the book root)
+  title: "Py-feat Live — Changelog"
+  limit: 50                    # optional: cap the number of releases
+  include_prereleases: true    # drafts are always excluded
+
+toc:
+  - file: changelog.md         # add the generated page once
+  # …
+```
+
+Then run the generator (it writes/overwrites `changelog.md`):
+
+```bash
+marimo-book sync-releases
+```
+
+Each release becomes a section with its title, publish date, a link to the
+release, and its body (GitHub-flavoured Markdown, embedded verbatim; a leading
+`#` in a body is demoted so it doesn't fight the page).
+
+This is a **generate-then-build** step — like `sync-deps`, it makes the only
+network call, so `build` stays hermetic and reproducible. The recommended flow:
+
+- **Commit** the generated `changelog.md`.
+- Regenerate it in CI when a new release publishes. Have the app repo's release
+  workflow fire a [`repository_dispatch`](https://docs.github.com/actions/using-workflows/events-that-trigger-workflows#repository_dispatch)
+  at the docs repo; the docs workflow runs `marimo-book sync-releases` (+ commit)
+  and rebuilds.
+- Set `GITHUB_TOKEN` in the environment for **private** repos or to lift the
+  unauthenticated API rate limit.
+
+`marimo-book sync-releases --check` writes nothing and exits non-zero when the
+page is stale — a useful CI gate.

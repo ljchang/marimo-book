@@ -5,6 +5,17 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.25] — 2026-06-15
+
+### Fixed
+
+- **`sync-releases` changelog heading levels.** Each release renders under a
+  `## <version>` heading, but a release note's own headings (e.g. an
+  `## Installation` section) were embedded verbatim and collided with the page
+  structure. The body's headings are now demoted by two levels (H1→H3, H2→H4,
+  …, capped at H6) so they nest under the version heading. Previously only `#`
+  (H1) was demoted.
+
 ## [0.1.24] — 2026-06-14
 
 ### Added

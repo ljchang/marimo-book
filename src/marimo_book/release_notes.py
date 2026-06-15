@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -128,19 +129,23 @@ def render_changelog_markdown(
             # Normalise CRLF from the API and demote any H1 in the body so it
             # doesn't compete with the per-release H2 heading.
             body = body.replace("\r\n", "\n")
-            lines.extend(_demote_h1(body).split("\n"))
+            lines.extend(_demote_headings(body).split("\n"))
             lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _demote_h1(markdown: str) -> str:
-    """Demote top-level ``# `` headings in a release body to ``### ``.
+_ATX_HEADING = re.compile(r"(#{1,6})\s")
 
-    Release bodies occasionally open with their own ``# Title``; left as-is
-    that would render as a page-level H1 mid-page. Shift only leading-``#``
-    lines (not ``##`` etc.) down two levels. Fenced code blocks are left
-    untouched.
+
+def _demote_headings(markdown: str, by: int = 2) -> str:
+    """Demote every ATX heading in a release body by ``by`` levels.
+
+    Each release renders under a ``## <version>`` heading, so the body's own
+    headings must sit *below* H2 or they collide with the page structure — e.g.
+    a release note's ``## Installation`` would otherwise render at the same
+    level as the version. Shift all headings down (H1→H3, H2→H4, …), capped at
+    H6. Fenced code blocks are left untouched.
     """
     out: list[str] = []
     in_fence = False
@@ -150,8 +155,10 @@ def _demote_h1(markdown: str) -> str:
             in_fence = not in_fence
             out.append(line)
             continue
-        if not in_fence and stripped.startswith("# "):
-            out.append("### " + stripped[2:])
+        m = None if in_fence else _ATX_HEADING.match(stripped)
+        if m:
+            level = min(len(m.group(1)) + by, 6)
+            out.append("#" * level + stripped[m.end(1) :])
         else:
             out.append(line)
     return "\n".join(out)

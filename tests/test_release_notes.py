@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 import marimo_book.release_notes as rn
 from marimo_book.cli import app
 from marimo_book.config import Book, ReleaseNotes
-from marimo_book.release_notes import _demote_h1, render_changelog_markdown
+from marimo_book.release_notes import _demote_headings, render_changelog_markdown
 
 RELEASES = [
     {
@@ -75,12 +75,14 @@ def test_render_empty_releases():
     assert "github.com/o/r/releases" in md
 
 
-def test_demote_h1_leaves_fenced_code_alone():
-    src = "# Title\n\n```\n# not a heading\n```\n## sub"
-    out = _demote_h1(src)
-    assert out.startswith("### Title")
-    assert "# not a heading" in out  # inside fence, untouched
-    assert "## sub" in out  # H2 untouched
+def test_demote_headings_shifts_all_levels_and_skips_fences():
+    src = "# Title\n\n```\n# not a heading\n```\n## sub\n### deep\n###### capped"
+    lines = _demote_headings(src).split("\n")
+    assert "### Title" in lines  # H1 -> H3
+    assert "#### sub" in lines  # H2 -> H4
+    assert "##### deep" in lines  # H3 -> H5
+    assert "###### capped" in lines  # H6 + 2 clamped to H6
+    assert "# not a heading" in lines  # inside fence, untouched (exact line)
 
 
 # --- config ------------------------------------------------------------------

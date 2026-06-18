@@ -234,6 +234,35 @@ def test_build_cached_stale_when_render_config_changes(tmp_path: Path) -> None:
     m.assert_called()  # stale → fell back to a live render
 
 
+def test_render_body_sig_ignores_package_version(tmp_path: Path) -> None:
+    """A package-version bump alone must NOT invalidate committed bodies.
+
+    Regression guard: the render signature used to embed the full package
+    version, so any release (even one that can't change export output) went
+    stale and forced a re-execution of every cached notebook. It now keys on
+    a hand-bumped render-output contract version instead.
+    """
+    from marimo_book.preprocessor import _render_body_signature
+
+    book = _book_with_cached_nb(tmp_path)
+    with patch("marimo_book.preprocessor._resolve_tool_version", return_value="0.1.24"):
+        sig_a = _render_body_signature(book)
+    with patch("marimo_book.preprocessor._resolve_tool_version", return_value="9.9.9"):
+        sig_b = _render_body_signature(book)
+    assert sig_a == sig_b
+
+
+def test_render_body_sig_changes_with_render_output_version(tmp_path: Path) -> None:
+    """Bumping the render-output contract version DOES invalidate bodies."""
+    from marimo_book.preprocessor import _render_body_signature
+
+    book = _book_with_cached_nb(tmp_path)
+    sig_a = _render_body_signature(book)
+    with patch("marimo_book.preprocessor._RENDER_OUTPUT_VERSION", "999"):
+        sig_b = _render_body_signature(book)
+    assert sig_a != sig_b
+
+
 # --- strict gate: a stale cached page must fail CI, not silently execute -----
 
 

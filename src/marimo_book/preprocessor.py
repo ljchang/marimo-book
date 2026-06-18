@@ -246,6 +246,18 @@ def _book_signature(book: Book) -> str:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+# Bump ONLY when a marimo-book change actually alters a notebook's *rendered
+# body* bytes (the export pipeline / cell HTML structure). This is the
+# render-output contract version, deliberately decoupled from the package
+# version: a release that only touches unrelated surfaces (CLI, nav CSS,
+# sync-releases, the button row) must NOT invalidate every committed
+# ``_rendered/`` body and force a costly re-execution of heavy notebooks.
+# Using the package version here (the old behavior) nuked the cache on every
+# release, so a patch bump silently re-executed GPU/video notebooks in CI —
+# which, on a deploy runner without the notebooks' deps, published tracebacks.
+_RENDER_OUTPUT_VERSION = "1"
+
+
 def _render_body_signature(book: Book) -> str:
     """Hash the fields that change a notebook's *rendered body*.
 
@@ -254,15 +266,16 @@ def _render_body_signature(book: Book) -> str:
     / ``repo`` / ``branch`` / the TOC. It DOES depend on ``defaults``
     (e.g. ``hide_first_code_cell``, ``suppress_warnings``), ``dependencies``
     (which mutate the executed source), ``widget_defaults`` (anywidget seed
-    state), and the marimo-book version (export output can change across
-    releases). Stored with each ``RenderedStore`` entry so a build can tell a
-    committed body is stale even when the source bytes are unchanged.
+    state), and :data:`_RENDER_OUTPUT_VERSION` — a hand-bumped contract version
+    that changes only when the export output itself changes, NOT on every
+    package release. Stored with each ``RenderedStore`` entry so a build can
+    tell a committed body is stale even when the source bytes are unchanged.
     """
     relevant: dict = {
         "defaults": book.defaults.model_dump(mode="json"),
         "dependencies": book.dependencies.model_dump(mode="json"),
         "widget_defaults": book.widget_defaults,
-        "marimo_book_version": _resolve_tool_version(),
+        "render_output_version": _RENDER_OUTPUT_VERSION,
     }
     payload = json.dumps(relevant, sort_keys=True, default=str)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()

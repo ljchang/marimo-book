@@ -5,6 +5,21 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Cached renders no longer invalidate on every release.** The committed
+  `_rendered/` body signature embedded the full marimo-book package version, so
+  *any* release — even one that can't change a notebook's output (CLI, nav CSS,
+  `sync-releases`) — marked every cached page stale. A plain `marimo-book build`
+  then fell back to *executing* the notebooks; on a deploy runner without the
+  notebooks' real dependencies that published tracebacks instead of the docs.
+  The signature now keys on a hand-bumped `_RENDER_OUTPUT_VERSION` contract,
+  bumped only when the export output itself changes. Upgrading marimo-book no
+  longer forces a re-render (and re-execution of heavy notebooks) unless the
+  render output actually changed.
+
 ## [0.1.25] — 2026-06-15
 
 ### Fixed

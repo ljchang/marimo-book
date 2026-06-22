@@ -15,6 +15,13 @@ repo: https://github.com/ljchang/marimo-book
 branch: main
 url: https://marimobook.org/
 
+# Brand marks. Recolored from the source kit's classic-indigo (#3f51b5)
+# to the site's brand indigo (#6366f1) so the logo matches the palette
+# below. The icon (book/"M") rides in the header next to the text title;
+# the favicon keeps a white tile so it reads on dark browser tabs.
+logo: images/marimo-book-icon.svg
+favicon: images/marimo-book-favicon.svg
+
 theme:
   palette:
     primary: "#6366f1"   # indigo 500 — muted violet accent

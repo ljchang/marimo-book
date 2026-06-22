@@ -84,8 +84,24 @@ def _build_config(
     # Always credit marimo-book in the footer (alongside any user copyright),
     # linking back to the project site. Material renders HTML in `copyright`
     # and shows it next to its own "Made with Material for MkDocs" notice.
+    #
+    # The book/"M" mark is inlined as SVG (not an <img src>) on purpose: the
+    # footer renders on every page at a different URL depth and Material does
+    # not rewrite paths inside `copyright`, so a relative src would 404 on
+    # nested pages. `currentColor` makes it inherit the credit-link color —
+    # muted in the footer, brand-indigo on hover — so it reads as one lockup
+    # with the wordmark and adapts to each book's palette and to dark mode.
+    _logo_svg = (
+        '<svg viewBox="0 0 100 100" width="1em" height="1em" aria-hidden="true" '
+        'style="vertical-align:-0.18em;margin-right:0.35em">'
+        '<circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="7"></circle>'
+        '<path d="M30 35 L49 52 L49 67 Q39.5 67 30 59 Z" fill="currentColor"></path>'
+        '<path d="M70 35 L51 52 L51 67 Q60.5 67 70 59 Z" fill="currentColor"></path>'
+        "</svg>"
+    )
     _attribution = (
-        'Made with <a href="https://marimobook.org" target="_blank" rel="noopener">Marimo-Book</a>'
+        'Made with <a href="https://marimobook.org" target="_blank" rel="noopener">'
+        f"{_logo_svg}Marimo-Book</a>"
     )
     cfg["copyright"] = f"{book.copyright} · {_attribution}" if book.copyright else _attribution
     # Drop Material's "Made with Material for MkDocs" footer notice — the

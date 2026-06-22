@@ -269,6 +269,23 @@
   letter-spacing: -0.01em;
 }
 
+/* Header logo: larger mark, snug to the title. Material ships a 1.2rem logo
+   with a wide gap before the site title (the title carries its own 1.25rem
+   left margin), so the icon + wordmark drift apart. Enlarge the mark and pull
+   the two together so they read as one lockup. The title rule is scoped with
+   `.md-logo ~` so books *without* a logo keep Material's default spacing. */
+.md-header__button.md-logo {
+  padding-right: 0.1rem;
+}
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.85rem;
+  width: 1.85rem;
+}
+.md-header__button.md-logo ~ .md-header__title {
+  margin-left: 0.15rem;
+}
+
 /* --- Admonitions: thin left stripe, no heavy fill ------------------------ */
 .md-typeset .admonition,
 .md-typeset details {

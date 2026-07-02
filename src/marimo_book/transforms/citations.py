@@ -17,25 +17,34 @@ takes effect on the next build without invalidating any notebook render.
 
 from __future__ import annotations
 
+import codecs
 import html
 import re
 from pathlib import Path
 
+import latexcodec  # noqa: F401 — registers the "ulatex" codec used by _clean
 from pybtex.database import Entry as _Entry
 from pybtex.database import parse_file
 
 # Pandoc-style citation group: [@key] or [@key1; @key2]. Keys are
 # conservative (no spaces/brackets/semicolons) so prose like "[@ 4pm]"
-# doesn't false-match.
-_CITE_RE = re.compile(r"\[(@[^\s;\]]+(?:\s*;\s*@[^\s;\]]+)*)\]")
+# doesn't false-match, and the negative lookahead skips markdown links
+# whose *label* looks like a citation — `[@handle](https://...)`, the
+# common GitHub-mention pattern.
+_CITE_RE = re.compile(r"\[(@[^\s;\]]+(?:\s*;\s*@[^\s;\]]+)*)\](?!\()")
 
-# Standalone placement marker (pandoc convention).
-_MARKER_RE = re.compile(r"^\\bibliography\s*$", re.MULTILINE)
+# Standalone placement marker (pandoc convention). `[ \t]*` — not `\s*` —
+# so the match stops at the line's own end and doesn't swallow the blank
+# line separating the marker from the content below it.
+_MARKER_RE = re.compile(r"^\\bibliography[ \t]*$", re.MULTILINE)
 
-# Code regions are quoted syntax, not citations. Fences first (multiline),
-# then inline spans within the remaining prose.
-_CODE_FENCE_RE = re.compile(r"^(```|~~~).*?^\1\s*$", re.MULTILINE | re.DOTALL)
-_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+# Regions whose text is quoted, not prose: fenced blocks (indentation
+# allowed — lists/admonitions), double- or single-backtick spans, and raw
+# HTML <pre> blocks (marimo cell outputs land in the body as _html_pre
+# HTML, not fenced markdown). Fences first, then the rest within prose.
+_CODE_FENCE_RE = re.compile(r"^[ \t]*(```|~~~).*?^[ \t]*\1[ \t]*$", re.MULTILINE | re.DOTALL)
+_CODE_SPAN_RE = re.compile(r"``[^`]*``|`[^`\n]*`")
+_HTML_PRE_RE = re.compile(r"<pre\b.*?</pre>", re.DOTALL | re.IGNORECASE)
 
 # (files, mtimes) → parsed entries. One parse per build; serve rebuilds
 # reload only when a .bib actually changes.
@@ -58,6 +67,10 @@ def load_bibliography(files: tuple[Path, ...]) -> dict[str, _Entry]:
     cache_key = tuple(stamped)
     if cache_key in _BIB_CACHE:
         return _BIB_CACHE[cache_key]
+    if len(_BIB_CACHE) > 8:
+        # Long `serve` sessions mint a new key per .bib edit; don't let
+        # superseded parses accumulate forever.
+        _BIB_CACHE.clear()
 
     entries: dict[str, _Entry] = {}
     for path_str, _ in stamped:
@@ -71,6 +84,21 @@ def load_bibliography(files: tuple[Path, ...]) -> dict[str, _Entry]:
 
 
 # --- formatting ---------------------------------------------------------------
+
+
+def _clean(value: str) -> str:
+    """BibTeX field → display text: decode LaTeX, drop braces, escape HTML.
+
+    Braces are BibTeX capitalization protectors ({AI}, {Bayesian}) — plain
+    removal is the standard display treatment. HTML-escaping keeps .bib
+    content from injecting markup into the page (the inline labels are
+    escaped at the call site; entry fields are escaped here).
+    """
+    try:
+        value = codecs.decode(value, "ulatex")
+    except Exception:  # noqa: BLE001 — odd escapes render as-is, not fatally
+        pass
+    return html.escape(value.replace("{", "").replace("}", ""))
 
 
 def _person_apa(person) -> str:
@@ -114,15 +142,15 @@ def format_inline_apa(entry: _Entry) -> str:
 def format_entry(entry: _Entry) -> str:
     """APA-flavored one-line reference; shared by both styles."""
     f = entry.fields
-    authors = _authors_apa(entry)
-    year = f.get("year", "n.d.")
-    title = f.get("title", "").strip("{}")
+    authors = _clean(_authors_apa(entry))
+    year = _clean(f.get("year", "n.d."))
+    title = _clean(f.get("title", ""))
     parts = [f"{authors} ({year}). {title}." if authors else f"{title} ({year})."]
 
     if entry.type == "article":
-        venue = f.get("journal", "")
-        vol = f.get("volume", "")
-        pages = f.get("pages", "").replace("--", "–")
+        venue = _clean(f.get("journal", ""))
+        vol = _clean(f.get("volume", ""))
+        pages = _clean(f.get("pages", "")).replace("--", "–")
         bits = f"*{venue}*" if venue else ""
         if vol:
             bits += f", {vol}"
@@ -132,17 +160,17 @@ def format_entry(entry: _Entry) -> str:
             parts.append(f"{bits}.")
     elif entry.type == "book":
         if f.get("publisher"):
-            parts.append(f"{f['publisher']}.")
+            parts.append(f"{_clean(f['publisher'])}.")
     elif entry.type == "inproceedings":
-        venue = f.get("booktitle", "")
-        pages = f.get("pages", "").replace("--", "–")
+        venue = _clean(f.get("booktitle", ""))
+        pages = _clean(f.get("pages", "")).replace("--", "–")
         if venue:
             parts.append(f"In *{venue}*" + (f" (pp. {pages})." if pages else "."))
 
     if f.get("doi"):
-        parts.append(f"https://doi.org/{f['doi']}")
+        parts.append(f"https://doi.org/{_clean(f['doi'])}")
     elif f.get("url"):
-        parts.append(f.get("url", ""))
+        parts.append(_clean(f.get("url", "")))
     return " ".join(p for p in parts if p)
 
 
@@ -158,7 +186,7 @@ def apply_citations(body: str, *, bib: dict[str, _Entry], style: str) -> str:
     cited: list[str] = []  # keys in first-use order
 
     def _render_group(match: re.Match) -> str:
-        rendered = []
+        anchors = []
         unknown = []
         for raw in match.group(1).split(";"):
             key = raw.strip().lstrip("@")
@@ -171,32 +199,38 @@ def apply_citations(body: str, *, bib: dict[str, _Entry], style: str) -> str:
             if style == "numbered":
                 label = f"[{cited.index(key) + 1}]"
             else:
-                label = html.escape(format_inline_apa(entry))
-            rendered.append(f'<a class="mb-cite" href="#mbref-{key}">{label}</a>')
-        out = ", ".join(rendered)
+                # Strip the parens: an APA group is ONE parenthetical with
+                # its members joined by semicolons — (A, 2015; B, 2020).
+                label = html.escape(format_inline_apa(entry)[1:-1])
+            anchors.append(f'<a class="mb-cite" href="#mbref-{key}">{label}</a>')
+        if style == "numbered":
+            out = ", ".join(anchors)
+        else:
+            out = f"({'; '.join(anchors)})" if anchors else ""
         if unknown:  # keep unresolved keys visible, pandoc-style
             out = f"{out} [{'; '.join(unknown)}]" if out else match.group(0)
         return out
 
-    # Transform prose only: split out fences, then inline spans.
-    def _transform_prose(text: str) -> str:
+    def _sub_protected(text: str, protect: list[re.Pattern], leaf) -> str:
+        """Apply ``leaf`` only outside the first pattern's matches, recursing
+        through the remaining patterns inside the unprotected gaps."""
+        if not protect:
+            return leaf(text)
+        head, rest = protect[0], protect[1:]
         pieces: list[str] = []
         pos = 0
-        for span in _CODE_SPAN_RE.finditer(text):
-            pieces.append(_CITE_RE.sub(_render_group, text[pos : span.start()]))
-            pieces.append(span.group(0))
-            pos = span.end()
-        pieces.append(_CITE_RE.sub(_render_group, text[pos:]))
+        for m in head.finditer(text):
+            pieces.append(_sub_protected(text[pos : m.start()], rest, leaf))
+            pieces.append(m.group(0))
+            pos = m.end()
+        pieces.append(_sub_protected(text[pos:], rest, leaf))
         return "".join(pieces)
 
-    pieces: list[str] = []
-    pos = 0
-    for fence in _CODE_FENCE_RE.finditer(body):
-        pieces.append(_transform_prose(body[pos : fence.start()]))
-        pieces.append(fence.group(0))
-        pos = fence.end()
-    pieces.append(_transform_prose(body[pos:]))
-    out = "".join(pieces)
+    out = _sub_protected(
+        body,
+        [_CODE_FENCE_RE, _HTML_PRE_RE, _CODE_SPAN_RE],
+        lambda t: _CITE_RE.sub(_render_group, t),
+    )
 
     if not cited:
         return body if not _MARKER_RE.search(body) else _MARKER_RE.sub("", body)
@@ -212,5 +246,8 @@ def apply_citations(body: str, *, bib: dict[str, _Entry], style: str) -> str:
     references = "## References\n\n" + "\n".join(items) + "\n"
 
     if _MARKER_RE.search(out):
-        return _MARKER_RE.sub(lambda _m: references.rstrip("\n"), out, count=1)
+        # First marker gets the section; any extras are stripped (matching
+        # the strip-all behavior of the no-citations path).
+        out = _MARKER_RE.sub(lambda _m: references.rstrip("\n"), out, count=1)
+        return _MARKER_RE.sub("", out)
     return out.rstrip("\n") + "\n\n" + references

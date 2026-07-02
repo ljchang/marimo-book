@@ -934,7 +934,7 @@ def test_citations_render_and_bib_edits_apply_without_rerender(tmp_path: Path) -
     )
     Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
     staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
-    assert "(Doe, 2020)" in staged
+    assert ">Doe, 2020</a>)" in staged
     assert "## References" in staged
 
     bib = tmp_path / "refs.bib"
@@ -946,4 +946,4 @@ def test_citations_render_and_bib_edits_apply_without_rerender(tmp_path: Path) -
     report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
     assert report.pages_cached == 1  # notebook untouched
     staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
-    assert "(Doe, 2021)" in staged  # .bib edit applied at finalize time
+    assert ">Doe, 2021</a>)" in staged  # .bib edit applied at finalize time

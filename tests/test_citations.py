@@ -69,7 +69,8 @@ def test_format_entry_article(tmp_path: Path) -> None:
 
     bib = load_bibliography((_bib_file(tmp_path),))
     text = format_entry(bib["chang2015"])
-    assert "Chang, L. J., & Smith, A." in text
+    # Fields are HTML-escaped for injection safety; &amp; renders as "&".
+    assert "Chang, L. J., &amp; Smith, A." in text
     assert "(2015)" in text
     assert "*Nature*" in text
     assert "doi.org/10.1000/x" in text
@@ -93,7 +94,7 @@ def test_apply_citations_apa_end_to_end(tmp_path: Path) -> None:
     bib = load_bibliography((_bib_file(tmp_path),))
     body = "Emotion is neural [@chang2015]. See also [@doe2020; @trio2021].\n"
     out = apply_citations(body, bib=bib, style="apa")
-    assert '<a class="mb-cite" href="#mbref-chang2015">(Chang &amp; Smith, 2015)</a>' in out
+    assert '(<a class="mb-cite" href="#mbref-chang2015">Chang &amp; Smith, 2015</a>)' in out
     assert "## References" in out
     assert 'id="mbref-doe2020"' in out
     assert out.index("chang2015") < out.index("## References")
@@ -148,3 +149,54 @@ def test_apply_citations_no_citations_is_identity(tmp_path: Path) -> None:
     bib = load_bibliography((_bib_file(tmp_path),))
     body = "No citations here.\n"
     assert apply_citations(body, bib=bib, style="apa") == body
+
+
+def test_citation_like_link_labels_untouched(tmp_path: Path) -> None:
+    """`[@handle](url)` is a markdown link with an @-label (GitHub-mention
+    style), not a citation — it must survive verbatim even when the label
+    matches a real bib key."""
+    from marimo_book.transforms.citations import apply_citations, load_bibliography
+
+    bib = load_bibliography((_bib_file(tmp_path),))
+    body = "Thanks [@doe2020](https://github.com/doe2020)! But cite [@doe2020].\n"
+    out = apply_citations(body, bib=bib, style="apa")
+    assert "[@doe2020](https://github.com/doe2020)" in out
+    assert "## References" in out  # the real citation still resolved
+
+
+def test_citations_inside_html_pre_blocks_untouched(tmp_path: Path) -> None:
+    """Notebook cell outputs land in the body as raw <pre> HTML, not fenced
+    markdown — quoted [@key]s there are output text, not citations."""
+    from marimo_book.transforms.citations import apply_citations, load_bibliography
+
+    bib = load_bibliography((_bib_file(tmp_path),))
+    body = 'Real [@doe2020].\n<pre class="marimo-stream-stdout">printed [@chang2015]</pre>\n'
+    out = apply_citations(body, bib=bib, style="numbered")
+    assert "printed [@chang2015]" in out
+    refs = out[out.index("## References") :]
+    assert "Chang" not in refs
+
+
+def test_apa_multi_key_group_is_single_parenthetical(tmp_path: Path) -> None:
+    from marimo_book.transforms.citations import apply_citations, load_bibliography
+
+    bib = load_bibliography((_bib_file(tmp_path),))
+    out = apply_citations("See [@doe2020; @chang2015].\n", bib=bib, style="apa")
+    assert ">Doe, 2020</a>; <a" in out  # one parenthetical, semicolon-joined
+    assert "(<a" in out and out.count("(Doe") == 0
+
+
+def test_latex_and_braces_cleaned_in_references(tmp_path: Path) -> None:
+    from marimo_book.transforms.citations import apply_citations, load_bibliography
+
+    f = tmp_path / "latex.bib"
+    f.write_text(
+        '@article{mueller2019, author={M\\"uller, Anna}, year={2019},\n'
+        " title={The {Bayesian} Brain <test>}, journal={NeuroImage}}\n",
+        encoding="utf-8",
+    )
+    bib = load_bibliography((f,))
+    out = apply_citations("Cite [@mueller2019].\n", bib=bib, style="numbered")
+    assert "Müller" in out
+    assert "The Bayesian Brain" in out  # protector braces stripped
+    assert "<test>" not in out and "&lt;test&gt;" in out  # fields HTML-escaped

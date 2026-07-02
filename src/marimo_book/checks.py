@@ -10,33 +10,35 @@ from __future__ import annotations
 
 import importlib.util
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Book, FileEntry, SectionEntry
 from .preprocessor import _doc_relpath_for, _iter_file_entries, _render_body_signature
 from .rendered_store import RenderedStore
+from .transforms.citations import _CODE_FENCE_RE, _CODE_SPAN_RE
 
 _SUPPORTED_SUFFIXES = {".md", ".py"}
 
-# Enabled-feature → (probe module, extra name). The probe is a module the
-# extra installs; find_spec is cheap and import-free.
-_FEATURE_EXTRAS: tuple[tuple[str, str, str], ...] = (
-    ("social_cards", "cairosvg", "social"),
-    ("pdf_export", "mkdocs_with_pdf", "pdf"),
-    ("check_external_links", "mkdocs_htmlproofer_plugin", "linkcheck"),
-    ("api_docs", "mkdocstrings", "api"),
-    ("blog_rss", "mkdocs_rss_plugin", "blog"),
+# One row per feature needing an extra: (label for the message, probe
+# module the extra installs — find_spec is cheap and import-free, the
+# pip extra name, getter for whether the book enables it). Keeping the
+# enabled-getter IN the row means adding a feature can't half-update two
+# parallel structures and crash `check` with a KeyError.
+_FEATURE_EXTRAS: tuple[tuple[str, str, str, Callable[[Book], bool]], ...] = (
+    ("social_cards: true", "cairosvg", "social", lambda b: b.social_cards),
+    ("pdf_export: true", "mkdocs_with_pdf", "pdf", lambda b: b.pdf_export),
+    # NB: the dist is mkdocs-htmlproofer-plugin but the module it installs
+    # is plain `htmlproofer`.
+    ("check_external_links: true", "htmlproofer", "linkcheck", lambda b: b.check_external_links),
+    ("api_docs: enabled", "mkdocstrings", "api", lambda b: b.api_docs.enabled),
+    ("blog.rss", "mkdocs_rss_plugin", "blog", lambda b: b.blog.enabled and b.blog.rss),
 )
 
 # Relative markdown link targets: `[text](target)` — captures the target up
 # to the first `)`, `#` or whitespace so anchors/titles don't pollute it.
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)#\s]+)[^)]*\)")
-
-# Regions whose "links" are examples, not links: fenced blocks and inline
-# code spans. Stripped before the link scan.
-_CODE_FENCE_RE = re.compile(r"^(```|~~~).*?^\1\s*$", re.MULTILINE | re.DOTALL)
-_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
 
 
 @dataclass
@@ -105,17 +107,8 @@ def _check_asset_paths(book: Book, book_dir: Path, report: CheckReport) -> None:
 
 
 def _check_extras(book: Book, report: CheckReport) -> None:
-    enabled = {
-        "social_cards": book.social_cards,
-        "pdf_export": book.pdf_export,
-        "check_external_links": book.check_external_links,
-        "api_docs": book.api_docs.enabled,
-        "blog_rss": book.blog.enabled and book.blog.rss,
-    }
-    labels = {"blog_rss": "blog.rss"}
-    for feature, module, extra in _FEATURE_EXTRAS:
-        if enabled[feature] and not _module_available(module):
-            label = labels.get(feature, f"{feature}: true")
+    for label, module, extra, is_enabled in _FEATURE_EXTRAS:
+        if is_enabled(book) and not _module_available(module):
             report.errors.append(
                 f"{label} needs the [{extra}] extra (pip install 'marimo-book[{extra}]')"
             )
@@ -138,8 +131,13 @@ def _check_cached_freshness(
         if not src_abs.exists():
             continue  # already an error from _check_toc_files
         if not store.is_fresh(str(entry.file), src_abs, body_sig=body_sig):
+            # Warning, not error: plain `build` handles this by warning and
+            # falling back to a live render (local authoring keeps working),
+            # so a non-strict `check` must not be harsher than the build it
+            # gates. `check --strict` promotes it — the CI posture, matching
+            # `build --strict`'s hard-error on stale artifacts.
             reason = store.reason_stale(str(entry.file), src_abs, body_sig=body_sig)
-            report.errors.append(
+            report.warnings.append(
                 f"{entry.file}: mode=cached but {reason}; "
                 f"run `marimo-book render` and commit _rendered/"
             )
@@ -198,12 +196,25 @@ def _check_bibliography(
     """
     if not book.bibliography.files:
         return
+    from pybtex.database import parse_file
+
     from .transforms.citations import _CITE_RE, load_bibliography
 
-    missing = [f for f in book.bibliography.files if not (book_dir / f).exists()]
-    for f in missing:
-        report.errors.append(f"bibliography: file not found: {f}")
+    for f in book.bibliography.files:
+        bib_abs = book_dir / f
+        if not bib_abs.exists():
+            report.errors.append(f"bibliography: file not found: {f}")
+            continue
+        # The build skips unparsable files silently (it must not crash over
+        # a bibliography typo); this is the loud pre-flight for those too —
+        # otherwise a syntax error surfaces only as a confusing cascade of
+        # unknown-key warnings.
+        try:
+            parse_file(str(bib_abs), bib_format="bibtex")
+        except Exception as exc:  # noqa: BLE001
+            report.errors.append(f"bibliography: {f} failed to parse: {exc}")
     bib = load_bibliography(tuple(book_dir / f for f in book.bibliography.files))
+    seen: set[tuple[str, str]] = set()
     for entry in entries:
         src = book_dir / entry.file
         if src.suffix != ".md" or not src.exists():
@@ -212,7 +223,8 @@ def _check_bibliography(
         for match in _CITE_RE.finditer(text):
             for raw in match.group(1).split(";"):
                 key = raw.strip().lstrip("@")
-                if key not in bib:
+                if key not in bib and (str(entry.file), key) not in seen:
+                    seen.add((str(entry.file), key))
                     report.warnings.append(
                         f"{entry.file}: citation key [@{key}] not found in bibliography"
                     )
@@ -229,7 +241,14 @@ def _check_internal_links(
     prose is skipped — it needs a render, which ``build --strict`` covers.
     Links inside fenced blocks / inline code are examples, not links.
     """
-    md_basenames = {entry.file.with_suffix("").name for entry in entries}
+    # Validate against STAGED names, exactly as the build's link rewriter
+    # does — the first TOC entry stages as index.md, so a link to its source
+    # name would not resolve on the built site.
+    index_source = Path(entries[0].file) if entries else None
+    md_basenames = {
+        _doc_relpath_for(entry.file, index_source=index_source).with_suffix("").name
+        for entry in entries
+    }
     if book.include_changelog:
         # Generated page: staged from CHANGELOG.md at build time.
         md_basenames.add("changelog")

@@ -52,7 +52,7 @@ from .config import Book, Dependencies, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .rendered_store import RenderedStore
 from .shell import _nav_from_toc, emit_mkdocs_yml
-from .transforms.citations import apply_citations, load_bibliography
+from .transforms.citations import _CITE_RE, apply_citations, load_bibliography
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import (
     CellError,
@@ -802,6 +802,19 @@ class Preprocessor:
                         spliced_body, precompute_stats = self._run_precompute(
                             entry, src_abs, docs_dir, index_source=index_source
                         )
+                        if (
+                            spliced_body is not None
+                            and self.book.bibliography.files
+                            and _CITE_RE.search(spliced_body)
+                        ):
+                            # Citations don't (yet) apply to precompute-spliced
+                            # bodies — the splice output can't go through the
+                            # rewrite pipeline. Warn via the stats so cache-hit
+                            # replays repeat the warning too.
+                            precompute_stats.setdefault("warnings", []).append(
+                                f"{entry.file}: citations are not rendered on "
+                                f"precomputed pages ([@key] left verbatim)"
+                            )
                         self._apply_precompute_stats(report, precompute_stats)
                         if spliced_body is not None:
                             # The splice replaced the page body wholesale;

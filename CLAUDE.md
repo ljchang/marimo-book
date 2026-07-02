@@ -177,6 +177,13 @@ Material's named-palette machinery doesn't fight us.
   It's the build cache; the next preprocessor run overwrites it. To
   force a full rebuild: `marimo-book build --rebuild` (preserves
   cache after the run) or `marimo-book clean` (wipes everything).
+  Since cache v3 it stores pre-finalize *bodies* under
+  `.marimo_book_cache/bodies/`; the key deliberately excludes the TOC,
+  `launch_buttons`, `repo`, and `branch` because the finalize step
+  (button row + link rewrites) re-runs against the cached body on every
+  build. Precompute stats and cell errors are recorded per entry and
+  replayed on hits — `_run_precompute` must never run on the hit path
+  (the spliced output is already baked into the cached body).
 - **Do not push directly to `main`.** The harness blocks this; route
   through a PR.
 - **Do not bypass CI** with `--no-verify` or by skipping checks. Fix

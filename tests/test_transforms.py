@@ -563,3 +563,23 @@ def test_export_notebook_timeout_raises_actionable_error(monkeypatch, tmp_path: 
     monkeypatch.setattr(marimo_export.subprocess, "run", fake_run)
     with pytest.raises(RuntimeError, match="timed out after 1s"):
         marimo_export.export_notebook(nb, timeout=1)
+
+
+# --- cell-error collection ----------------------------------------------------
+
+
+def test_collect_cell_errors_finds_raising_cell() -> None:
+    from marimo_book.transforms.marimo_export import collect_cell_errors
+
+    exp = export_notebook(FIXTURES / "error_notebook.py")
+    errors = collect_cell_errors(exp)
+    assert len(errors) == 1
+    assert errors[0].ename == "ValueError"
+    assert errors[0].evalue == "boom"
+
+
+def test_collect_cell_errors_empty_for_clean_notebook() -> None:
+    from marimo_book.transforms.marimo_export import collect_cell_errors
+
+    exp = export_notebook(FIXTURES / "simple_notebook.py")
+    assert collect_cell_errors(exp) == []

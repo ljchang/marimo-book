@@ -26,7 +26,7 @@ import hashlib
 import json
 import shutil
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
@@ -454,11 +454,16 @@ class Preprocessor:
         book_dir: Path,
         sandbox_override: bool | None = None,
         rebuild: bool = False,
+        on_progress: Callable[[str], None] | None = None,
     ) -> None:
         self.book = book
         self.book_dir = Path(book_dir).resolve()
         # None = honour book.yml's dependencies.mode; True/False overrides.
         self.sandbox_override = sandbox_override
+        # Called with a human-readable line before/after slow per-entry work
+        # (notebook exports take seconds-to-minutes; without this, build and
+        # serve look hung). None = silent.
+        self.on_progress = on_progress
         # When True, every TOC entry is re-rendered regardless of cache state.
         # The cache is still updated so future builds without --rebuild benefit.
         self.rebuild = rebuild
@@ -473,6 +478,10 @@ class Preprocessor:
         if self.sandbox_override is not None:
             return self.sandbox_override
         return self.book.dependencies.mode == "sandbox"
+
+    def _progress(self, message: str) -> None:
+        if self.on_progress is not None:
+            self.on_progress(message)
 
     # --- public API ----------------------------------------------------------
 
@@ -532,16 +541,25 @@ class Preprocessor:
         cache = BuildCache(self.book_dir, self.book, force_rebuild=self.rebuild)
         rendered_store = RenderedStore(self.book_dir)
 
+        # Progress lines cover only .py entries — Markdown stages in ~10 ms,
+        # notebooks in seconds-to-minutes.
+        py_total = sum(1 for e in file_entries if e.file.suffix == ".py")
+        py_seen = 0
+
         for entry in file_entries:
             src_rel = str(entry.file)
             src_abs = (self.book_dir / entry.file).resolve()
             out_rel = _doc_relpath_for(entry.file, index_source=index_source).as_posix()
             mode = entry.effective_mode(self.book.defaults.mode)
+            if entry.file.suffix == ".py":
+                py_seen += 1
+            tag = f"[{py_seen}/{py_total}]"
             try:
                 # mode=cached: source outputs from the committed _rendered/
                 # artifact instead of executing the notebook. Never touches the
                 # transient cache or precompute (the committed body is final).
                 if entry.file.suffix == ".py" and mode == "cached":
+                    self._progress(f"{tag} {src_rel} (committed render)")
                     self._stage_cached(
                         entry,
                         src_rel,
@@ -559,8 +577,11 @@ class Preprocessor:
                 # Notebook entries are the only ones worth caching: marimo
                 # export takes seconds-to-minutes, vs ~10 ms for Markdown.
                 if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs, docs_dir):
+                    self._progress(f"{tag} {src_rel} (cache hit)")
                     report.pages_cached += 1
                 else:
+                    if entry.file.suffix == ".py":
+                        self._progress(f"{tag} rendering {src_rel}...")
                     stage_page(
                         self.book,
                         self.book_dir,

@@ -910,3 +910,40 @@ def test_mode_flip_invalidates_cached_page(tmp_path: Path) -> None:
     assert report.pages_cached == 0  # the flip missed the cache
     staged = (tmp_path / "_site_src" / "docs" / "nb.md").read_text(encoding="utf-8")
     assert "WASM" in staged
+
+
+def test_citations_render_and_bib_edits_apply_without_rerender(tmp_path: Path) -> None:
+    """Citations are finalize-time: a .bib edit must show up on the next
+    build while the notebook body stays a cache hit."""
+    import os
+
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "intro.md").write_text("# Intro\n\nSee [@doe2020].\n", encoding="utf-8")
+    shutil.copy(NOTEBOOK_FIXTURE, content / "nb.py")
+    (tmp_path / "refs.bib").write_text(
+        "@book{doe2020, author={Doe, Jane}, year={2020}, title={A Book}, publisher={MIT}}\n",
+        encoding="utf-8",
+    )
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "bibliography": {"files": ["refs.bib"]},
+            "toc": [{"file": "content/intro.md"}, {"file": "content/nb.py"}],
+        }
+    )
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+    assert "(Doe, 2020)" in staged
+    assert "## References" in staged
+
+    bib = tmp_path / "refs.bib"
+    bib.write_text(
+        "@book{doe2020, author={Doe, Jane}, year={2021}, title={A Book}, publisher={MIT}}\n",
+        encoding="utf-8",
+    )
+    os.utime(bib, (bib.stat().st_atime, bib.stat().st_mtime + 5))
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.pages_cached == 1  # notebook untouched
+    staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+    assert "(Doe, 2021)" in staged  # .bib edit applied at finalize time

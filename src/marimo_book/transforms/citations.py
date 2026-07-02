@@ -21,8 +21,8 @@ import html
 import re
 from pathlib import Path
 
-from pybtex.database import parse_file
 from pybtex.database import Entry as _Entry
+from pybtex.database import parse_file
 
 # Pandoc-style citation group: [@key] or [@key1; @key2]. Keys are
 # conservative (no spaces/brackets/semicolons) so prose like "[@ 4pm]"

@@ -49,6 +49,12 @@ social_cards: true
 # extra is needed — just flip this flag.
 cross_references: true
 
+# Native pandoc-style citations ([@key] in prose). See content/citations.md
+# for the authoring guide; this book dogfoods the feature.
+bibliography:
+  - refs.bib
+cite_style: apa
+
 # Auto-include the repo-root CHANGELOG.md as a "Changelog" page in the
 # nav. Single source of truth — the file you maintain for PyPI also
 # becomes a docs page, so readers can browse release history in-book.
@@ -90,6 +96,7 @@ toc:
       - file: content/blog-guide.md
       - file: content/cached-mode-guide.md
       - file: content/release-download-guide.md
+      - file: content/citations.md
 
   - section: Publishing
     children:

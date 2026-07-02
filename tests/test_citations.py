@@ -115,11 +115,7 @@ def test_apply_citations_respects_code_regions(tmp_path: Path) -> None:
     from marimo_book.transforms.citations import apply_citations, load_bibliography
 
     bib = load_bibliography((_bib_file(tmp_path),))
-    body = (
-        "Real [@doe2020].\n"
-        "```md\nexample [@chang2015]\n```\n"
-        "Inline `[@trio2021]` example.\n"
-    )
+    body = "Real [@doe2020].\n```md\nexample [@chang2015]\n```\nInline `[@trio2021]` example.\n"
     out = apply_citations(body, bib=bib, style="numbered")
     assert "example [@chang2015]" in out  # fence untouched
     assert "`[@trio2021]`" in out  # span untouched

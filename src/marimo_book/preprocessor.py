@@ -52,6 +52,7 @@ from .config import Book, Dependencies, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .rendered_store import RenderedStore
 from .shell import _nav_from_toc, emit_mkdocs_yml
+from .transforms.citations import apply_citations, load_bibliography
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import (
     CellError,
@@ -1421,6 +1422,11 @@ def _finalize_page(
     )
     if apply_rewrites:
         body = apply_link_rewrites(body, md_basenames=md_basenames)
+        if book.bibliography.files:
+            # Finalize-time like the rewrites: cached bodies keep the raw
+            # [@key] text, so .bib edits apply without invalidating renders.
+            bib = load_bibliography(tuple(book_dir / f for f in book.bibliography.files))
+            body = apply_citations(body, bib=bib, style=book.cite_style)
     dst.write_text(_compose_page(buttons, body), encoding="utf-8")
     return dst
 

@@ -36,6 +36,10 @@ dependencies = [
     # them so an upstream dependency shuffle can't break our imports.
     "tomlkit>=0.12",
     "markdown>=3.5",
+    # .bib parsing for the native citations transform
+    # (transforms/citations.py). Small + pure-Python, so a base dep — same
+    # friction rationale as mkdocs-autorefs below.
+    "pybtex>=0.24",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     # 0.23.6 ships marimo-team/marimo#9409, which makes

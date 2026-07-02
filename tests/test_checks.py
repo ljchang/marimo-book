@@ -134,10 +134,29 @@ def test_fresh_cached_page_passes(tmp_path: Path) -> None:
 # --- warnings -------------------------------------------------------------------
 
 
-def test_inert_bibliography_warns(tmp_path: Path) -> None:
+def test_missing_bib_file_is_error(tmp_path: Path) -> None:
     from marimo_book.checks import run_checks
 
-    (tmp_path / "refs.bib").write_text("@misc{k, title={T}}\n", encoding="utf-8")
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "bibliography": {"files": ["gone.bib"]},
+            "toc": [{"file": "content/a.md"}],
+        },
+        files=["content/a.md"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("bibliography" in e and "gone.bib" in e for e in report.errors)
+
+
+def test_unknown_citation_key_warns(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    (tmp_path / "refs.bib").write_text(
+        "@book{doe2020, author={Doe, J.}, year={2020}, title={T}, publisher={P}}\n",
+        encoding="utf-8",
+    )
     book = _book(
         tmp_path,
         {
@@ -147,8 +166,13 @@ def test_inert_bibliography_warns(tmp_path: Path) -> None:
         },
         files=["content/a.md"],
     )
+    (tmp_path / "content" / "a.md").write_text(
+        "# A\nKnown [@doe2020], unknown [@typo2020], quoted `[@ok]`.\n", encoding="utf-8"
+    )
     report = run_checks(book, tmp_path)
-    assert any("bibliography" in w and "not implemented" in w for w in report.warnings)
+    assert any("[@typo2020]" in w for w in report.warnings)
+    assert not any("doe2020" in w for w in report.warnings)
+    assert not any("[@ok]" in w for w in report.warnings)  # code span exempt
 
 
 def test_reserved_launch_button_flags_warn(tmp_path: Path) -> None:

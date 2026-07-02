@@ -72,6 +72,7 @@ def run_checks(book: Book, book_dir: Path) -> CheckReport:
     _check_inert_knobs(book, report)
     _check_empty_sections(book.toc, report)
     _check_internal_links(book, book_dir, entries, report)
+    _check_bibliography(book, book_dir, entries, report)
     return report
 
 
@@ -163,10 +164,6 @@ def _check_duplicate_outputs(entries: list[FileEntry], report: CheckReport) -> N
 
 
 def _check_inert_knobs(book: Book, report: CheckReport) -> None:
-    if book.bibliography.files:
-        report.warnings.append(
-            "bibliography: is configured but not implemented yet — citations will not render"
-        )
     for name in ("binder", "colab", "wasm"):
         if getattr(book.launch_buttons, name, False):
             report.warnings.append(
@@ -189,6 +186,36 @@ def _check_empty_sections(toc: list, report: CheckReport) -> None:
                 )
             else:
                 _check_empty_sections(entry.children, report)
+
+
+def _check_bibliography(
+    book: Book, book_dir: Path, entries: list[FileEntry], report: CheckReport
+) -> None:
+    """Missing .bib files are errors; unknown [@key]s in .md prose warn.
+
+    The build itself stays quiet on unknown keys (they render verbatim,
+    which is self-evident on the page) — this is the loud pre-flight.
+    """
+    if not book.bibliography.files:
+        return
+    from .transforms.citations import _CITE_RE, load_bibliography
+
+    missing = [f for f in book.bibliography.files if not (book_dir / f).exists()]
+    for f in missing:
+        report.errors.append(f"bibliography: file not found: {f}")
+    bib = load_bibliography(tuple(book_dir / f for f in book.bibliography.files))
+    for entry in entries:
+        src = book_dir / entry.file
+        if src.suffix != ".md" or not src.exists():
+            continue
+        text = _CODE_SPAN_RE.sub("", _CODE_FENCE_RE.sub("", src.read_text(encoding="utf-8")))
+        for match in _CITE_RE.finditer(text):
+            for raw in match.group(1).split(";"):
+                key = raw.strip().lstrip("@")
+                if key not in bib:
+                    report.warnings.append(
+                        f"{entry.file}: citation key [@{key}] not found in bibliography"
+                    )
 
 
 def _check_internal_links(

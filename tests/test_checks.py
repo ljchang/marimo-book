@@ -97,7 +97,9 @@ def test_installed_extra_passes(tmp_path: Path, monkeypatch) -> None:
     assert not any("social_cards" in e for e in report.errors)
 
 
-def test_stale_cached_page_is_error(tmp_path: Path) -> None:
+def test_stale_cached_page_warns_not_errors(tmp_path: Path) -> None:
+    """Plain `build` warns and live-renders stale cached pages, so a
+    non-strict `check` must not be harsher than the build it gates."""
     from marimo_book.checks import run_checks
 
     book = _book(
@@ -106,7 +108,8 @@ def test_stale_cached_page_is_error(tmp_path: Path) -> None:
         files=["content/nb.py"],
     )
     report = run_checks(book, tmp_path)  # nothing committed → stale
-    assert any("nb.py" in e and "marimo-book render" in e for e in report.errors)
+    assert report.ok
+    assert any("nb.py" in w and "marimo-book render" in w for w in report.warnings)
 
 
 def test_fresh_cached_page_passes(tmp_path: Path) -> None:
@@ -129,15 +132,35 @@ def test_fresh_cached_page_passes(tmp_path: Path) -> None:
     store.save()
     report = run_checks(book, tmp_path)
     assert not any("nb.py" in e for e in report.errors)
+    assert not any("nb.py" in w for w in report.warnings)
 
 
 # --- warnings -------------------------------------------------------------------
 
 
-def test_inert_bibliography_warns(tmp_path: Path) -> None:
+def test_missing_bib_file_is_error(tmp_path: Path) -> None:
     from marimo_book.checks import run_checks
 
-    (tmp_path / "refs.bib").write_text("@misc{k, title={T}}\n", encoding="utf-8")
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "bibliography": {"files": ["gone.bib"]},
+            "toc": [{"file": "content/a.md"}],
+        },
+        files=["content/a.md"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("bibliography" in e and "gone.bib" in e for e in report.errors)
+
+
+def test_unknown_citation_key_warns(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    (tmp_path / "refs.bib").write_text(
+        "@book{doe2020, author={Doe, J.}, year={2020}, title={T}, publisher={P}}\n",
+        encoding="utf-8",
+    )
     book = _book(
         tmp_path,
         {
@@ -147,8 +170,13 @@ def test_inert_bibliography_warns(tmp_path: Path) -> None:
         },
         files=["content/a.md"],
     )
+    (tmp_path / "content" / "a.md").write_text(
+        "# A\nKnown [@doe2020], unknown [@typo2020], quoted `[@ok]`.\n", encoding="utf-8"
+    )
     report = run_checks(book, tmp_path)
-    assert any("bibliography" in w and "not implemented" in w for w in report.warnings)
+    assert any("[@typo2020]" in w for w in report.warnings)
+    assert not any("doe2020" in w for w in report.warnings)
+    assert not any("[@ok]" in w for w in report.warnings)  # code span exempt
 
 
 def test_reserved_launch_button_flags_warn(tmp_path: Path) -> None:
@@ -258,3 +286,50 @@ def test_links_in_code_fences_and_spans_are_ignored(tmp_path: Path) -> None:
     )
     report = run_checks(book, tmp_path)
     assert not any("broken relative link" in w for w in report.warnings)
+
+
+def test_unparsable_bib_is_error(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    (tmp_path / "refs.bib").write_text("@article{broken", encoding="utf-8")
+    book = _book(
+        tmp_path,
+        {"title": "T", "bibliography": {"files": ["refs.bib"]}, "toc": [{"file": "content/a.md"}]},
+        files=["content/a.md"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("failed to parse" in e for e in report.errors)
+
+
+def test_unknown_citation_key_warns_once_per_file(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    (tmp_path / "refs.bib").write_text(
+        "@book{doe2020, author={Doe, J.}, year={2020}, title={T}, publisher={P}}\n",
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {"title": "T", "bibliography": {"files": ["refs.bib"]}, "toc": [{"file": "content/a.md"}]},
+        files=["content/a.md"],
+    )
+    (tmp_path / "content" / "a.md").write_text(
+        "# A\nTwice [@typo2020] and again [@typo2020].\n", encoding="utf-8"
+    )
+    report = run_checks(book, tmp_path)
+    assert sum("[@typo2020]" in w for w in report.warnings) == 1
+
+
+def test_link_to_promoted_index_page_validates_by_staged_name(tmp_path: Path) -> None:
+    """The first TOC entry stages as index.md; links must validate against
+    staged names the way the build's rewriter resolves them."""
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/intro.md"}, {"file": "content/b.md"}]},
+        files=["content/intro.md", "content/b.md"],
+    )
+    (tmp_path / "content" / "b.md").write_text("# B\n[home](index.md)\n", encoding="utf-8")
+    report = run_checks(book, tmp_path)
+    assert not any("index.md" in w for w in report.warnings)

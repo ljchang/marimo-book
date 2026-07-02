@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Native citations.** `bibliography: [refs.bib]` + `cite_style: apa|numbered`
+  now work: pandoc-style `[@key]` / `[@a; @b]` in `.md` pages and notebook
+  prose render as linked inline citations plus a per-page References section
+  (a standalone `\bibliography` line controls placement). No mkdocs plugin
+  and no pandoc — resolved natively in the preprocessor at finalize time, so
+  editing the `.bib` never invalidates cached notebook renders. Code
+  fences/spans are exempt; unknown keys stay verbatim (`check` warns on
+  them and errors on missing `.bib` files).
 - **`marimo-book check` is now a real doctor** (was a stub). In under a
   second, with no notebook execution: missing TOC files, missing
   logo/favicon/api_docs/blog paths, uninstalled extras for enabled features

@@ -104,7 +104,15 @@ class RenderedStore:
 
     # --- write side (`marimo-book render`) -----------------------------------
 
-    def write(self, src_rel: str, src_abs: Path, body: str, *, body_sig: str | None = None) -> None:
+    def write(
+        self,
+        src_rel: str,
+        src_abs: Path,
+        body: str,
+        *,
+        body_sig: str | None = None,
+        cell_errors: list[dict] | None = None,
+    ) -> None:
         """Persist a freshly rendered ``body`` and record its source hash.
 
         The body file mirrors the source path with a ``.md`` suffix so the
@@ -112,6 +120,8 @@ class RenderedStore:
         page maps to ``index.md`` in the built site. ``body_sig`` records the
         render-affecting config + tool version so a later build can detect a
         stale artifact even when the source bytes are unchanged.
+        ``cell_errors`` records any raising cells so a later ``build --strict``
+        can fail on a committed traceback without executing anything.
         """
         body_rel = Path(src_rel).with_suffix(".md").as_posix()
         body_abs = self.root / body_rel
@@ -123,8 +133,20 @@ class RenderedStore:
             "body_sig": body_sig,
             "rendered_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "marimo_book_version": _tool_version(),
+            "cell_errors": cell_errors or [],
         }
         self.dirty = True
+
+    def recorded_cell_errors(self, src_rel: str) -> list[dict]:
+        """Raising cells captured at render time.
+
+        Entries committed before this key existed return ``[]`` — they are
+        grandfathered rather than schema-bumped, because a bump would mark
+        every committed body stale and force re-executing heavy notebooks.
+        """
+        entry = self.entries.get(src_rel) or {}
+        raw = entry.get("cell_errors")
+        return raw if isinstance(raw, list) else []
 
     def save(self) -> None:
         if not self.dirty and self.manifest_path.exists():

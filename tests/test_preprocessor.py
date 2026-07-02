@@ -439,7 +439,7 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     )
     captured: dict[str, str] = {}
 
-    def fake_render(py_path, *, display_code=False, staged_source_path=None):
+    def fake_render(py_path, *, display_code=False, staged_source_path=None, timeout=None):
         # Capture the staged source content while the tempdir still exists.
         assert staged_source_path is not None, "WASM path must receive a staged source"
         captured["content"] = staged_source_path.read_text()
@@ -662,3 +662,32 @@ def test_cell_error_allow_errors_silences(tmp_path: Path) -> None:
     )
     assert report.ok
     assert not any("boom" in w for w in report.warnings)
+
+
+def test_cell_error_strict_verdict_survives_cache_hit(tmp_path: Path) -> None:
+    """A non-strict (warn) build records the cache; the next strict build hits
+    the cache without re-exporting — it must still fail from the recorded
+    errors, not silently pass because the export was skipped."""
+    book = _error_book(tmp_path)
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.ok and report.pages_rendered > 0  # warm the cache, warning only
+
+    report = Preprocessor(book, book_dir=tmp_path).build(
+        out_dir=tmp_path / "_site_src", strict=True
+    )
+    assert report.pages_cached > 0  # exercised the cache-hit path, not a re-render
+    assert not report.ok
+    assert any("ValueError: boom" in e for e in report.errors)
+
+
+def test_execution_timeout_change_does_not_invalidate_signatures(tmp_path: Path) -> None:
+    """The timeout can abort a render but never change its output, so tuning it
+    must not invalidate the build cache or committed _rendered/ bodies."""
+    from marimo_book.preprocessor import _book_signature, _render_body_signature
+
+    base = {"title": "T", "toc": [{"file": "a.md"}]}
+    b1 = Book.model_validate(base)
+    b2 = Book.model_validate({**base, "defaults": {"execution_timeout": None}})
+    assert _render_body_signature(b1) == _render_body_signature(b2)
+    assert _book_signature(b1) == _book_signature(b2)

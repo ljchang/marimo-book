@@ -106,6 +106,27 @@ If a PR introduces a new optional extra (like `[autorefs]`), update
 both `.github/workflows/ci.yml` and `.github/workflows/docs.yml` to
 install it (the docs job needs every extra the docs site uses).
 
+## Build strictness and execution bounds (since 0.1.27)
+
+- **`build --strict` fails when a notebook cell raises.** The traceback
+  still renders into the page (authoring aid), but it lands in
+  `report.errors` under strict. Non-strict builds, blog posts, and
+  `marimo-book render` warn. Opt out per TOC entry with
+  `allow_errors: true` (for lessons that demo exceptions). The verdict
+  survives caching: raising cells are recorded in the transient cache
+  AND in `_rendered/` manifest entries and replayed on hits — do not
+  remove that replay or a cached strict run will silently pass. WASM
+  pages are exempt (islands pipeline produces no ipynb error outputs).
+  The docs CI job installs `drawdata anywidget` because without them
+  the demo notebooks raise and now fail the strict docs build.
+- **`defaults.execution_timeout`** (seconds, default 600, `null`
+  disables) bounds every notebook execution: `marimo export`
+  subprocesses AND the in-process WASM island build. It is deliberately
+  **excluded from `_book_signature` and `_render_body_signature`** — it
+  can abort a render but never change its output, so tuning it must not
+  invalidate caches or committed `_rendered/` bodies. Keep any future
+  "how long/how" knobs out of those signatures too.
+
 ## Feature flags users can opt into via `book.yml`
 
 | Flag | Effect | Extra needed |

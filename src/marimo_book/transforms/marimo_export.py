@@ -61,6 +61,9 @@ class ExportedNotebook:
 class CellError:
     """A cell whose execution raised — parsed from ipynb ``error`` outputs."""
 
+    # 1-based ordinal among the notebook's *code* cells (the exported ipynb
+    # interleaves markdown cells, whose positions would make the number
+    # meaningless to the author looking at their ``.py``).
     cell_index: int
     ename: str
     evalue: str
@@ -76,12 +79,16 @@ def collect_cell_errors(exported: ExportedNotebook) -> list[CellError]:
     (``--strict``) or just a warning.
     """
     errors: list[CellError] = []
-    for idx, cell in enumerate(exported.cells):
+    code_ordinal = 0
+    for cell in exported.cells:
         if cell.get("cell_type") != "code":
             continue
+        code_ordinal += 1
         for out in cell.get("outputs", []) or []:
             if out.get("output_type") == "error":
-                errors.append(CellError(idx, out.get("ename", "Error"), out.get("evalue", "")))
+                errors.append(
+                    CellError(code_ordinal, out.get("ename", "Error"), out.get("evalue", ""))
+                )
     return errors
 
 

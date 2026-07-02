@@ -108,7 +108,8 @@ class BuildReport:
 # --- build cache ------------------------------------------------------------
 
 # Bumped whenever the cache schema or hit-decision rules change.
-_CACHE_SCHEMA_VERSION = 1
+# v2: entries record ``cell_errors`` so hits can replay the strict/warn verdict.
+_CACHE_SCHEMA_VERSION = 2
 _CACHE_DIR_NAME = ".marimo_book_cache"
 _CACHE_FILE_NAME = "manifest.json"
 
@@ -167,7 +168,9 @@ class BuildCache:
         self.dirty = True
         return True
 
-    def record(self, src_rel: str, src_abs: Path, out_rel: str) -> None:
+    def record(
+        self, src_rel: str, src_abs: Path, out_rel: str, *, cell_errors: list[dict] | None = None
+    ) -> None:
         try:
             mtime = src_abs.stat().st_mtime
             digest = _file_sha256(src_abs)
@@ -178,8 +181,17 @@ class BuildCache:
             "src_hash": digest,
             "out_path": out_rel,
             "rendered_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            # Raising cells observed at render time, replayed on cache hits —
+            # a hit skips the export, and the strict/warn verdict must not
+            # depend on whether the page happened to be cached.
+            "cell_errors": cell_errors or [],
         }
         self.dirty = True
+
+    def recorded_cell_errors(self, src_rel: str) -> list[dict]:
+        entry = self.entries.get(src_rel) or {}
+        raw = entry.get("cell_errors")
+        return raw if isinstance(raw, list) else []
 
     def save(self) -> None:
         if not self.dirty and self.path.exists():
@@ -214,6 +226,20 @@ class BuildCache:
             self.entries = loaded
 
 
+def _cell_errors_to_dicts(cell_errors: list[CellError]) -> list[dict]:
+    return [{"cell_index": e.cell_index, "ename": e.ename, "evalue": e.evalue} for e in cell_errors]
+
+
+def _cell_errors_from_dicts(raw: list[dict]) -> list[CellError]:
+    return [
+        CellError(
+            int(d.get("cell_index", 0)), str(d.get("ename", "Error")), str(d.get("evalue", ""))
+        )
+        for d in raw
+        if isinstance(d, dict)
+    ]
+
+
 def _resolve_tool_version() -> str:
     """Read the installed package version; fall back to a sentinel if missing."""
     try:
@@ -234,9 +260,13 @@ def _book_signature(book: Book) -> str:
     Excludes title / palette / fonts / analytics — those only affect
     ``mkdocs.yml`` emission, which is always re-run and cheap.
     """
+    defaults = book.defaults.model_dump(mode="json")
+    # execution_timeout bounds how long a render may take, never what it
+    # renders — excluding it keeps caches valid when the knob changes.
+    defaults.pop("execution_timeout", None)
     relevant: dict = {
         "widget_defaults": book.widget_defaults,
-        "defaults": book.defaults.model_dump(mode="json"),
+        "defaults": defaults,
         "dependencies": book.dependencies.model_dump(mode="json"),
         "launch_buttons": book.launch_buttons.model_dump(mode="json"),
         "precompute": book.precompute.model_dump(mode="json"),
@@ -273,8 +303,14 @@ def _render_body_signature(book: Book) -> str:
     package release. Stored with each ``RenderedStore`` entry so a build can
     tell a committed body is stale even when the source bytes are unchanged.
     """
+    defaults = book.defaults.model_dump(mode="json")
+    # execution_timeout can only abort a render, never change its output —
+    # including it would mark every committed body stale (and force a costly
+    # re-execution of heavy notebooks) each time the knob is tuned or a
+    # release adds/renames it. Same rationale as _RENDER_OUTPUT_VERSION.
+    defaults.pop("execution_timeout", None)
     relevant: dict = {
-        "defaults": book.defaults.model_dump(mode="json"),
+        "defaults": defaults,
         "dependencies": book.dependencies.model_dump(mode="json"),
         "widget_defaults": book.widget_defaults,
         "render_output_version": _RENDER_OUTPUT_VERSION,
@@ -485,6 +521,31 @@ class Preprocessor:
         if self.on_progress is not None:
             self.on_progress(message)
 
+    def _apply_cell_error_policy(
+        self,
+        entry: FileEntry,
+        cell_errors: list[CellError],
+        report: BuildReport,
+        *,
+        strict: bool,
+        note: str,
+    ) -> None:
+        """Route a page's raising cells to the report.
+
+        ``strict`` makes them build failures; otherwise they are warnings
+        suffixed with ``note`` (what the visible traceback ends up in).
+        ``allow_errors: true`` on the entry silences both — for pages that
+        intentionally demonstrate exceptions.
+        """
+        if not cell_errors or entry.allow_errors:
+            return
+        sink = report.errors if strict else report.warnings
+        for e in cell_errors:
+            sink.append(
+                f"{entry.file}: code cell {e.cell_index} raised {e.ename}: {e.evalue}"
+                + ("" if strict else f" ({note})")
+            )
+
     # --- public API ----------------------------------------------------------
 
     def build(
@@ -580,6 +641,16 @@ class Preprocessor:
                 # export takes seconds-to-minutes, vs ~10 ms for Markdown.
                 if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs, docs_dir):
                     self._progress(f"{tag} {src_rel} (cache hit)")
+                    # Replay cell errors recorded at render time — a hit skips
+                    # the export entirely, so without this a page that failed
+                    # `--strict` once would pass on the very next (cached) run.
+                    self._apply_cell_error_policy(
+                        entry,
+                        _cell_errors_from_dicts(cache.recorded_cell_errors(src_rel)),
+                        report,
+                        strict=strict,
+                        note="traceback published to page",
+                    )
                     report.pages_cached += 1
                 else:
                     if entry.file.suffix == ".py":
@@ -588,19 +659,9 @@ class Preprocessor:
                     # A raising cell renders its traceback into the page (a
                     # deliberate authoring aid) but must not slip through CI:
                     # strict makes it a build failure, non-strict a warning.
-                    def _on_cell_errors(
-                        cell_errors: list[CellError], *, _entry: FileEntry = entry
-                    ) -> None:
-                        if _entry.allow_errors:
-                            return
-                        sink = report.errors if strict else report.warnings
-                        for e in cell_errors:
-                            sink.append(
-                                f"{_entry.file}: cell {e.cell_index} raised "
-                                f"{e.ename}: {e.evalue}"
-                                + ("" if strict else " (traceback published to page)")
-                            )
-
+                    # Collected (not routed) here so the raw list can also be
+                    # recorded in the cache for replay on future hits.
+                    collected_errors: list[CellError] = []
                     stage_page(
                         self.book,
                         self.book_dir,
@@ -609,10 +670,22 @@ class Preprocessor:
                         md_basenames=md_basenames,
                         sandbox=self.sandbox,
                         index_source=index_source,
-                        on_cell_errors=_on_cell_errors,
+                        on_cell_errors=collected_errors.extend,
+                    )
+                    self._apply_cell_error_policy(
+                        entry,
+                        collected_errors,
+                        report,
+                        strict=strict,
+                        note="traceback published to page",
                     )
                     if entry.file.suffix == ".py":
-                        cache.record(src_rel, src_abs, out_rel)
+                        cache.record(
+                            src_rel,
+                            src_abs,
+                            out_rel,
+                            cell_errors=_cell_errors_to_dicts(collected_errors),
+                        )
                     report.pages_rendered += 1
                 report.pages += 1
 
@@ -676,11 +749,12 @@ class Preprocessor:
         report = BuildReport()
         store = RenderedStore(self.book_dir)
         default_mode = self.book.defaults.mode
-        for entry in _iter_file_entries(self.book.toc):
-            if entry.file.suffix != ".py":
-                continue
-            if entry.effective_mode(default_mode) != "cached":
-                continue
+        targets = [
+            e
+            for e in _iter_file_entries(self.book.toc)
+            if e.file.suffix == ".py" and e.effective_mode(default_mode) == "cached"
+        ]
+        for pos, entry in enumerate(targets, 1):
             src_rel = str(entry.file)
             src_abs = (self.book_dir / entry.file).resolve()
             report.pages += 1
@@ -694,29 +768,37 @@ class Preprocessor:
                     )
                 continue
             try:
+                # These are the notebooks documented to run for hours on a
+                # GPU box — say which one is executing and how many remain.
+                self._progress(f"[{pos}/{len(targets)}] rendering {src_rel}...")
                 # ``render`` runs on the author's machine — a raising cell
                 # would otherwise be committed to ``_rendered/`` unnoticed.
                 # Warn (not error): a demo-exception page is legitimate and
-                # ``allow_errors: true`` silences it entirely.
-                def _on_cell_errors(
-                    cell_errors: list[CellError], *, _entry: FileEntry = entry
-                ) -> None:
-                    if _entry.allow_errors:
-                        return
-                    for e in cell_errors:
-                        report.warnings.append(
-                            f"{_entry.file}: cell {e.cell_index} raised "
-                            f"{e.ename}: {e.evalue} (traceback committed to _rendered/)"
-                        )
-
+                # ``allow_errors: true`` silences it entirely. The raw list is
+                # also stored with the artifact so a later ``build --strict``
+                # can fail on the committed traceback without executing.
+                collected_errors: list[CellError] = []
                 body = render_py_body(
                     self.book,
                     self.book_dir,
                     entry,
                     sandbox=self.sandbox,
-                    on_cell_errors=_on_cell_errors,
+                    on_cell_errors=collected_errors.extend,
                 )
-                store.write(src_rel, src_abs, body, body_sig=self.body_signature)
+                self._apply_cell_error_policy(
+                    entry,
+                    collected_errors,
+                    report,
+                    strict=False,
+                    note="traceback committed to _rendered/",
+                )
+                store.write(
+                    src_rel,
+                    src_abs,
+                    body,
+                    body_sig=self.body_signature,
+                    cell_errors=_cell_errors_to_dicts(collected_errors),
+                )
                 report.pages_rendered += 1
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
@@ -747,6 +829,16 @@ class Preprocessor:
         authoring still works.
         """
         if store.is_fresh(src_rel, src_abs, body_sig=self.body_signature):
+            # The committed body may contain tracebacks captured at render
+            # time; replay them so the strict gate applies to cached pages
+            # the same as to freshly executed ones.
+            self._apply_cell_error_policy(
+                entry,
+                _cell_errors_from_dicts(store.recorded_cell_errors(src_rel)),
+                report,
+                strict=strict,
+                note="traceback committed to _rendered/",
+            )
             _finalize_page(
                 self.book,
                 self.book_dir,
@@ -775,6 +867,7 @@ class Preprocessor:
             f"rendering fresh (executes). Run `marimo-book render` and commit "
             f"_rendered/ so CI need not execute."
         )
+        collected_errors: list[CellError] = []
         stage_page(
             self.book,
             self.book_dir,
@@ -783,6 +876,14 @@ class Preprocessor:
             md_basenames=md_basenames,
             sandbox=self.sandbox,
             index_source=index_source,
+            on_cell_errors=collected_errors.extend,
+        )
+        self._apply_cell_error_policy(
+            entry,
+            collected_errors,
+            report,
+            strict=False,  # this branch is only reachable when strict is off
+            note="traceback published to page",
         )
         report.pages_rendered += 1
 
@@ -942,11 +1043,18 @@ class Preprocessor:
                 def _on_post_cell_errors(cell_errors: list[CellError], *, _src: Path = src) -> None:
                     for e in cell_errors:
                         report.warnings.append(
-                            f"{_src.name}: cell {e.cell_index} raised "
+                            f"{_src.name}: code cell {e.cell_index} raised "
                             f"{e.ename}: {e.evalue} (traceback published to post)"
                         )
 
-                body = self._render_notebook_body(src, on_cell_errors=_on_post_cell_errors)
+                # Contain per-post render crashes (export timeout, marimo
+                # failure) like TOC entries — one bad post must not abort
+                # the whole build before mkdocs.yml is written.
+                try:
+                    body = self._render_notebook_body(src, on_cell_errors=_on_post_cell_errors)
+                except Exception as exc:  # noqa: BLE001
+                    report.errors.append(f"{src.name}: {exc.__class__.__name__}: {exc}")
+                    continue
                 if meta.title == src.stem:
                     h1 = _first_markdown_heading(body)
                     if h1:
@@ -1083,7 +1191,11 @@ def stage_page(
                 # islands runtime takes over in the browser; the body we
                 # write here contains marimo's CDN-loaded scripts + the
                 # ``<marimo-island>`` web components for each cell.
-                body = render_wasm_page(src_abs, staged_source_path=staged)
+                body = render_wasm_page(
+                    src_abs,
+                    staged_source_path=staged,
+                    timeout=book.defaults.execution_timeout,
+                )
                 apply_rewrites = False
             else:
                 body = _render_marimo(

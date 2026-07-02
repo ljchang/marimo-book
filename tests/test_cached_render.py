@@ -321,3 +321,30 @@ def test_render_cached_allow_errors_silences(tmp_path: Path) -> None:
     report = Preprocessor(book, book_dir=tmp_path).render_cached()
     assert report.ok
     assert not any("boom" in w for w in report.warnings)
+
+
+def test_cached_page_with_committed_cell_error_fails_strict_build(tmp_path: Path) -> None:
+    """render commits the traceback body AND the cell-error record; a later
+    strict build must fail from the record without executing anything."""
+    content = tmp_path / "content"
+    content.mkdir(parents=True)
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    shutil.copy(FIXTURES / "error_notebook.py", content / "err.py")
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [
+                {"file": "content/intro.md"},
+                {"file": "content/err.py", "mode": "cached"},
+            ],
+        }
+    )
+    pre = Preprocessor(book, book_dir=tmp_path)
+    assert pre.render_cached().ok  # warns, commits _rendered/
+
+    report = Preprocessor(book, book_dir=tmp_path).build(
+        out_dir=tmp_path / "_site_src", strict=True
+    )
+    assert report.pages_cached > 0  # sourced from the committed artifact
+    assert not report.ok
+    assert any("ValueError: boom" in e for e in report.errors)

@@ -280,3 +280,44 @@ def test_build_cached_stale_under_strict_errors_without_executing(tmp_path: Path
     assert any("refusing to execute under --strict" in e for e in report.errors)
     assert report.pages_cached == 0
     assert report.pages_rendered == 1  # only the markdown index rendered
+
+
+# --- cell errors surfaced by `marimo-book render` ---------------------------
+
+
+def test_render_cached_warns_on_cell_error(tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir(parents=True)
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    shutil.copy(FIXTURES / "error_notebook.py", content / "err.py")
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [
+                {"file": "content/intro.md"},
+                {"file": "content/err.py", "mode": "cached"},
+            ],
+        }
+    )
+    report = Preprocessor(book, book_dir=tmp_path).render_cached()
+    assert report.ok  # author-facing warning, never fatal
+    assert any("ValueError: boom" in w for w in report.warnings)
+
+
+def test_render_cached_allow_errors_silences(tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir(parents=True)
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    shutil.copy(FIXTURES / "error_notebook.py", content / "err.py")
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [
+                {"file": "content/intro.md"},
+                {"file": "content/err.py", "mode": "cached", "allow_errors": True},
+            ],
+        }
+    )
+    report = Preprocessor(book, book_dir=tmp_path).render_cached()
+    assert report.ok
+    assert not any("boom" in w for w in report.warnings)

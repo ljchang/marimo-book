@@ -53,8 +53,10 @@ from .rendered_store import RenderedStore
 from .shell import _nav_from_toc, emit_mkdocs_yml
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import (
+    CellError,
     cells_to_markdown,
     cleanup_orphan_precompute_dirs,
+    collect_cell_errors,
     export_notebook,
     staged_sibling_file,
 )
@@ -582,6 +584,23 @@ class Preprocessor:
                 else:
                     if entry.file.suffix == ".py":
                         self._progress(f"{tag} rendering {src_rel}...")
+
+                    # A raising cell renders its traceback into the page (a
+                    # deliberate authoring aid) but must not slip through CI:
+                    # strict makes it a build failure, non-strict a warning.
+                    def _on_cell_errors(
+                        cell_errors: list[CellError], *, _entry: FileEntry = entry
+                    ) -> None:
+                        if _entry.allow_errors:
+                            return
+                        sink = report.errors if strict else report.warnings
+                        for e in cell_errors:
+                            sink.append(
+                                f"{_entry.file}: cell {e.cell_index} raised "
+                                f"{e.ename}: {e.evalue}"
+                                + ("" if strict else " (traceback published to page)")
+                            )
+
                     stage_page(
                         self.book,
                         self.book_dir,
@@ -590,6 +609,7 @@ class Preprocessor:
                         md_basenames=md_basenames,
                         sandbox=self.sandbox,
                         index_source=index_source,
+                        on_cell_errors=_on_cell_errors,
                     )
                     if entry.file.suffix == ".py":
                         cache.record(src_rel, src_abs, out_rel)
@@ -674,7 +694,28 @@ class Preprocessor:
                     )
                 continue
             try:
-                body = render_py_body(self.book, self.book_dir, entry, sandbox=self.sandbox)
+                # ``render`` runs on the author's machine — a raising cell
+                # would otherwise be committed to ``_rendered/`` unnoticed.
+                # Warn (not error): a demo-exception page is legitimate and
+                # ``allow_errors: true`` silences it entirely.
+                def _on_cell_errors(
+                    cell_errors: list[CellError], *, _entry: FileEntry = entry
+                ) -> None:
+                    if _entry.allow_errors:
+                        return
+                    for e in cell_errors:
+                        report.warnings.append(
+                            f"{_entry.file}: cell {e.cell_index} raised "
+                            f"{e.ename}: {e.evalue} (traceback committed to _rendered/)"
+                        )
+
+                body = render_py_body(
+                    self.book,
+                    self.book_dir,
+                    entry,
+                    sandbox=self.sandbox,
+                    on_cell_errors=_on_cell_errors,
+                )
                 store.write(src_rel, src_abs, body, body_sig=self.body_signature)
                 report.pages_rendered += 1
             except Exception as exc:  # noqa: BLE001
@@ -868,13 +909,17 @@ class Preprocessor:
                 return True
         return False
 
-    def _render_notebook_body(self, src: Path) -> str:
+    def _render_notebook_body(
+        self, src: Path, on_cell_errors: Callable[[list[CellError]], None] | None = None
+    ) -> str:
         """Render a .py blog post to static markdown (reuses the page path)."""
         needs_pep723 = self.book.dependencies.auto_pep723
         with _maybe_stage_with_pep723(
             src, self.book.dependencies, enabled=needs_pep723, wasm_bootstrap=False
         ) as staged:
-            return _render_marimo(staged or src, self.book, sandbox=False)
+            return _render_marimo(
+                staged or src, self.book, sandbox=False, on_cell_errors=on_cell_errors
+            )
 
     def _stage_blog(self, docs_dir: Path, report: BuildReport) -> None:
         """Render and stage blog posts + index + merged .authors.yml."""
@@ -893,7 +938,15 @@ class Preprocessor:
         for src in posts:
             meta = resolve_meta(parse_post_header(src), src, default_author=default_author)
             if src.suffix == ".py":
-                body = self._render_notebook_body(src)
+                # Blog posts are never strict-fatal in v1 — warn only.
+                def _on_post_cell_errors(cell_errors: list[CellError], *, _src: Path = src) -> None:
+                    for e in cell_errors:
+                        report.warnings.append(
+                            f"{_src.name}: cell {e.cell_index} raised "
+                            f"{e.ename}: {e.evalue} (traceback published to post)"
+                        )
+
+                body = self._render_notebook_body(src, on_cell_errors=_on_post_cell_errors)
                 if meta.title == src.stem:
                     h1 = _first_markdown_heading(body)
                     if h1:
@@ -999,6 +1052,7 @@ def stage_page(
     md_basenames: set[str] | None = None,
     sandbox: bool = False,
     index_source: Path | None = None,
+    on_cell_errors: Callable[[list[CellError]], None] | None = None,
 ) -> Path:
     """Render a single TOC entry into ``docs_dir`` and return the output path."""
     src_abs = (book_dir / entry.file).resolve()
@@ -1032,7 +1086,9 @@ def stage_page(
                 body = render_wasm_page(src_abs, staged_source_path=staged)
                 apply_rewrites = False
             else:
-                body = _render_marimo(staged or src_abs, book, sandbox=sandbox)
+                body = _render_marimo(
+                    staged or src_abs, book, sandbox=sandbox, on_cell_errors=on_cell_errors
+                )
                 apply_rewrites = True
     elif src_abs.suffix == ".md":
         body = _render_markdown(src_abs)
@@ -1086,7 +1142,14 @@ def _finalize_page(
     return dst
 
 
-def render_py_body(book: Book, book_dir: Path, entry: FileEntry, *, sandbox: bool = False) -> str:
+def render_py_body(
+    book: Book,
+    book_dir: Path,
+    entry: FileEntry,
+    *,
+    sandbox: bool = False,
+    on_cell_errors: Callable[[list[CellError]], None] | None = None,
+) -> str:
     """Execute a ``.py`` entry and return its rendered body (pre-finalize).
 
     This is the expensive, source-dependent output that ``mode: cached``
@@ -1103,16 +1166,28 @@ def render_py_body(book: Book, book_dir: Path, entry: FileEntry, *, sandbox: boo
         enabled=book.dependencies.auto_pep723,
         wasm_bootstrap=False,
     ) as staged:
-        return _render_marimo(staged or src_abs, book, sandbox=sandbox)
+        return _render_marimo(
+            staged or src_abs, book, sandbox=sandbox, on_cell_errors=on_cell_errors
+        )
 
 
-def _render_marimo(src: Path, book: Book, *, sandbox: bool = False) -> str:
+def _render_marimo(
+    src: Path,
+    book: Book,
+    *,
+    sandbox: bool = False,
+    on_cell_errors: Callable[[list[CellError]], None] | None = None,
+) -> str:
     exp = export_notebook(
         src,
         sandbox=sandbox,
         suppress_warnings=book.defaults.suppress_warnings,
         timeout=book.defaults.execution_timeout,
     )
+    if on_cell_errors is not None:
+        cell_errors = collect_cell_errors(exp)
+        if cell_errors:
+            on_cell_errors(cell_errors)
     return cells_to_markdown(
         exp,
         hide_first_code_cell=book.defaults.hide_first_code_cell,

@@ -483,7 +483,7 @@ def test_stage_page_auto_pep723_static_mode_skips_bootstrap(tmp_path: Path) -> N
     )
     captured: dict[str, str] = {}
 
-    def fake_render_marimo(src, book_arg, *, sandbox=False):
+    def fake_render_marimo(src, book_arg, *, sandbox=False, on_cell_errors=None):
         # Read content while the staged tempdir is still alive (it gets
         # torn down on context exit, before the assertions below).
         captured["content"] = Path(src).read_text(encoding="utf-8")
@@ -513,7 +513,7 @@ def test_stage_page_static_mode_skips_staging_by_default(tmp_path: Path) -> None
     book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
     captured = {"args": None}
 
-    def fake_render(src, book_arg, *, sandbox=False):
+    def fake_render(src, book_arg, *, sandbox=False, on_cell_errors=None):
         captured["args"] = src
         return "<!-- mocked -->"
 
@@ -623,3 +623,42 @@ def test_on_progress_reports_notebook_renders(tmp_path: Path) -> None:
 
     assert report.ok
     assert any("[1/1] content/nb.py (cache hit)" in m for m in messages)
+
+
+# --- cell-error strictness ----------------------------------------------------
+
+
+def _error_book(tmp_path: Path, *, allow_errors: bool = False) -> Book:
+    _minimal_book(tmp_path)
+    shutil.copy(FIXTURES / "error_notebook.py", tmp_path / "content" / "err.py")
+    entry: dict = {"file": "content/err.py"}
+    if allow_errors:
+        entry["allow_errors"] = True
+    return Book.model_validate({"title": "Test", "toc": [{"file": "content/intro.md"}, entry]})
+
+
+def test_cell_error_warns_on_default_build(tmp_path: Path) -> None:
+    book = _error_book(tmp_path)
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.ok  # non-strict: warn, don't fail
+    assert any("cell" in w and "ValueError: boom" in w for w in report.warnings)
+
+
+def test_cell_error_fails_strict_build(tmp_path: Path) -> None:
+    book = _error_book(tmp_path)
+    report = Preprocessor(book, book_dir=tmp_path).build(
+        out_dir=tmp_path / "_site_src", strict=True
+    )
+    assert not report.ok
+    assert any("ValueError: boom" in e for e in report.errors)
+    # The page still stages — strictness changes the verdict, not the output.
+    assert (tmp_path / "_site_src" / "docs" / "err.md").exists()
+
+
+def test_cell_error_allow_errors_silences(tmp_path: Path) -> None:
+    book = _error_book(tmp_path, allow_errors=True)
+    report = Preprocessor(book, book_dir=tmp_path).build(
+        out_dir=tmp_path / "_site_src", strict=True
+    )
+    assert report.ok
+    assert not any("boom" in w for w in report.warnings)

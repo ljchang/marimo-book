@@ -266,6 +266,7 @@ def build(
         book_dir=book_dir,
         sandbox_override=sandbox,
         rebuild=rebuild or clean,
+        on_progress=_echo_progress,
     )
     typer.echo(
         f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages, "
@@ -396,7 +397,13 @@ def serve(
     book_dir = book_file.resolve().parent
     site_src = book_dir / "_site_src"
 
-    pre = Preprocessor(book, book_dir=book_dir, sandbox_override=sandbox, rebuild=rebuild)
+    pre = Preprocessor(
+        book,
+        book_dir=book_dir,
+        sandbox_override=sandbox,
+        rebuild=rebuild,
+        on_progress=_echo_progress,
+    )
     typer.echo(
         f"Preprocessing '{book.title}' ({_count_toc(book.toc)} pages, "
         f"deps={'sandbox' if pre.sandbox else 'env'})..."
@@ -432,6 +439,7 @@ def serve(
             site_src=site_src,
             on_report=_watcher_report_callback,
             sandbox_override=sandbox,
+            on_progress=_echo_progress,
         )
 
     try:
@@ -448,6 +456,11 @@ def serve(
                 mkdocs_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 mkdocs_proc.kill()
+
+
+def _echo_progress(message: str) -> None:
+    """Per-notebook progress line from the preprocessor (see on_progress)."""
+    typer.echo(f"  {message}")
 
 
 def _report_build(report) -> None:

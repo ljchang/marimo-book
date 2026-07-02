@@ -594,3 +594,32 @@ def test_mkdocs_yml_wires_blog_plugins_and_nav(tmp_path: Path) -> None:
     assert "blog" in names and "tags" in names and "rss" in names
     assert names.index("blog") < names.index("rss")
     assert any(isinstance(n, dict) and n.get("News") == "blog/index.md" for n in cfg["nav"])
+
+
+# --- build progress reporting -------------------------------------------------
+
+
+def test_on_progress_reports_notebook_renders(tmp_path: Path) -> None:
+    _minimal_book(tmp_path)
+    shutil.copy(NOTEBOOK_FIXTURE, tmp_path / "content" / "nb.py")
+    book = Book.model_validate(
+        {
+            "title": "Test",
+            "toc": [{"file": "content/intro.md"}, {"file": "content/nb.py"}],
+        }
+    )
+
+    messages: list[str] = []
+    pre = Preprocessor(book, book_dir=tmp_path, on_progress=messages.append)
+    report = pre.build(out_dir=tmp_path / "_site_src")
+
+    assert report.ok
+    assert any("[1/1] rendering content/nb.py" in m for m in messages)
+
+    # Second build: the cache hit surfaces instead of a render line.
+    messages.clear()
+    pre = Preprocessor(book, book_dir=tmp_path, on_progress=messages.append)
+    report = pre.build(out_dir=tmp_path / "_site_src")
+
+    assert report.ok
+    assert any("[1/1] content/nb.py (cache hit)" in m for m in messages)

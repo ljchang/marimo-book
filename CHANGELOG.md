@@ -5,6 +5,29 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`defaults.execution_timeout`** (seconds, default `600`, `null` disables)
+  bounds every `marimo export` subprocess — a notebook stuck in an infinite
+  loop or a hung download previously stalled `build`/`serve`/CI forever with
+  no diagnostic. Books whose notebooks legitimately run longer should raise
+  the knob (or disable it) in `book.yml`.
+- **Per-notebook progress lines** during `build` and `serve` rebuilds
+  (`[2/7] rendering content/ch2.py...`), so long notebook builds no longer
+  look hung.
+- **Theme polish.** Palettes now follow the OS `prefers-color-scheme` on
+  first visit (the manual toggle still overrides); instant-navigation
+  prefetch, a page-load progress bar, and a back-to-top button are enabled.
+
+### Fixed
+
+- **Declared `tomlkit` and `markdown` as direct dependencies** — both are
+  imported directly but were only present transitively via marimo/mkdocs, so
+  an upstream dependency shuffle could have crashed every build at import
+  time. Dropped unused `jinja2` and `pybtex`.
+
 ## [0.1.26] — 2026-06-18
 
 ### Fixed

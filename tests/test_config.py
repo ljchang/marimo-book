@@ -203,3 +203,20 @@ def test_api_docs_full_roundtrip() -> None:
     assert book.api_docs.docstring_style == "numpy"
     assert book.api_docs.options == {"members_order": "source"}
     assert book.api_docs.inventories == ["https://docs.python.org/3/objects.inv"]
+
+
+def test_execution_timeout_default_and_override(tmp_path: Path) -> None:
+    book_yml = tmp_path / "book.yml"
+    book_yml.write_text(yaml.safe_dump({"title": "T", "toc": [{"file": "a.md"}]}))
+    assert load_book(book_yml).defaults.execution_timeout == 600.0
+
+    book_yml.write_text(
+        yaml.safe_dump(
+            {
+                "title": "T",
+                "defaults": {"execution_timeout": None},
+                "toc": [{"file": "a.md"}],
+            }
+        )
+    )
+    assert load_book(book_yml).defaults.execution_timeout is None

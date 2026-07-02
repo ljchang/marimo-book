@@ -42,6 +42,11 @@ from .callouts import render_callout_html
 # notebook. The key names we care about for v0.1:
 _HIDE_CODE = "hide_code"
 
+# Default wall-clock cap per export subprocess; ``Defaults.execution_timeout``
+# overrides it per book. Applied even when callers don't thread the knob so
+# no call site can hang unboundedly by accident.
+DEFAULT_EXPORT_TIMEOUT: float = 600.0
+
 
 @dataclass
 class ExportedNotebook:
@@ -58,6 +63,7 @@ def export_notebook(
     include_outputs: bool = True,
     sandbox: bool = False,
     suppress_warnings: bool = False,
+    timeout: float | None = DEFAULT_EXPORT_TIMEOUT,
 ) -> ExportedNotebook:
     """Run ``marimo export ipynb`` and return the parsed notebook JSON.
 
@@ -94,7 +100,16 @@ def export_notebook(
     with tempfile.TemporaryDirectory(prefix="marimo_book_") as tmp_dir:
         tmp_out = Path(tmp_dir) / f"{py_path.stem}.ipynb"
         cmd.extend(["-o", str(tmp_out)])
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=False, env=env, timeout=timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"marimo export ipynb timed out after {timeout:g}s for {py_path}. "
+                "Raise defaults.execution_timeout in book.yml (or set it to null "
+                "to disable) if this notebook legitimately runs longer."
+            ) from exc
         # marimo exits non-zero when *some* cells fail to execute but still
         # produces a valid ipynb with error outputs. We accept that case
         # because the preprocessor then emits the error cell visibly.
@@ -117,6 +132,7 @@ def export_notebook_with_overrides(
     include_outputs: bool = True,
     sandbox: bool = False,
     suppress_warnings: bool = False,
+    timeout: float | None = DEFAULT_EXPORT_TIMEOUT,
 ) -> ExportedNotebook:
     """Run ``marimo export`` against ``rewritten_source`` instead of the file.
 
@@ -137,6 +153,7 @@ def export_notebook_with_overrides(
             include_outputs=include_outputs,
             sandbox=sandbox,
             suppress_warnings=suppress_warnings,
+            timeout=timeout,
         )
 
 

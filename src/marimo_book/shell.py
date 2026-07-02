@@ -230,7 +230,10 @@ def _build_config(
 
 
 def _theme_block(book: Book) -> dict[str, Any]:
+    # ``media`` keys make the first paint follow the OS preference; the
+    # manual toggle still overrides (Material persists the choice).
     palette_default: dict[str, Any] = {
+        "media": "(prefers-color-scheme: light)",
         "scheme": "default",
         "toggle": {
             "icon": "material/weather-sunny",
@@ -238,6 +241,7 @@ def _theme_block(book: Book) -> dict[str, Any]:
         },
     }
     palette_slate: dict[str, Any] = {
+        "media": "(prefers-color-scheme: dark)",
         "scheme": "slate",
         "toggle": {
             "icon": "material/weather-night",
@@ -262,6 +266,11 @@ def _theme_block(book: Book) -> dict[str, Any]:
             "navigation.path",
             "navigation.footer",
             "navigation.instant",
+            # Prefetch on hover + a top progress bar for slow page loads
+            # (WASM pages especially), and a back-to-top button on mobile.
+            "navigation.instant.prefetch",
+            "navigation.instant.progress",
+            "navigation.top",
             "navigation.tracking",
             "search.suggest",
             "search.highlight",

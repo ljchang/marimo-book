@@ -321,6 +321,12 @@ class Defaults(BaseModel):
     # don't surface as visible stderr blocks in the rendered page. Off by
     # default so existing books don't lose visible warnings unexpectedly.
     suppress_warnings: bool = False
+    # Wall-clock cap (seconds) on each ``marimo export`` subprocess. A
+    # notebook stuck in an infinite loop or a hung download otherwise
+    # stalls build/serve/CI forever with no diagnostic. ``null`` disables
+    # the cap (e.g. books whose ``mode: cached`` renders legitimately run
+    # for hours on a GPU box).
+    execution_timeout: float | None = 600.0
 
 
 # --- TOC entries (discriminated union) ---------------------------------------

@@ -708,19 +708,22 @@ def test_build_cache_body_roundtrip(tmp_path: Path) -> None:
     book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
 
     cache = BuildCache(tmp_path, book)
-    assert not cache.is_hit("content/nb.py", src)
+    assert not cache.is_hit("content/nb.py", src, mode="static")
     cache.record(
         "content/nb.py",
         src,
         "nb.md",
         body="BODY",
         apply_rewrites=True,
+        mode="static",
         precompute={"widgets": 2, "skipped": 1, "warnings": ["capped"]},
     )
     cache.save()
 
     cache2 = BuildCache(tmp_path, book)
-    assert cache2.is_hit("content/nb.py", src)
+    assert cache2.is_hit("content/nb.py", src, mode="static")
+    # A per-entry mode flip must miss — the TOC is not in the signature.
+    assert not cache2.is_hit("content/nb.py", src, mode="wasm")
     assert cache2.body("content/nb.py") == "BODY"
     assert cache2.apply_rewrites("content/nb.py") is True
     assert cache2.recorded_precompute("content/nb.py") == {
@@ -739,12 +742,12 @@ def test_build_cache_miss_when_body_file_deleted(tmp_path: Path) -> None:
     book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
 
     cache = BuildCache(tmp_path, book)
-    cache.record("content/nb.py", src, "nb.md", body="BODY", apply_rewrites=True)
+    cache.record("content/nb.py", src, "nb.md", body="BODY", apply_rewrites=True, mode="static")
     cache.save()
     shutil.rmtree(tmp_path / _CACHE_DIR_NAME / "bodies")
 
     cache2 = BuildCache(tmp_path, book)
-    assert not cache2.is_hit("content/nb.py", src)
+    assert not cache2.is_hit("content/nb.py", src, mode="static")
 
 
 def test_book_signature_ignores_toc_buttons_repo(tmp_path: Path) -> None:
@@ -809,3 +812,101 @@ def test_repo_change_refreshes_buttons_on_cached_page(tmp_path: Path) -> None:
     assert report.pages_cached == 1
     staged = (tmp_path / "_site_src" / "docs" / "nb.md").read_text(encoding="utf-8")
     assert "owner/newrepo" in staged  # fresh buttons on a cached body
+
+
+def test_build_cache_miss_when_body_file_corrupted(tmp_path: Path) -> None:
+    """A torn/mismatched bodies/ file (interrupted build) must miss, not
+    silently replay corrupt output — is_hit verifies the body hash."""
+    from marimo_book.preprocessor import _CACHE_DIR_NAME, BuildCache
+
+    src = tmp_path / "content" / "nb.py"
+    src.parent.mkdir(parents=True)
+    src.write_text("print(1)\n", encoding="utf-8")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
+
+    cache = BuildCache(tmp_path, book)
+    cache.record("content/nb.py", src, "nb.md", body="BODY", apply_rewrites=True, mode="static")
+    cache.save()
+    (tmp_path / _CACHE_DIR_NAME / "bodies" / "content" / "nb.md").write_text(
+        "TORN", encoding="utf-8"
+    )
+
+    cache2 = BuildCache(tmp_path, book)
+    assert not cache2.is_hit("content/nb.py", src, mode="static")
+
+
+def test_build_cache_record_survives_readonly_cache_dir(tmp_path: Path) -> None:
+    """Cache bookkeeping failures must never fail a build whose staged
+    output is already complete."""
+    import os
+
+    from marimo_book.preprocessor import _CACHE_DIR_NAME, BuildCache
+
+    src = tmp_path / "content" / "nb.py"
+    src.parent.mkdir(parents=True)
+    src.write_text("print(1)\n", encoding="utf-8")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
+
+    cache_dir = tmp_path / _CACHE_DIR_NAME
+    cache_dir.mkdir()
+    os.chmod(cache_dir, 0o500)  # read+execute, no write
+    try:
+        cache = BuildCache(tmp_path, book)
+        cache.record(
+            "content/nb.py", src, "nb.md", body="BODY", apply_rewrites=True, mode="static"
+        )  # must not raise
+        assert "content/nb.py" not in cache.entries
+    finally:
+        os.chmod(cache_dir, 0o700)
+
+
+def test_build_cache_prunes_orphan_bodies_on_save(tmp_path: Path) -> None:
+    from marimo_book.preprocessor import _CACHE_DIR_NAME, BuildCache
+
+    content = tmp_path / "content"
+    content.mkdir(parents=True)
+    for name in ("a.py", "b.py"):
+        (content / name).write_text("print(1)\n", encoding="utf-8")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/a.py"}]})
+
+    cache = BuildCache(tmp_path, book)
+    cache.record(
+        "content/a.py", content / "a.py", "a.md", body="A", apply_rewrites=True, mode="static"
+    )
+    cache.record(
+        "content/b.py", content / "b.py", "b.md", body="B", apply_rewrites=True, mode="static"
+    )
+    cache.save()
+    bodies = tmp_path / _CACHE_DIR_NAME / "bodies" / "content"
+    assert (bodies / "a.md").exists() and (bodies / "b.md").exists()
+
+    # b.py removed from the TOC → its entry is gone next run; save() prunes.
+    del cache.entries["content/b.py"]
+    cache.dirty = True
+    cache.save()
+    assert (bodies / "a.md").exists()
+    assert not (bodies / "b.md").exists()
+
+
+def test_mode_flip_invalidates_cached_page(tmp_path: Path) -> None:
+    """Flipping a TOC entry static→wasm must re-render, not replay the
+    static body (the TOC is not part of the cache signature)."""
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    shutil.copy(NOTEBOOK_FIXTURE, content / "nb.py")
+    toc = [{"file": "content/intro.md"}, {"file": "content/nb.py"}]
+    book = Book.model_validate({"title": "T", "toc": toc})
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+
+    book2 = Book.model_validate(
+        {"title": "T", "toc": [toc[0], {"file": "content/nb.py", "mode": "wasm"}]}
+    )
+    with patch(
+        "marimo_book.preprocessor.render_wasm_page",
+        return_value="<marimo-island>WASM</marimo-island>",
+    ):
+        report = Preprocessor(book2, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.pages_cached == 0  # the flip missed the cache
+    staged = (tmp_path / "_site_src" / "docs" / "nb.md").read_text(encoding="utf-8")
+    assert "WASM" in staged

@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~0.9 s; books with heavier precompute grids gain proportionally more.
   Wiping `_site_src` no longer forces a re-render either — staged pages are
   reconstructed from cached bodies without executing anything.
+
+### Fixed
+
+- **Precomputed pages keep their launch buttons.** The splice step matched
+  the button row with an exact-string marker that never fit the real markup
+  (which carries a `data-placement` attribute), so books with `repo:` set
+  silently lost the molab/GitHub/download row on every precomputed page.
 - **`build --strict` now fails when a notebook cell raises.** Previously a
   runtime error rendered its traceback into the published page while CI
   stayed green (mkdocs strict only checks nav/links). Non-strict builds and

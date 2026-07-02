@@ -958,3 +958,46 @@ def test_precompute_skipped_on_cache_hit_and_stats_replayed(tmp_path: Path) -> N
     assert report2.widgets_precomputed == 1  # stats replayed from the cache
     staged_after_second = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
     assert staged_after_second == staged_after_first  # byte-identical replay
+
+
+def test_precompute_page_keeps_launch_buttons(tmp_path: Path) -> None:
+    """The splice must preserve the button row (its opening tag carries a
+    data-placement attribute — an exact-string marker used to miss it and
+    silently drop the buttons), and cache replay must be byte-identical."""
+    book = _book_with_widget_notebook(tmp_path, source="slider = mo.ui.slider(steps=[0, 1, 5])")
+    payload = book.model_dump(mode="json")
+    payload["repo"] = "https://github.com/owner/repo"
+    payload["precompute"] = {"enabled": True}
+    book = Book.model_validate(payload)
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 1
+    staged_first = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+    assert 'class="marimo-book-buttons"' in staged_first  # buttons survive the splice
+
+    report2 = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report2.pages_cached == 1
+    staged_second = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+    assert staged_second == staged_first  # hit replay byte-identical, buttons included
+
+
+def test_transient_precompute_skip_not_frozen_into_cache(tmp_path: Path) -> None:
+    """A runtime-cap skip (machine-load dependent) must not cache the page
+    as static forever — the next build retries the widget grid."""
+    from marimo_book.transforms.precompute import PrecomputeResult
+
+    book = _book_with_widget_notebook(tmp_path, source="slider = mo.ui.slider(steps=[0, 1, 5])")
+    book = _enable_precompute(book)
+
+    skipped = PrecomputeResult(
+        body="static", widget_html="", skipped=True, skip_reason="projected over max_seconds"
+    )
+    with patch("marimo_book.preprocessor.precompute_page", return_value=skipped):
+        report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 0
+    assert any("max_seconds" in w for w in report.warnings)
+
+    # Second build, caps no longer hit: page must MISS (retry), not replay static.
+    report2 = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report2.pages_cached == 0
+    assert report2.widgets_precomputed == 1

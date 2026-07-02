@@ -29,6 +29,7 @@ import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -117,18 +118,19 @@ _CACHE_FILE_NAME = "manifest.json"
 
 
 class BuildCache:
-    """Per-file content cache for ``marimo export`` outputs.
+    """Per-file body cache for ``marimo export`` outputs (schema v3).
 
-    Each TOC entry resolves to a HIT (skip the expensive notebook export
-    and reuse the staged ``.md``) or MISS (render fresh, record the new
-    fingerprint). The cache is keyed by source content, the marimo-book
-    version, and any ``book.yml`` field that affects rendering — so a
-    schema change, tool upgrade, or relevant config change invalidates
-    everything safely.
+    Each ``.py`` TOC entry resolves to a HIT (reuse the cached pre-finalize
+    *body* from ``bodies/`` — the finalize step re-applies buttons and link
+    rewrites against it every build) or MISS (render fresh, record body +
+    fingerprint). Keyed by source content, the marimo-book version, the
+    render-only book signature (no TOC/buttons/repo — those are finalize
+    inputs), and the entry's effective ``mode``. Precompute output is baked
+    into the cached body; its stats and any cell errors are recorded per
+    entry and replayed on hits.
 
     Markdown TOC entries are NOT cached: their render is ~10 ms each and
-    not worth the bookkeeping. Only ``.py`` notebook entries pass through
-    the cache.
+    not worth the bookkeeping.
     """
 
     def __init__(self, book_dir: Path, book: Book, *, force_rebuild: bool = False) -> None:
@@ -142,16 +144,31 @@ class BuildCache:
         if not force_rebuild:
             self._load()
 
-    def is_hit(self, src_rel: str, src_abs: Path) -> bool:
+    def is_hit(self, src_rel: str, src_abs: Path, *, mode: str) -> bool:
         if self.force_rebuild:
             return False
         entry = self.entries.get(src_rel)
         if entry is None:
             return False
+        # The per-entry ``mode:`` override lives in the TOC, which is
+        # deliberately NOT part of the cache signature — so a static↔wasm
+        # flip must miss here or the wrong-mode body replays forever.
+        if entry.get("mode") != mode:
+            return False
         # The staged file is rewritten by the finalize step on every build,
-        # so a hit is gated on the cached *body* file instead.
+        # so a hit is gated on the cached *body* file instead. Verify its
+        # content hash too: bodies are written mid-loop while the manifest
+        # saves at the end, so an interrupted build can leave a torn or
+        # newer-than-manifest body — replaying it silently would publish
+        # corrupt output.
         body_file = entry.get("body_file")
-        if not body_file or not (self.bodies_dir / body_file).exists():
+        if not body_file:
+            return False
+        try:
+            body_bytes = (self.bodies_dir / body_file).read_bytes()
+        except OSError:
+            return False
+        if hashlib.sha256(body_bytes).hexdigest() != entry.get("body_hash"):
             return False
         try:
             mtime = src_abs.stat().st_mtime
@@ -181,23 +198,28 @@ class BuildCache:
         *,
         body: str,
         apply_rewrites: bool,
+        mode: str,
         cell_errors: list[dict] | None = None,
         precompute: dict | None = None,
     ) -> None:
+        body_file = Path(src_rel).with_suffix(".md").as_posix()
+        body_abs = self.bodies_dir / body_file
         try:
             mtime = src_abs.stat().st_mtime
             digest = _file_sha256(src_abs)
+            body_abs.parent.mkdir(parents=True, exist_ok=True)
+            body_abs.write_text(body, encoding="utf-8")
         except OSError:
+            # Cache bookkeeping must never fail a build whose staged output
+            # is already complete (read-only checkout, full disk, …).
             return
-        body_file = Path(src_rel).with_suffix(".md").as_posix()
-        body_abs = self.bodies_dir / body_file
-        body_abs.parent.mkdir(parents=True, exist_ok=True)
-        body_abs.write_text(body, encoding="utf-8")
         self.entries[src_rel] = {
             "src_mtime": mtime,
             "src_hash": digest,
             "out_path": out_rel,
             "body_file": body_file,
+            "body_hash": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            "mode": mode,
             # False for wasm bodies (marimo HTML, not our Markdown) and for
             # precompute-spliced bodies (the splice output was never rewritten).
             "apply_rewrites": apply_rewrites,
@@ -243,7 +265,28 @@ class BuildCache:
             "entries": self.entries,
         }
         self.path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        self._prune_orphan_bodies()
         self.dirty = False
+
+    def _prune_orphan_bodies(self) -> None:
+        """Delete body files no manifest entry references.
+
+        Removed/renamed TOC entries and wholesale invalidations (schema or
+        signature change discards the manifest but not the files) would
+        otherwise accumulate stale bodies — potentially large, with base64
+        images — until ``marimo-book clean``.
+        """
+        if not self.bodies_dir.exists():
+            return
+        keep = {(self.bodies_dir / e["body_file"]).resolve() for e in self.entries.values()}
+        try:
+            for f in sorted(self.bodies_dir.rglob("*"), reverse=True):
+                if f.is_file() and f.resolve() not in keep:
+                    f.unlink(missing_ok=True)
+                elif f.is_dir() and not any(f.iterdir()):
+                    f.rmdir()
+        except OSError:
+            pass  # best-effort hygiene; never fail a build over it
 
     # --- internals ----------------------------------------------------------
 
@@ -290,25 +333,20 @@ def _resolve_tool_version() -> str:
 def _book_signature(book: Book) -> str:
     """Hash ``book.yml`` fields whose changes invalidate cached *bodies*.
 
-    The transient cache stores the pre-finalize body, so only fields the
-    render itself reads belong here: ``defaults`` (e.g.
-    ``hide_first_code_cell``), ``dependencies`` (mode), ``widget_defaults``
-    (anywidget seed state), and ``precompute`` (whose output is baked into
-    the cached body of precomputed pages).
+    Composed from :func:`_render_body_signature` (the shared definition of
+    "render-affecting config" — keeps the two hashers from drifting apart)
+    plus ``precompute``, whose output is baked into the cached body of
+    precomputed pages but is irrelevant to ``_rendered/`` (cached mode never
+    precomputes).
 
     Deliberately excludes ``launch_buttons`` / ``repo`` / ``branch`` / the
     TOC — the finalize step (button row + link rewrites) re-runs on every
     build against the cached body, so those edits must NOT re-execute
-    notebooks. Also excludes title / palette / fonts / analytics (mkdocs.yml
-    emission only) and ``execution_timeout`` (bounds how long a render may
-    take, never what it renders).
+    notebooks. Per-entry ``mode:`` overrides live in the TOC too; they are
+    handled per entry by ``BuildCache.is_hit(mode=...)`` instead.
     """
-    defaults = book.defaults.model_dump(mode="json")
-    defaults.pop("execution_timeout", None)
     relevant: dict = {
-        "widget_defaults": book.widget_defaults,
-        "defaults": defaults,
-        "dependencies": book.dependencies.model_dump(mode="json"),
+        "body": _render_body_signature(book),
         "precompute": book.precompute.model_dump(mode="json"),
     }
     payload = json.dumps(relevant, sort_keys=True, default=str)
@@ -380,7 +418,12 @@ def _spliced_page_and_body(original_page: str, result) -> tuple[str, str]:
     hit (fresh buttons + verbatim body) reproduces the spliced page without
     re-running a single export.
     """
-    marker_open = '<div class="marimo-book-buttons">'
+    # Prefix match — the opening tag carries a data-placement attribute
+    # (`<div class="marimo-book-buttons" data-placement="header">`), so an
+    # exact `...buttons">` marker never matches and silently dropped the
+    # button row from precomputed pages. The row contains no nested <div>,
+    # so the first close after the marker is the row's own.
+    marker_open = '<div class="marimo-book-buttons"'
     marker_close = "</div>"
     body = _splice_controls_inline(
         result.body, result.widget_html, anchor_cell_idx=result.splice_anchor_cell_idx
@@ -686,7 +729,7 @@ class Preprocessor:
 
                 # Notebook entries are the only ones worth caching: marimo
                 # export takes seconds-to-minutes, vs ~10 ms for Markdown.
-                if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs):
+                if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs, mode=mode):
                     self._progress(f"{tag} {src_rel} (cache hit)")
                     # Replay cell errors recorded at render time — a hit skips
                     # the export entirely, so without this a page that failed
@@ -762,16 +805,26 @@ class Preprocessor:
                         if spliced_body is not None:
                             # The splice replaced the page body wholesale;
                             # replaying it verbatim (no rewrites) reproduces
-                            # today's staged bytes on a future hit.
+                            # today's staged bytes on a future hit. Link
+                            # rewrites have never applied to spliced bodies
+                            # (pre-existing: the splice replaces the rewritten
+                            # body with a fresh unrewritten export) — fixing
+                            # that belongs in _run_precompute, not here.
                             cached_body, cached_rewrites = spliced_body, False
 
-                    if entry.file.suffix == ".py":
+                    # A transient precompute skip (runtime cap on a loaded
+                    # machine) must not be frozen into the cache as a static
+                    # page — leave the entry unrecorded so the next build
+                    # retries the widget grid.
+                    transient_skip = bool(precompute_stats and precompute_stats.get("transient"))
+                    if entry.file.suffix == ".py" and not transient_skip:
                         cache.record(
                             src_rel,
                             src_abs,
                             out_rel,
                             body=cached_body,
                             apply_rewrites=cached_rewrites,
+                            mode=mode,
                             cell_errors=_cell_errors_to_dicts(collected_errors),
                             precompute=precompute_stats,
                         )
@@ -1067,8 +1120,16 @@ class Preprocessor:
             timeout=self.book.defaults.execution_timeout,
         )
         if result.skipped:
+            # Runtime caps (time/bytes projections) depend on machine load —
+            # mark the skip transient so the caller does NOT cache the page
+            # as static forever; the next build retries the grid.
             warnings.append(f"{entry.file}: {result.skip_reason}")
-            return None, {"widgets": 0, "skipped": skipped + len(kept), "warnings": warnings}
+            return None, {
+                "widgets": 0,
+                "skipped": skipped + len(kept),
+                "warnings": warnings,
+                "transient": True,
+            }
         if not result.reactive_cell_indices:
             # Widgets exist but no downstream cells changed; static is fine.
             return None, {"widgets": 0, "skipped": skipped, "warnings": warnings}
@@ -1215,6 +1276,7 @@ def _iter_file_entries(toc: list) -> list[FileEntry]:
     return out
 
 
+@cache
 def _book_subpath_in_repo(book_dir: Path) -> str:
     """Return the book's path relative to its enclosing git repo, or "".
 

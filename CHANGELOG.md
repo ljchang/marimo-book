@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Serve/rebuild speed: the transient cache now stores pre-finalize bodies**
+  (cache schema v3). Launch buttons and link rewrites are re-applied on every
+  build, so TOC, title, `repo`, and `launch_buttons` edits no longer
+  invalidate notebook renders; precompute results (spliced body + stats +
+  warnings) are recorded and replayed on hits instead of re-exporting the
+  entire widget grid on every build — previously the dominant cost of every
+  `serve` rebuild. Warm-building marimo-book's own docs drops from ~5.8 s to
+  ~0.9 s; books with heavier precompute grids gain proportionally more.
+  Wiping `_site_src` no longer forces a re-render either — staged pages are
+  reconstructed from cached bodies without executing anything.
+
+### Fixed
+
+- **Precomputed pages keep their launch buttons.** The splice step matched
+  the button row with an exact-string marker that never fit the real markup
+  (which carries a `data-placement` attribute), so books with `repo:` set
+  silently lost the molab/GitHub/download row on every precomputed page.
 - **`build --strict` now fails when a notebook cell raises.** Previously a
   runtime error rendered its traceback into the published page while CI
   stayed green (mkdocs strict only checks nav/links). Non-strict builds and

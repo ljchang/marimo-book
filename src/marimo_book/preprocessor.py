@@ -29,6 +29,7 @@ import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -109,28 +110,32 @@ class BuildReport:
 
 # Bumped whenever the cache schema or hit-decision rules change.
 # v2: entries record ``cell_errors`` so hits can replay the strict/warn verdict.
-_CACHE_SCHEMA_VERSION = 2
+# v3: entries store the pre-finalize *body* (under ``bodies/``) so hits skip
+#     the render AND precompute; buttons/link-rewrites re-apply every build.
+_CACHE_SCHEMA_VERSION = 3
 _CACHE_DIR_NAME = ".marimo_book_cache"
 _CACHE_FILE_NAME = "manifest.json"
 
 
 class BuildCache:
-    """Per-file content cache for ``marimo export`` outputs.
+    """Per-file body cache for ``marimo export`` outputs (schema v3).
 
-    Each TOC entry resolves to a HIT (skip the expensive notebook export
-    and reuse the staged ``.md``) or MISS (render fresh, record the new
-    fingerprint). The cache is keyed by source content, the marimo-book
-    version, and any ``book.yml`` field that affects rendering — so a
-    schema change, tool upgrade, or relevant config change invalidates
-    everything safely.
+    Each ``.py`` TOC entry resolves to a HIT (reuse the cached pre-finalize
+    *body* from ``bodies/`` — the finalize step re-applies buttons and link
+    rewrites against it every build) or MISS (render fresh, record body +
+    fingerprint). Keyed by source content, the marimo-book version, the
+    render-only book signature (no TOC/buttons/repo — those are finalize
+    inputs), and the entry's effective ``mode``. Precompute output is baked
+    into the cached body; its stats and any cell errors are recorded per
+    entry and replayed on hits.
 
     Markdown TOC entries are NOT cached: their render is ~10 ms each and
-    not worth the bookkeeping. Only ``.py`` notebook entries pass through
-    the cache.
+    not worth the bookkeeping.
     """
 
     def __init__(self, book_dir: Path, book: Book, *, force_rebuild: bool = False) -> None:
         self.path = book_dir / _CACHE_DIR_NAME / _CACHE_FILE_NAME
+        self.bodies_dir = book_dir / _CACHE_DIR_NAME / "bodies"
         self.force_rebuild = force_rebuild
         self.tool_version = _resolve_tool_version()
         self.book_signature = _book_signature(book)
@@ -139,14 +144,31 @@ class BuildCache:
         if not force_rebuild:
             self._load()
 
-    def is_hit(self, src_rel: str, src_abs: Path, docs_dir: Path) -> bool:
+    def is_hit(self, src_rel: str, src_abs: Path, *, mode: str) -> bool:
         if self.force_rebuild:
             return False
         entry = self.entries.get(src_rel)
         if entry is None:
             return False
-        out_abs = docs_dir / entry["out_path"]
-        if not out_abs.exists():
+        # The per-entry ``mode:`` override lives in the TOC, which is
+        # deliberately NOT part of the cache signature — so a static↔wasm
+        # flip must miss here or the wrong-mode body replays forever.
+        if entry.get("mode") != mode:
+            return False
+        # The staged file is rewritten by the finalize step on every build,
+        # so a hit is gated on the cached *body* file instead. Verify its
+        # content hash too: bodies are written mid-loop while the manifest
+        # saves at the end, so an interrupted build can leave a torn or
+        # newer-than-manifest body — replaying it silently would publish
+        # corrupt output.
+        body_file = entry.get("body_file")
+        if not body_file:
+            return False
+        try:
+            body_bytes = (self.bodies_dir / body_file).read_bytes()
+        except OSError:
+            return False
+        if hashlib.sha256(body_bytes).hexdigest() != entry.get("body_hash"):
             return False
         try:
             mtime = src_abs.stat().st_mtime
@@ -169,24 +191,63 @@ class BuildCache:
         return True
 
     def record(
-        self, src_rel: str, src_abs: Path, out_rel: str, *, cell_errors: list[dict] | None = None
+        self,
+        src_rel: str,
+        src_abs: Path,
+        out_rel: str,
+        *,
+        body: str,
+        apply_rewrites: bool,
+        mode: str,
+        cell_errors: list[dict] | None = None,
+        precompute: dict | None = None,
     ) -> None:
+        body_file = Path(src_rel).with_suffix(".md").as_posix()
+        body_abs = self.bodies_dir / body_file
         try:
             mtime = src_abs.stat().st_mtime
             digest = _file_sha256(src_abs)
+            body_abs.parent.mkdir(parents=True, exist_ok=True)
+            body_abs.write_text(body, encoding="utf-8")
         except OSError:
+            # Cache bookkeeping must never fail a build whose staged output
+            # is already complete (read-only checkout, full disk, …).
             return
         self.entries[src_rel] = {
             "src_mtime": mtime,
             "src_hash": digest,
             "out_path": out_rel,
-            "rendered_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "body_file": body_file,
+            "body_hash": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            "mode": mode,
+            # False for wasm bodies (marimo HTML, not our Markdown) and for
+            # precompute-spliced bodies (the splice output was never rewritten).
+            "apply_rewrites": apply_rewrites,
             # Raising cells observed at render time, replayed on cache hits —
             # a hit skips the export, and the strict/warn verdict must not
             # depend on whether the page happened to be cached.
             "cell_errors": cell_errors or [],
+            # {"widgets", "skipped", "warnings"} recorded at render time and
+            # replayed on hits — a hit skips _run_precompute entirely (the
+            # spliced output is already baked into the body).
+            "precompute": precompute,
+            "rendered_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
         self.dirty = True
+
+    def body(self, src_rel: str) -> str:
+        """The cached pre-finalize body (only valid after an ``is_hit``)."""
+        entry = self.entries[src_rel]
+        return (self.bodies_dir / entry["body_file"]).read_text(encoding="utf-8")
+
+    def apply_rewrites(self, src_rel: str) -> bool:
+        entry = self.entries.get(src_rel) or {}
+        return bool(entry.get("apply_rewrites", True))
+
+    def recorded_precompute(self, src_rel: str) -> dict | None:
+        entry = self.entries.get(src_rel) or {}
+        raw = entry.get("precompute")
+        return raw if isinstance(raw, dict) else None
 
     def recorded_cell_errors(self, src_rel: str) -> list[dict]:
         entry = self.entries.get(src_rel) or {}
@@ -204,7 +265,28 @@ class BuildCache:
             "entries": self.entries,
         }
         self.path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        self._prune_orphan_bodies()
         self.dirty = False
+
+    def _prune_orphan_bodies(self) -> None:
+        """Delete body files no manifest entry references.
+
+        Removed/renamed TOC entries and wholesale invalidations (schema or
+        signature change discards the manifest but not the files) would
+        otherwise accumulate stale bodies — potentially large, with base64
+        images — until ``marimo-book clean``.
+        """
+        if not self.bodies_dir.exists():
+            return
+        keep = {(self.bodies_dir / e["body_file"]).resolve() for e in self.entries.values()}
+        try:
+            for f in sorted(self.bodies_dir.rglob("*"), reverse=True):
+                if f.is_file() and f.resolve() not in keep:
+                    f.unlink(missing_ok=True)
+                elif f.is_dir() and not any(f.iterdir()):
+                    f.rmdir()
+        except OSError:
+            pass  # best-effort hygiene; never fail a build over it
 
     # --- internals ----------------------------------------------------------
 
@@ -249,30 +331,23 @@ def _resolve_tool_version() -> str:
 
 
 def _book_signature(book: Book) -> str:
-    """Hash ``book.yml`` fields whose changes invalidate rendered pages.
+    """Hash ``book.yml`` fields whose changes invalidate cached *bodies*.
 
-    Includes anything the preprocessor reads while rendering a notebook
-    or applying link-rewrites: ``defaults`` (e.g. ``hide_first_code_cell``),
-    ``dependencies`` (mode), ``widget_defaults`` (anywidget seed state),
-    ``launch_buttons`` + ``repo`` + ``branch`` (button row), and the
-    flattened TOC (link rewrites depend on which other pages exist).
+    Composed from :func:`_render_body_signature` (the shared definition of
+    "render-affecting config" — keeps the two hashers from drifting apart)
+    plus ``precompute``, whose output is baked into the cached body of
+    precomputed pages but is irrelevant to ``_rendered/`` (cached mode never
+    precomputes).
 
-    Excludes title / palette / fonts / analytics — those only affect
-    ``mkdocs.yml`` emission, which is always re-run and cheap.
+    Deliberately excludes ``launch_buttons`` / ``repo`` / ``branch`` / the
+    TOC — the finalize step (button row + link rewrites) re-runs on every
+    build against the cached body, so those edits must NOT re-execute
+    notebooks. Per-entry ``mode:`` overrides live in the TOC too; they are
+    handled per entry by ``BuildCache.is_hit(mode=...)`` instead.
     """
-    defaults = book.defaults.model_dump(mode="json")
-    # execution_timeout bounds how long a render may take, never what it
-    # renders — excluding it keeps caches valid when the knob changes.
-    defaults.pop("execution_timeout", None)
     relevant: dict = {
-        "widget_defaults": book.widget_defaults,
-        "defaults": defaults,
-        "dependencies": book.dependencies.model_dump(mode="json"),
-        "launch_buttons": book.launch_buttons.model_dump(mode="json"),
+        "body": _render_body_signature(book),
         "precompute": book.precompute.model_dump(mode="json"),
-        "repo": book.repo,
-        "branch": book.branch,
-        "toc": [e.model_dump(mode="json") for e in book.toc],
     }
     payload = json.dumps(relevant, sort_keys=True, default=str)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -333,7 +408,22 @@ def _splice_precomputed_body(original_page: str, result) -> str:
     reactive-cell marker (shouldn't happen for a precomputed page, but
     defensive), we fall back to top-of-body placement.
     """
-    marker_open = '<div class="marimo-book-buttons">'
+    return _spliced_page_and_body(original_page, result)[0]
+
+
+def _spliced_page_and_body(original_page: str, result) -> tuple[str, str]:
+    """Like :func:`_splice_precomputed_body` but also returns the body alone.
+
+    The body-only form is what the transient cache stores: replaying it on a
+    hit (fresh buttons + verbatim body) reproduces the spliced page without
+    re-running a single export.
+    """
+    # Prefix match — the opening tag carries a data-placement attribute
+    # (`<div class="marimo-book-buttons" data-placement="header">`), so an
+    # exact `...buttons">` marker never matches and silently dropped the
+    # button row from precomputed pages. The row contains no nested <div>,
+    # so the first close after the marker is the row's own.
+    marker_open = '<div class="marimo-book-buttons"'
     marker_close = "</div>"
     body = _splice_controls_inline(
         result.body, result.widget_html, anchor_cell_idx=result.splice_anchor_cell_idx
@@ -342,8 +432,8 @@ def _splice_precomputed_body(original_page: str, result) -> str:
         head_end = original_page.index(marker_open)
         close_at = original_page.index(marker_close, head_end) + len(marker_close)
         head = original_page[:close_at]
-        return head + "\n\n" + body
-    return body
+        return head + "\n\n" + body, body
+    return body, body
 
 
 def _splice_controls_inline(
@@ -639,7 +729,7 @@ class Preprocessor:
 
                 # Notebook entries are the only ones worth caching: marimo
                 # export takes seconds-to-minutes, vs ~10 ms for Markdown.
-                if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs, docs_dir):
+                if entry.file.suffix == ".py" and cache.is_hit(src_rel, src_abs, mode=mode):
                     self._progress(f"{tag} {src_rel} (cache hit)")
                     # Replay cell errors recorded at render time — a hit skips
                     # the export entirely, so without this a page that failed
@@ -651,6 +741,21 @@ class Preprocessor:
                         strict=strict,
                         note="traceback published to page",
                     )
+                    # Re-finalize the cached body with THIS build's TOC and
+                    # button context — that's what lets the cache key ignore
+                    # TOC/repo/button edits. Precompute output is already
+                    # baked into the body; replay its stats and skip the grid.
+                    _finalize_page(
+                        self.book,
+                        self.book_dir,
+                        entry,
+                        docs_dir,
+                        cache.body(src_rel),
+                        apply_rewrites=cache.apply_rewrites(src_rel),
+                        md_basenames=md_basenames,
+                        index_source=index_source,
+                    )
+                    self._apply_precompute_stats(report, cache.recorded_precompute(src_rel))
                     report.pages_cached += 1
                 else:
                     if entry.file.suffix == ".py":
@@ -662,7 +767,7 @@ class Preprocessor:
                     # Collected (not routed) here so the raw list can also be
                     # recorded in the cache for replay on future hits.
                     collected_errors: list[CellError] = []
-                    stage_page(
+                    staged = stage_page(
                         self.book,
                         self.book_dir,
                         entry,
@@ -679,29 +784,52 @@ class Preprocessor:
                         strict=strict,
                         note="traceback published to page",
                     )
-                    if entry.file.suffix == ".py":
+
+                    # Static-reactivity precompute: scan widgets, apply caps,
+                    # re-export per value, splice the lookup table into the
+                    # staged page so the JS shim can swap reactive cells. WASM
+                    # pages get native reactivity from marimo's runtime in the
+                    # browser, so precompute is a no-op for them. Only fresh
+                    # renders reach here — hits replay the recorded result.
+                    cached_body, cached_rewrites = staged.body, staged.apply_rewrites
+                    precompute_stats: dict | None = None
+                    if (
+                        entry.file.suffix == ".py"
+                        and self.book.precompute.enabled
+                        and entry.effective_mode(self.book.defaults.mode) == "static"
+                    ):
+                        spliced_body, precompute_stats = self._run_precompute(
+                            entry, src_abs, docs_dir, index_source=index_source
+                        )
+                        self._apply_precompute_stats(report, precompute_stats)
+                        if spliced_body is not None:
+                            # The splice replaced the page body wholesale;
+                            # replaying it verbatim (no rewrites) reproduces
+                            # today's staged bytes on a future hit. Link
+                            # rewrites have never applied to spliced bodies
+                            # (pre-existing: the splice replaces the rewritten
+                            # body with a fresh unrewritten export) — fixing
+                            # that belongs in _run_precompute, not here.
+                            cached_body, cached_rewrites = spliced_body, False
+
+                    # A transient precompute skip (runtime cap on a loaded
+                    # machine) must not be frozen into the cache as a static
+                    # page — leave the entry unrecorded so the next build
+                    # retries the widget grid.
+                    transient_skip = bool(precompute_stats and precompute_stats.get("transient"))
+                    if entry.file.suffix == ".py" and not transient_skip:
                         cache.record(
                             src_rel,
                             src_abs,
                             out_rel,
+                            body=cached_body,
+                            apply_rewrites=cached_rewrites,
+                            mode=mode,
                             cell_errors=_cell_errors_to_dicts(collected_errors),
+                            precompute=precompute_stats,
                         )
                     report.pages_rendered += 1
                 report.pages += 1
-
-                # Static-reactivity precompute: scan widgets, apply caps,
-                # re-export per value, splice the lookup table into the
-                # staged page so the JS shim can swap reactive cells. WASM
-                # pages get native reactivity from marimo's runtime in the
-                # browser, so precompute is a no-op for them.
-                if (
-                    entry.file.suffix == ".py"
-                    and self.book.precompute.enabled
-                    and entry.effective_mode(self.book.defaults.mode) == "static"
-                ):
-                    self._run_precompute(
-                        entry, src_abs, docs_dir, report, index_source=index_source
-                    )
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(f"{entry.file}: {exc.__class__.__name__}: {exc}")
 
@@ -904,48 +1032,67 @@ class Preprocessor:
         if cname_src.exists() and cname_src.is_file():
             shutil.copy2(cname_src, docs_dir / "CNAME")
 
+    def _apply_precompute_stats(self, report: BuildReport, stats: dict | None) -> None:
+        """Fold precompute counters/warnings into the report.
+
+        One code path for fresh runs AND cache-hit replays, so the report
+        reads identically whether the widget grid executed or was reused.
+        """
+        if not stats:
+            return
+        report.widgets_precomputed += stats.get("widgets", 0)
+        report.widgets_skipped += stats.get("skipped", 0)
+        report.warnings.extend(stats.get("warnings", []))
+
     def _run_precompute(
         self,
         entry: FileEntry,
         src_abs: Path,
         docs_dir: Path,
-        report: BuildReport,
         index_source: Path | None = None,
-    ) -> None:
+    ) -> tuple[str | None, dict | None]:
         """Detect widget candidates, apply caps, run the per-value re-export.
 
         Handles 1..N widgets per page. Each widget is precomputed
         independently; when widgets have disjoint downstream cells they
         coexist on one page. Joint widgets (sharing a downstream cell)
         still cause the page to render static — that's the next pass.
+
+        Returns ``(spliced_body, stats)``: the body-only spliced content when
+        the page precomputed (``None`` when it stayed static), plus counter/
+        warning stats for :meth:`_apply_precompute_stats`. Nothing is written
+        to the report here — the caller applies stats, and also records them
+        in the cache so hits can replay the identical report lines.
         """
         cfg = self.book.precompute
         if page_excluded(entry.file, cfg.exclude_pages):
-            return
+            return None, None
 
         try:
             source = src_abs.read_text(encoding="utf-8")
         except OSError:
-            return
+            return None, None
         candidates = scan_widgets(source)
         if not candidates:
-            return
+            return None, None
 
         # Per-widget count cap (cheap pre-check before any execution).
         kept: list[WidgetCandidate] = []
+        warnings: list[str] = []
+        skipped = 0
         for c in candidates:
             if len(c.values) > cfg.max_values_per_widget:
-                report.warnings.append(
+                warnings.append(
                     f"{entry.file}:{c.line} {c.var_name} "
                     f"({len(c.values)} values) exceeds "
                     f"max_values_per_widget ({cfg.max_values_per_widget}); "
                     f"rendered static."
                 )
-                report.widgets_skipped += 1
+                skipped += 1
                 continue
             kept.append(c)
         if not kept:
-            return
+            return None, {"widgets": 0, "skipped": skipped, "warnings": warnings}
 
         # Page-wide cap. For v1 (independent widgets), realistic cost
         # is ``1 + sum(values_i - 1)`` — sum, not cartesian product —
@@ -955,13 +1102,12 @@ class Preprocessor:
         # on total renders here.
         renders = estimate_renders_independent(kept)
         if renders > cfg.max_combinations_per_page:
-            report.warnings.append(
+            warnings.append(
                 f"{entry.file}: precompute would need {renders} re-exports across "
                 f"{len(kept)} widgets, exceeding max_combinations_per_page "
                 f"({cfg.max_combinations_per_page}); rendered static."
             )
-            report.widgets_skipped += len(kept)
-            return
+            return None, {"widgets": 0, "skipped": skipped + len(kept), "warnings": warnings}
 
         result = precompute_page(
             src_abs,
@@ -974,19 +1120,28 @@ class Preprocessor:
             timeout=self.book.defaults.execution_timeout,
         )
         if result.skipped:
-            report.warnings.append(f"{entry.file}: {result.skip_reason}")
-            report.widgets_skipped += len(kept)
-            return
+            # Runtime caps (time/bytes projections) depend on machine load —
+            # mark the skip transient so the caller does NOT cache the page
+            # as static forever; the next build retries the grid.
+            warnings.append(f"{entry.file}: {result.skip_reason}")
+            return None, {
+                "widgets": 0,
+                "skipped": skipped + len(kept),
+                "warnings": warnings,
+                "transient": True,
+            }
         if not result.reactive_cell_indices:
-            return  # widgets exist but no downstream cells changed; static is fine
+            # Widgets exist but no downstream cells changed; static is fine.
+            return None, {"widgets": 0, "skipped": skipped, "warnings": warnings}
 
         out_rel = _doc_relpath_for(entry.file, index_source=index_source)
         staged_path = docs_dir / out_rel
         if not staged_path.exists():
-            return
+            return None, {"widgets": 0, "skipped": skipped, "warnings": warnings}
         original = staged_path.read_text(encoding="utf-8")
-        staged_path.write_text(_splice_precomputed_body(original, result), encoding="utf-8")
-        report.widgets_precomputed += len(kept)
+        page, spliced_body = _spliced_page_and_body(original, result)
+        staged_path.write_text(page, encoding="utf-8")
+        return spliced_body, {"widgets": len(kept), "skipped": skipped, "warnings": warnings}
 
     def _stage_changelog(self, docs_dir: Path) -> bool:
         """Copy ``CHANGELOG.md`` into the staged tree.
@@ -1121,6 +1276,7 @@ def _iter_file_entries(toc: list) -> list[FileEntry]:
     return out
 
 
+@cache
 def _book_subpath_in_repo(book_dir: Path) -> str:
     """Return the book's path relative to its enclosing git repo, or "".
 
@@ -1151,6 +1307,20 @@ def _book_subpath_in_repo(book_dir: Path) -> str:
 # --- Single-page staging ----------------------------------------------------
 
 
+@dataclass
+class StagedPage:
+    """What :func:`stage_page` produced for one TOC entry.
+
+    ``body`` is the pre-finalize content (no buttons, no link rewrites) —
+    exactly what the transient cache stores so a later hit can re-finalize
+    with fresh TOC/button context instead of re-executing the notebook.
+    """
+
+    path: Path
+    body: str
+    apply_rewrites: bool
+
+
 def stage_page(
     book: Book,
     book_dir: Path,
@@ -1161,8 +1331,8 @@ def stage_page(
     sandbox: bool = False,
     index_source: Path | None = None,
     on_cell_errors: Callable[[list[CellError]], None] | None = None,
-) -> Path:
-    """Render a single TOC entry into ``docs_dir`` and return the output path."""
+) -> StagedPage:
+    """Render a single TOC entry into ``docs_dir``."""
     src_abs = (book_dir / entry.file).resolve()
     if not src_abs.exists():
         raise FileNotFoundError(f"TOC references missing file: {entry.file}")
@@ -1208,7 +1378,7 @@ def stage_page(
     else:
         raise ValueError(f"Unsupported file type for TOC entry: {entry.file}")
 
-    return _finalize_page(
+    dst = _finalize_page(
         book,
         book_dir,
         entry,
@@ -1218,6 +1388,7 @@ def stage_page(
         md_basenames=md_basenames,
         index_source=index_source,
     )
+    return StagedPage(dst, body, apply_rewrites)
 
 
 def _finalize_page(

@@ -281,6 +281,7 @@ def test_substitute_only_touches_target_call() -> None:
 # share the marimo-export plumbing (1-2 s each).
 
 from pathlib import Path  # noqa: E402
+from unittest.mock import patch  # noqa: E402
 
 from marimo_book.config import Book  # noqa: E402
 from marimo_book.preprocessor import Preprocessor  # noqa: E402
@@ -927,3 +928,33 @@ def _(slider):
 """
     # `helper` isn't a cell, so the consumer is index 0 (the only cell).
     assert find_widget_consumer_cell_idx(src, ["slider"]) == 0
+
+
+def test_precompute_skipped_on_cache_hit_and_stats_replayed(tmp_path: Path) -> None:
+    """A cache hit must not re-run the widget grid: the spliced body is
+    replayed from the cache, and the report still counts the widgets."""
+    book = _book_with_widget_notebook(tmp_path, source="slider = mo.ui.slider(steps=[0, 1, 5])")
+    book = _enable_precompute(book)
+
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.widgets_precomputed == 1
+    staged_after_first = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+
+    def _must_not_execute(*args, **kwargs):
+        raise AssertionError("cache hit must not execute the notebook")
+
+    with (
+        patch("marimo_book.preprocessor.export_notebook", side_effect=_must_not_execute),
+        patch("marimo_book.transforms.precompute.export_notebook", side_effect=_must_not_execute),
+        patch(
+            "marimo_book.transforms.precompute.export_notebook_with_overrides",
+            side_effect=_must_not_execute,
+        ),
+    ):
+        report2 = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+
+    assert report2.ok
+    assert report2.pages_cached == 1
+    assert report2.widgets_precomputed == 1  # stats replayed from the cache
+    staged_after_second = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
+    assert staged_after_second == staged_after_first  # byte-identical replay

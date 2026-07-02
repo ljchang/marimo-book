@@ -317,17 +317,20 @@ def test_cache_invalidates_on_widget_defaults_change(tmp_path: Path) -> None:
     assert second.pages_rendered == 2
 
 
-def test_cache_invalidates_when_staged_output_missing(tmp_path: Path) -> None:
-    """If someone wipes _site_src but leaves the cache, we must re-render."""
+def test_cache_restages_output_from_cached_body_when_site_src_wiped(tmp_path: Path) -> None:
+    """Wiping _site_src must not force a re-render: since cache v3 the hit
+    path re-finalizes the staged file from the cached body, so the page comes
+    back without executing the notebook."""
     book = _book_with_notebook(tmp_path)
     out_dir = tmp_path / "_site_src"
     Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
 
-    # Wipe the staged tree but leave the manifest alone.
+    # Wipe the staged tree but leave the cache (manifest + bodies) alone.
     shutil.rmtree(out_dir)
     second = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
-    assert second.pages_cached == 0
-    assert second.pages_rendered == 2
+    assert second.pages_cached == 1  # notebook reused
+    assert second.pages_rendered == 1  # markdown page re-stages (never cached)
+    assert (out_dir / "docs" / "notebook.md").exists()  # staged file reconstructed
 
 
 # --- PEP 723 staging --------------------------------------------------------
@@ -691,3 +694,118 @@ def test_execution_timeout_change_does_not_invalidate_signatures(tmp_path: Path)
     b2 = Book.model_validate({**base, "defaults": {"execution_timeout": None}})
     assert _render_body_signature(b1) == _render_body_signature(b2)
     assert _book_signature(b1) == _book_signature(b2)
+
+
+# --- BuildCache v3: body storage + render-only signature ----------------------
+
+
+def test_build_cache_body_roundtrip(tmp_path: Path) -> None:
+    from marimo_book.preprocessor import BuildCache
+
+    src = tmp_path / "content" / "nb.py"
+    src.parent.mkdir(parents=True)
+    src.write_text("print(1)\n", encoding="utf-8")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
+
+    cache = BuildCache(tmp_path, book)
+    assert not cache.is_hit("content/nb.py", src)
+    cache.record(
+        "content/nb.py",
+        src,
+        "nb.md",
+        body="BODY",
+        apply_rewrites=True,
+        precompute={"widgets": 2, "skipped": 1, "warnings": ["capped"]},
+    )
+    cache.save()
+
+    cache2 = BuildCache(tmp_path, book)
+    assert cache2.is_hit("content/nb.py", src)
+    assert cache2.body("content/nb.py") == "BODY"
+    assert cache2.apply_rewrites("content/nb.py") is True
+    assert cache2.recorded_precompute("content/nb.py") == {
+        "widgets": 2,
+        "skipped": 1,
+        "warnings": ["capped"],
+    }
+
+
+def test_build_cache_miss_when_body_file_deleted(tmp_path: Path) -> None:
+    from marimo_book.preprocessor import _CACHE_DIR_NAME, BuildCache
+
+    src = tmp_path / "content" / "nb.py"
+    src.parent.mkdir(parents=True)
+    src.write_text("print(1)\n", encoding="utf-8")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
+
+    cache = BuildCache(tmp_path, book)
+    cache.record("content/nb.py", src, "nb.md", body="BODY", apply_rewrites=True)
+    cache.save()
+    shutil.rmtree(tmp_path / _CACHE_DIR_NAME / "bodies")
+
+    cache2 = BuildCache(tmp_path, book)
+    assert not cache2.is_hit("content/nb.py", src)
+
+
+def test_book_signature_ignores_toc_buttons_repo(tmp_path: Path) -> None:
+    """The cache stores pre-finalize bodies; TOC/buttons/repo only affect the
+    finalize step, which re-runs every build — they must not invalidate."""
+    from marimo_book.preprocessor import _book_signature
+
+    b1 = Book.model_validate({"title": "T", "toc": [{"file": "a.md"}]})
+    b2 = Book.model_validate(
+        {
+            "title": "T",
+            "repo": "https://github.com/o/r",
+            "branch": "dev",
+            "launch_buttons": {"molab": False},
+            "toc": [{"file": "a.md"}, {"file": "b.md", "title": "B!"}],
+        }
+    )
+    assert _book_signature(b1) == _book_signature(b2)
+
+    b3 = Book.model_validate(
+        {"title": "T", "toc": [{"file": "a.md"}], "defaults": {"hide_first_code_cell": False}}
+    )
+    assert _book_signature(b1) != _book_signature(b3)  # render-affecting still keys
+
+
+def test_toc_edit_does_not_invalidate_notebook_render(tmp_path: Path) -> None:
+    """Adding a TOC entry / retitling must reuse the cached notebook body;
+    the finalize step re-runs so the staged page still updates."""
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    shutil.copy(NOTEBOOK_FIXTURE, content / "nb.py")
+    toc = [{"file": "content/intro.md"}, {"file": "content/nb.py"}]
+    book = Book.model_validate({"title": "T", "toc": toc})
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+
+    (content / "extra.md").write_text("# Extra\n", encoding="utf-8")
+    book2 = Book.model_validate(
+        {"title": "T", "toc": [*toc, {"file": "content/extra.md", "title": "New!"}]}
+    )
+    report = Preprocessor(book2, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.ok
+    assert report.pages_cached == 1  # nb.py reused despite the TOC change
+    assert (tmp_path / "_site_src" / "docs" / "nb.md").exists()
+
+
+def test_repo_change_refreshes_buttons_on_cached_page(tmp_path: Path) -> None:
+    """Buttons are finalize-time: a repo change must show up in the staged
+    page without re-executing the notebook."""
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    shutil.copy(NOTEBOOK_FIXTURE, content / "nb.py")
+    toc = [{"file": "content/intro.md"}, {"file": "content/nb.py"}]
+    book = Book.model_validate({"title": "T", "toc": toc})
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+
+    book2 = Book.model_validate(
+        {"title": "T", "repo": "https://github.com/owner/newrepo", "toc": toc}
+    )
+    report = Preprocessor(book2, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert report.pages_cached == 1
+    staged = (tmp_path / "_site_src" / "docs" / "nb.md").read_text(encoding="utf-8")
+    assert "owner/newrepo" in staged  # fresh buttons on a cached body

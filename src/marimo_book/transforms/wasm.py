@@ -98,6 +98,7 @@ def render_wasm_page(
     *,
     display_code: bool = False,
     staged_source_path: Path | None = None,
+    timeout: float | None = None,
 ) -> str:
     """Render a marimo notebook as a WASM-interactive page body.
 
@@ -123,7 +124,17 @@ def render_wasm_page(
     """
     target = staged_source_path or py_path
     gen = MarimoIslandGenerator.from_file(str(target), display_code=display_code)
-    asyncio.run(gen.build())
+    # ``gen.build()`` executes the notebook in-process (no subprocess), so it
+    # doesn't get export_notebook's timeout for free — bound it here so a
+    # hung wasm notebook can't stall build/serve/CI.
+    try:
+        asyncio.run(asyncio.wait_for(gen.build(), timeout))
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"wasm render timed out after {timeout:g}s for {py_path}. "
+            "Raise defaults.execution_timeout in book.yml (or set it to null "
+            "to disable) if this notebook legitimately runs longer."
+        ) from exc
     head = gen.render_head()
     # ``include_init_island=False`` skips marimo's static "Initializing..."
     # spinner. The bundle is supposed to hide that placeholder once cells

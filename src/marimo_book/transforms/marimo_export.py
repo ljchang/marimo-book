@@ -57,6 +57,41 @@ class ExportedNotebook:
     metadata: dict
 
 
+@dataclass
+class CellError:
+    """A cell whose execution raised — parsed from ipynb ``error`` outputs."""
+
+    # 1-based ordinal among the notebook's *code* cells (the exported ipynb
+    # interleaves markdown cells, whose positions would make the number
+    # meaningless to the author looking at their ``.py``).
+    cell_index: int
+    ename: str
+    evalue: str
+
+
+def collect_cell_errors(exported: ExportedNotebook) -> list[CellError]:
+    """Return every ``output_type: error`` in the exported notebook.
+
+    marimo exits nonzero when cells fail but still writes a valid ipynb
+    with the traceback as an error output; :func:`export_notebook` accepts
+    that case so the page can render the failure visibly. This helper lets
+    the build decide whether a visible traceback is also a build failure
+    (``--strict``) or just a warning.
+    """
+    errors: list[CellError] = []
+    code_ordinal = 0
+    for cell in exported.cells:
+        if cell.get("cell_type") != "code":
+            continue
+        code_ordinal += 1
+        for out in cell.get("outputs", []) or []:
+            if out.get("output_type") == "error":
+                errors.append(
+                    CellError(code_ordinal, out.get("ename", "Error"), out.get("evalue", ""))
+                )
+    return errors
+
+
 def export_notebook(
     py_path: Path,
     *,

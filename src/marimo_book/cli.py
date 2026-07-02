@@ -323,11 +323,14 @@ def render(
     """
     book = _load_or_exit(book_file)
     book_dir = book_file.resolve().parent
-    pre = Preprocessor(book, book_dir=book_dir)
+    pre = Preprocessor(book, book_dir=book_dir, on_progress=_echo_progress)
     report = pre.render_cached(check_only=check)
 
+    # In --check mode every warning is a staleness report; in render mode
+    # warnings are other diagnostics (e.g. raising cells) — label accordingly.
+    warn_label = "stale" if check else "warning"
     for warn in report.warnings:
-        typer.echo(f"  stale: {warn}", err=True)
+        typer.echo(f"  {warn_label}: {warn}", err=True)
     for err in report.errors:
         typer.echo(f"  error: {err}", err=True)
 

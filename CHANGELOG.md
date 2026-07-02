@@ -9,11 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`build --strict` now fails when a notebook cell raises.** Previously a
+  runtime error rendered its traceback into the published page while CI
+  stayed green (mkdocs strict only checks nav/links). Non-strict builds and
+  `marimo-book render` warn; pages that intentionally demonstrate exceptions
+  opt out with `allow_errors: true` on the TOC entry. The verdict survives
+  caching: raising cells are recorded in the build cache and in `_rendered/`
+  manifest entries and replayed on hits, so a cached page can't dodge the
+  strict gate (artifacts rendered before this release are grandfathered
+  until the next `marimo-book render`). WASM pages are exempt — the islands
+  runtime re-executes in the browser. Diagnostics point at the code-cell
+  ordinal (`code cell 3`), counting only code cells.
 - **`defaults.execution_timeout`** (seconds, default `600`, `null` disables)
-  bounds every `marimo export` subprocess — a notebook stuck in an infinite
-  loop or a hung download previously stalled `build`/`serve`/CI forever with
-  no diagnostic. Books whose notebooks legitimately run longer should raise
-  the knob (or disable it) in `book.yml`.
+  bounds every notebook execution — `marimo export` subprocesses and the
+  in-process WASM island build — a notebook stuck in an infinite loop or a
+  hung download previously stalled `build`/`serve`/CI forever with no
+  diagnostic. Books whose notebooks legitimately run longer should raise the
+  knob (or disable it) in `book.yml`. The knob is excluded from cache and
+  `_rendered/` signatures: tuning it never invalidates committed renders.
+- **`marimo-book render` progress + labels.** Per-notebook
+  `[i/N] rendering …` lines while heavy cached notebooks execute, and its
+  warnings are no longer mislabeled `stale:` outside `--check`. A crashing
+  blog post now lands in the report like TOC entries instead of aborting the
+  whole build.
 - **Per-notebook progress lines** during `build` and `serve` rebuilds
   (`[2/7] rendering content/ch2.py...`), so long notebook builds no longer
   look hung.

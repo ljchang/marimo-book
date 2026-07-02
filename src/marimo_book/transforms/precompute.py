@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from .marimo_export import (
+    DEFAULT_EXPORT_TIMEOUT,
     cells_to_markdown_segments,
     export_notebook,
     export_notebook_with_overrides,
@@ -566,7 +567,7 @@ def precompute_page(
     max_combinations: int,
     sandbox: bool = False,
     suppress_warnings: bool = False,
-    timeout: float | None = None,
+    timeout: float | None = DEFAULT_EXPORT_TIMEOUT,
 ) -> PrecomputeResult:
     """Re-export a notebook once per (widget, value), return the staged body.
 

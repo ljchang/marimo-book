@@ -346,6 +346,10 @@ class FileEntry(BaseModel):
     # (no execution at build). Markdown pages ignore this field.
     mode: Literal["static", "wasm", "cached"] | None = None
     hidden: bool = False
+    # Cells on this page are *expected* to raise (e.g. a lesson that
+    # demonstrates exceptions). Suppresses the cell-error warning and the
+    # ``build --strict`` failure for this entry only.
+    allow_errors: bool = False
 
     def effective_mode(self, default_mode: str) -> str:
         """Resolve this entry's render mode against the book-wide default."""

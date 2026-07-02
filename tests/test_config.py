@@ -220,3 +220,14 @@ def test_execution_timeout_default_and_override(tmp_path: Path) -> None:
         )
     )
     assert load_book(book_yml).defaults.execution_timeout is None
+
+
+def test_file_entry_allow_errors_flag(tmp_path: Path) -> None:
+    book_yml = tmp_path / "book.yml"
+    book_yml.write_text(
+        yaml.safe_dump({"title": "T", "toc": [{"file": "a.py", "allow_errors": True}]})
+    )
+    assert load_book(book_yml).toc[0].allow_errors is True
+
+    book_yml.write_text(yaml.safe_dump({"title": "T", "toc": [{"file": "a.py"}]}))
+    assert load_book(book_yml).toc[0].allow_errors is False

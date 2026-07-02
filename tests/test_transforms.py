@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from marimo_book.config import Book
 from marimo_book.launch_buttons import render_button_row
@@ -543,3 +546,20 @@ def test_anywidget_escaped_under_text_markdown_routes_to_html() -> None:
     assert "&lt;marimo-anywidget" not in out
     # Literal kwarg from cell source seeds initial state.
     assert '"height": 320' in out
+
+
+# --- export timeout ----------------------------------------------------------
+
+
+def test_export_notebook_timeout_raises_actionable_error(monkeypatch, tmp_path: Path) -> None:
+    from marimo_book.transforms import marimo_export
+
+    nb = tmp_path / "hang.py"
+    nb.write_text("import marimo\napp = marimo.App()\n", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 1))
+
+    monkeypatch.setattr(marimo_export.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="timed out after 1s"):
+        marimo_export.export_notebook(nb, timeout=1)

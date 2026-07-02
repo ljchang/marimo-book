@@ -808,6 +808,7 @@ class Preprocessor:
             max_combinations=cfg.max_combinations_per_page,
             sandbox=self.sandbox,
             suppress_warnings=self.book.defaults.suppress_warnings,
+            timeout=self.book.defaults.execution_timeout,
         )
         if result.skipped:
             report.warnings.append(f"{entry.file}: {result.skip_reason}")
@@ -1089,6 +1090,7 @@ def _render_marimo(src: Path, book: Book, *, sandbox: bool = False) -> str:
         src,
         sandbox=sandbox,
         suppress_warnings=book.defaults.suppress_warnings,
+        timeout=book.defaults.execution_timeout,
     )
     return cells_to_markdown(
         exp,

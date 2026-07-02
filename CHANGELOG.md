@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`build --strict` now fails when a notebook cell raises.** Previously a
+  runtime error rendered its traceback into the published page while CI
+  stayed green (mkdocs strict only checks nav/links). Non-strict builds and
+  `marimo-book render` warn; pages that intentionally demonstrate exceptions
+  opt out with `allow_errors: true` on the TOC entry.
 - **`defaults.execution_timeout`** (seconds, default `600`, `null` disables)
   bounds every `marimo export` subprocess — a notebook stuck in an infinite
   loop or a hung download previously stalled `build`/`serve`/CI forever with

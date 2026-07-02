@@ -272,3 +272,47 @@ def test_new_post_respects_blog_dir_from_book_yml(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert (tmp_path / "news" / "posts" / "2026-06-04-hi.md").exists()
+
+
+# --- check --------------------------------------------------------------------
+
+
+def _write_book(tmp_path: Path, *, broken: bool = False) -> Path:
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    toc = "  - file: content/intro.md\n"
+    if broken:
+        toc += "  - file: content/missing.py\n"
+    book_yml = tmp_path / "book.yml"
+    book_yml.write_text(f"title: T\nrepo: https://github.com/o/r\ntoc:\n{toc}", encoding="utf-8")
+    return book_yml
+
+
+def test_check_passes_on_clean_book(runner: CliRunner, tmp_path: Path) -> None:
+    book_yml = _write_book(tmp_path)
+    result = runner.invoke(app, ["check", "-b", str(book_yml)])
+    assert result.exit_code == 0, result.output
+    assert "All checks passed" in result.output
+
+
+def test_check_fails_on_missing_file(runner: CliRunner, tmp_path: Path) -> None:
+    book_yml = _write_book(tmp_path, broken=True)
+    result = runner.invoke(app, ["check", "-b", str(book_yml)])
+    assert result.exit_code == 1
+    assert "missing" in result.output
+
+
+def test_check_strict_promotes_warnings(runner: CliRunner, tmp_path: Path) -> None:
+    content = tmp_path / "content"
+    content.mkdir()
+    (content / "intro.md").write_text("# Intro\n[dead](gone.md)\n", encoding="utf-8")
+    book_yml = tmp_path / "book.yml"
+    book_yml.write_text(
+        "title: T\nrepo: https://github.com/o/r\ntoc:\n  - file: content/intro.md\n",
+        encoding="utf-8",
+    )
+    assert runner.invoke(app, ["check", "-b", str(book_yml)]).exit_code == 0
+    result = runner.invoke(app, ["check", "-b", str(book_yml), "--strict"])
+    assert result.exit_code == 1
+    assert "broken relative link" in result.output

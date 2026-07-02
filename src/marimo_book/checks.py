@@ -33,6 +33,11 @@ _FEATURE_EXTRAS: tuple[tuple[str, str, str], ...] = (
 # to the first `)`, `#` or whitespace so anchors/titles don't pollute it.
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)#\s]+)[^)]*\)")
 
+# Regions whose "links" are examples, not links: fenced blocks and inline
+# code spans. Stripped before the link scan.
+_CODE_FENCE_RE = re.compile(r"^(```|~~~).*?^\1\s*$", re.MULTILINE | re.DOTALL)
+_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+
 
 @dataclass
 class CheckReport:
@@ -66,7 +71,7 @@ def run_checks(book: Book, book_dir: Path) -> CheckReport:
     _check_duplicate_outputs(entries, report)
     _check_inert_knobs(book, report)
     _check_empty_sections(book.toc, report)
-    _check_internal_links(book_dir, entries, report)
+    _check_internal_links(book, book_dir, entries, report)
     return report
 
 
@@ -111,8 +116,7 @@ def _check_extras(book: Book, report: CheckReport) -> None:
         if enabled[feature] and not _module_available(module):
             label = labels.get(feature, f"{feature}: true")
             report.errors.append(
-                f"{label} needs the [{extra}] extra "
-                f"(pip install 'marimo-book[{extra}]')"
+                f"{label} needs the [{extra}] extra (pip install 'marimo-book[{extra}]')"
             )
 
 
@@ -161,8 +165,7 @@ def _check_duplicate_outputs(entries: list[FileEntry], report: CheckReport) -> N
 def _check_inert_knobs(book: Book, report: CheckReport) -> None:
     if book.bibliography.files:
         report.warnings.append(
-            "bibliography: is configured but not implemented yet — "
-            "citations will not render"
+            "bibliography: is configured but not implemented yet — citations will not render"
         )
     for name in ("binder", "colab", "wasm"):
         if getattr(book.launch_buttons, name, False):
@@ -189,7 +192,7 @@ def _check_empty_sections(toc: list, report: CheckReport) -> None:
 
 
 def _check_internal_links(
-    book_dir: Path, entries: list[FileEntry], report: CheckReport
+    book: Book, book_dir: Path, entries: list[FileEntry], report: CheckReport
 ) -> None:
     """Static pass over .md sources for broken relative links.
 
@@ -197,15 +200,19 @@ def _check_internal_links(
     its basename matches another TOC page (the link-rewrite convention maps
     ``page.md`` links to whichever entry stages under that name). Notebook
     prose is skipped — it needs a render, which ``build --strict`` covers.
+    Links inside fenced blocks / inline code are examples, not links.
     """
-    md_basenames = {
-        entry.file.with_suffix("").name for entry in entries if entry.file.suffix == ".md"
-    } | {entry.file.with_suffix("").name for entry in entries if entry.file.suffix == ".py"}
+    md_basenames = {entry.file.with_suffix("").name for entry in entries}
+    if book.include_changelog:
+        # Generated page: staged from CHANGELOG.md at build time.
+        md_basenames.add("changelog")
     for entry in entries:
         src = book_dir / entry.file
         if src.suffix != ".md" or not src.exists():
             continue
         text = src.read_text(encoding="utf-8")
+        text = _CODE_FENCE_RE.sub("", text)
+        text = _CODE_SPAN_RE.sub("", text)
         for match in _MD_LINK_RE.finditer(text):
             target = match.group(1)
             if "://" in target or target.startswith(("mailto:", "/", "data:")):

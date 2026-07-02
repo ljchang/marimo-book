@@ -239,3 +239,22 @@ def test_broken_relative_link_warns_and_valid_ones_pass(tmp_path: Path) -> None:
     assert len(broken) == 2
     assert any("missing.md" in w for w in broken)
     assert any("images/gone.png" in w for w in broken)
+
+
+def test_links_in_code_fences_and_spans_are_ignored(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "include_changelog": True, "toc": [{"file": "content/a.md"}]},
+        files=["content/a.md"],
+    )
+    (tmp_path / "content" / "a.md").write_text(
+        "# A\n"
+        "```markdown\n[example](not-a-real-page.md)\n```\n"
+        "Use `[label](page.md)` syntax for cross-refs.\n"
+        "[changelog](changelog.md)\n",  # generated page — valid with the flag on
+        encoding="utf-8",
+    )
+    report = run_checks(book, tmp_path)
+    assert not any("broken relative link" in w for w in report.warnings)

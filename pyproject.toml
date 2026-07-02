@@ -31,10 +31,13 @@ dependencies = [
     "typer>=0.12",
     "pydantic>=2.6",
     "pyyaml>=6.0",
-    "jinja2>=3.1",
+    # Used directly (transforms/pep723.py, transforms/precompute.py) but
+    # historically only present transitively via marimo / mkdocs. Declare
+    # them so an upstream dependency shuffle can't break our imports.
+    "tomlkit>=0.12",
+    "markdown>=3.5",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
-    "pybtex>=0.24",
     # 0.23.6 ships marimo-team/marimo#9409, which makes
     # `MarimoIslandGenerator.from_file()` propagate the notebook
     # filename so `__file__` / `mo.notebook_dir()` resolve correctly on

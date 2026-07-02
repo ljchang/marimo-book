@@ -266,6 +266,11 @@ def _theme_block(book: Book) -> dict[str, Any]:
             "navigation.path",
             "navigation.footer",
             "navigation.instant",
+            # Prefetch on hover + a top progress bar for slow page loads
+            # (WASM pages especially), and a back-to-top button on mobile.
+            "navigation.instant.prefetch",
+            "navigation.instant.progress",
+            "navigation.top",
             "navigation.tracking",
             "search.suggest",
             "search.highlight",

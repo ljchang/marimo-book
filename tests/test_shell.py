@@ -16,3 +16,10 @@ def test_palettes_follow_system_color_scheme() -> None:
     media = {p["scheme"]: p.get("media") for p in palettes}
     assert media["default"] == "(prefers-color-scheme: light)"
     assert media["slate"] == "(prefers-color-scheme: dark)"
+
+
+def test_nav_features_include_prefetch_progress_and_top() -> None:
+    features = _theme_block(_book())["features"]
+    assert "navigation.instant.prefetch" in features
+    assert "navigation.instant.progress" in features
+    assert "navigation.top" in features

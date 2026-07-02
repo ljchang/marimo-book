@@ -106,6 +106,11 @@ If a PR introduces a new optional extra (like `[autorefs]`), update
 both `.github/workflows/ci.yml` and `.github/workflows/docs.yml` to
 install it (the docs job needs every extra the docs site uses).
 
+`marimo-book check` (build-free doctor) lives in `src/marimo_book/checks.py`.
+Keep it fast and side-effect-free: no notebook execution, no subprocesses,
+no network. When adding a feature flag with a new extra, add its probe to
+`_FEATURE_EXTRAS` there so `check` catches the missing install.
+
 ## Build strictness and execution bounds (since 0.1.27)
 
 - **`build --strict` fails when a notebook cell raises.** The traceback

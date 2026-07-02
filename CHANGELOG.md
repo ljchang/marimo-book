@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`marimo-book check` is now a real doctor** (was a stub). In under a
+  second, with no notebook execution: missing TOC files, missing
+  logo/favicon/api_docs/blog paths, uninstalled extras for enabled features
+  (with the exact pip command), stale `mode: cached` artifacts, duplicate
+  staged outputs, inert config knobs (`bibliography:` until it ships,
+  reserved launch-button flags), buttons-without-repo, empty sections, and
+  broken relative links in `.md` sources (code fences/spans excluded).
+  Errors exit 1; `--strict` promotes warnings for CI.
 - **Serve/rebuild speed: the transient cache now stores pre-finalize bodies**
   (cache schema v3). Launch buttons and link rewrites are re-applied on every
   build, so TOC, title, `repo`, and `launch_buttons` edits no longer

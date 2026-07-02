@@ -506,14 +506,32 @@ def check(
     strict: bool = typer.Option(
         False,
         "--strict",
-        help="Fail on warnings.",
+        help="Exit nonzero on warnings too, not just errors (for CI).",
     ),
 ) -> None:
-    """Validate ``book.yml`` and linked content without building."""
+    """Validate ``book.yml`` and linked content without building.
+
+    Fast pre-flight (< 1 s, no notebook execution): missing TOC files,
+    missing asset paths, uninstalled extras for enabled features, stale
+    ``mode: cached`` artifacts, duplicate staged outputs, inert config
+    knobs, and broken relative links in ``.md`` sources. ``build --strict``
+    remains the authority on rendered output.
+    """
+    from .checks import run_checks
+
     book = _load_or_exit(book_file)
-    typer.echo(f"OK: loaded '{book.title}' with {_count_toc(book.toc)} TOC entries")
-    if strict:
-        typer.echo("[stub] --strict content checks not yet implemented")
+    report = run_checks(book, book_file.resolve().parent)
+    for err in report.errors:
+        typer.echo(f"  error: {err}", err=True)
+    for warn in report.warnings:
+        typer.echo(f"  warning: {warn}", err=True)
+
+    if report.errors or report.warnings:
+        typer.echo(f"{len(report.errors)} errors, {len(report.warnings)} warnings.")
+    if report.errors or (strict and report.warnings):
+        raise typer.Exit(code=1)
+    if not report.warnings:
+        typer.echo(f"All checks passed ({_count_toc(book.toc)} TOC entries).")
 
 
 @app.command("sync-deps")

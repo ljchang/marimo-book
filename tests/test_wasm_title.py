@@ -86,3 +86,19 @@ def test_render_wasm_page_emits_single_hoisted_h1(tmp_path):
     assert "<h1>Page Title</h1>" in body
     # The notebook's own (islands-encoded) heading must be gone.
     assert "Page Title" not in body.split("</h1>", 1)[1]
+
+
+def test_render_wasm_page_hoists_from_staged_ast_unparsed_source(tmp_path):
+    # The regression that shipped broken: WASM renders the pep723-STAGED source,
+    # which is ast.unparse'd. Drive render_wasm_page with exactly that form.
+    import ast
+
+    raw = _nb('mo.md(r"""\n# Staged Page\n\nHello.\n""")')
+    orig = tmp_path / "orig.py"
+    orig.write_text(raw, encoding="utf-8")
+    staged = tmp_path / "staged.py"
+    staged.write_text(ast.unparse(ast.parse(raw)), encoding="utf-8")
+    body = render_wasm_page(orig, staged_source_path=staged)
+    assert body.count("<h1>") == 1
+    assert "<h1>Staged Page</h1>" in body
+    assert "Staged Page" not in body.split("</h1>", 1)[1]

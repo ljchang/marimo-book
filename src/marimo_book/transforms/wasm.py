@@ -200,9 +200,7 @@ def render_wasm_page(
                 stripped_target, display_code=display_code, timeout=timeout, py_path=py_path
             )
         return f"<h1>{_html.escape(title)}</h1>\n\n" + body
-    return _render_wasm_body(
-        target, display_code=display_code, timeout=timeout, py_path=py_path
-    )
+    return _render_wasm_body(target, display_code=display_code, timeout=timeout, py_path=py_path)
 
 
 def _render_wasm_body(

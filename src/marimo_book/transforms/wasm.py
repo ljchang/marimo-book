@@ -86,11 +86,54 @@ affected.
 from __future__ import annotations
 
 import asyncio
+import html as _html
+import re
+import textwrap
 from pathlib import Path
 
 from marimo import MarimoIslandGenerator
 
 from .anywidgets import rewrite_anywidget_html
+from .marimo_export import staged_sibling_file
+
+# Matches the string literal passed to the first ``mo.md(...)`` call. A plain
+# (non-raw) string so the ``"""`` / ``'''`` delimiters can appear literally.
+_MO_MD_RE = re.compile(
+    'mo\\.md\\(\\s*[rR]?(?P<q>"""|\'\'\')(?P<body>.*?)(?P=q)',
+    re.DOTALL,
+)
+
+
+def extract_and_strip_title(source: str) -> tuple[str | None, str]:
+    """Pull the page title out of a notebook's first markdown cell.
+
+    On WASM pages the notebook's leading ``# H1`` is emitted *encoded* inside a
+    ``<marimo-mime-renderer>`` data attribute, so MkDocs Material can't see a
+    literal ``<h1`` in ``page.content`` and injects the nav title as its own
+    ``<h1>`` — giving the reader two identical titles. To fix that we hoist the
+    title: strip the ``# H1`` line from the first ``mo.md`` cell here (so the
+    cell no longer renders it) and let the caller emit one real ``<h1>`` at the
+    top of the page body (which Material then detects and leaves alone).
+
+    Returns ``(title, source_without_the_h1_line)``. Returns ``(None, source)``
+    unchanged when the first ``mo.md`` cell doesn't begin with an ATX ``# H1``
+    (nothing to hoist), so non-title-first notebooks are untouched.
+    """
+    m = _MO_MD_RE.search(source)
+    if not m:
+        return None, source
+    raw = m.group("body")
+    first = next((ln for ln in textwrap.dedent(raw).splitlines() if ln.strip()), "")
+    heading = re.match(r"#[ \t]+(.+?)[ \t]*$", first)
+    if not heading:
+        return None, source
+    title = heading.group(1).strip()
+    # Drop the first ATX H1 line (``# ...``) from the cell's raw source; ``##``+
+    # subheadings never match because ``#[ \t]+`` requires whitespace after a
+    # single ``#``.
+    new_raw = re.sub(r"(?m)^[ \t]*#[ \t]+.+\n", "", raw, count=1)
+    new_source = source[: m.start("body")] + new_raw + source[m.end("body") :]
+    return title, new_source
 
 
 def render_wasm_page(
@@ -123,6 +166,27 @@ def render_wasm_page(
     compatibility and standalone test usage.
     """
     target = staged_source_path or py_path
+    # Hoist the notebook's first ``# H1`` to a real ``<h1>`` at the top of the
+    # page (see extract_and_strip_title): otherwise MkDocs Material can't see
+    # the islands-encoded heading and injects the nav title, duplicating it.
+    title, stripped = extract_and_strip_title(target.read_text(encoding="utf-8"))
+    if title:
+        with staged_sibling_file(
+            target, prefix="marimo_book_title_", content=stripped
+        ) as stripped_target:
+            body = _render_wasm_body(
+                stripped_target, display_code=display_code, timeout=timeout, py_path=py_path
+            )
+        return f"<h1>{_html.escape(title)}</h1>\n\n" + body
+    return _render_wasm_body(
+        target, display_code=display_code, timeout=timeout, py_path=py_path
+    )
+
+
+def _render_wasm_body(
+    target: Path, *, display_code: bool, timeout: float | None, py_path: Path
+) -> str:
+    """Build the islands head + body for ``target`` (see render_wasm_page)."""
     gen = MarimoIslandGenerator.from_file(str(target), display_code=display_code)
     # ``gen.build()`` executes the notebook in-process (no subprocess), so it
     # doesn't get export_notebook's timeout for free — bound it here so a

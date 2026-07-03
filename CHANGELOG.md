@@ -5,6 +5,23 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.28] — 2026-07-03
+
+### Fixed
+
+- **WASM pages no longer render a duplicated page title.** On `mode: wasm`
+  pages the notebook's leading `# H1` is emitted *encoded* inside a
+  `<marimo-mime-renderer>` data attribute, so MkDocs Material can't see a
+  literal `<h1` in `page.content` and injects the nav title as its own
+  heading — the reader saw the title twice. The WASM renderer now hoists the
+  first `mo.md` cell's leading `# H1`: it strips that line from the cell
+  (rendering the copy, never the source `.py`) and emits one real `<h1>` at
+  the top of the page body, which Material detects and leaves alone. The
+  notebook's own (often more descriptive) heading becomes the single page
+  title. Notebooks whose first markdown cell doesn't begin with an ATX `# H1`
+  are untouched; static/cached pages were never affected (their heading is a
+  literal `<h1>` Material already sees).
+
 ## [0.1.27] — 2026-07-02
 
 ### Added

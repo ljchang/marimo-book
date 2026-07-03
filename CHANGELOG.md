@@ -5,6 +5,16 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.29] — 2026-07-03
+
+### Fixed
+
+- **The 0.1.28 WASM title-hoist now actually reaches cached builds.** The hoist
+  changes a notebook's rendered body, but `_RENDER_OUTPUT_VERSION` wasn't bumped,
+  so the transient build cache replayed pre-0.1.28 bodies and the duplicate title
+  persisted on any page whose source was unchanged. Bumped the contract version
+  so cached bodies invalidate and WASM pages re-render with the hoist.
+
 ## [0.1.28] — 2026-07-03
 
 ### Fixed

@@ -363,9 +363,11 @@ def _book_signature(book: Book) -> str:
 # Using the package version here (the old behavior) nuked the cache on every
 # release, so a patch bump silently re-executed GPU/video notebooks in CI —
 # which, on a deploy runner without the notebooks' deps, published tracebacks.
-# "2": WASM pages now hoist the notebook's first H1 to a page-level <h1>
+# "2": WASM pages hoist the notebook's first H1 to a page-level <h1>
 # (transforms/wasm.py) — a render-output change, so cached bodies must invalidate.
-_RENDER_OUTPUT_VERSION = "2"
+# "3": that hoist was a no-op on staged (ast.unparse'd) sources until 0.1.30
+# made extract_and_strip_title AST-based; bump again so the fixed output lands.
+_RENDER_OUTPUT_VERSION = "3"
 
 
 def _render_body_signature(book: Book) -> str:

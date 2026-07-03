@@ -62,6 +62,20 @@ def test_both_triple_quote_styles(quote):
     assert extract_and_strip_title(src)[0] == "Quoted Title"
 
 
+def test_works_on_ast_unparsed_source():
+    # The WASM pep723 staging round-trips the source through ast.unparse, which
+    # turns mo.md(r\"\"\"...\"\"\") into a single-quoted literal with \n escapes.
+    # The title logic must still find + strip the heading (regression: it didn't).
+    import ast
+
+    src = _nb('mo.md(r"""\n# Staged Title\nbody\n""")')
+    staged = ast.unparse(ast.parse(src))
+    assert 'mo.md(r"""' not in staged  # confirm it's the escaped single-quote form
+    title, stripped = extract_and_strip_title(staged)
+    assert title == "Staged Title"
+    assert "# Staged Title" not in ast.unparse(ast.parse(stripped))
+
+
 def test_render_wasm_page_emits_single_hoisted_h1(tmp_path):
     nb = tmp_path / "page.py"
     nb.write_text(_nb('mo.md(r"""\n# Page Title\n\nHello world.\n""")'), encoding="utf-8")

@@ -5,6 +5,20 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.30] — 2026-07-03
+
+### Fixed
+
+- **WASM title-hoist now actually strips the heading.** `extract_and_strip_title`
+  matched `mo.md("""...""")` with a triple-quote regex, but the WASM staging
+  round-trips the source through `ast.unparse` first (for the micropip
+  bootstrap), which rewrites it to a single-quoted literal with `\n` escapes —
+  so the regex found nothing and the hoist silently no-op'd on every real build
+  (the duplicate title persisted; only the raw-source unit test passed).
+  Rewrote it to walk the AST and operate on the string *value*, immune to quote
+  style. Bumped `_RENDER_OUTPUT_VERSION` to invalidate the now-incorrect cached
+  bodies.
+
 ## [0.1.29] — 2026-07-03
 
 ### Fixed

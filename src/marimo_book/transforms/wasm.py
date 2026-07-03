@@ -85,6 +85,7 @@ affected.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import html as _html
 import re
@@ -96,12 +97,25 @@ from marimo import MarimoIslandGenerator
 from .anywidgets import rewrite_anywidget_html
 from .marimo_export import staged_sibling_file
 
-# Matches the string literal passed to the first ``mo.md(...)`` call. A plain
-# (non-raw) string so the ``"""`` / ``'''`` delimiters can appear literally.
-_MO_MD_RE = re.compile(
-    'mo\\.md\\(\\s*[rR]?(?P<q>"""|\'\'\')(?P<body>.*?)(?P=q)',
-    re.DOTALL,
-)
+
+def _first_mo_md_constant(tree: ast.AST) -> ast.Constant | None:
+    """The string ``Constant`` of the source-earliest ``mo.md("...")`` call."""
+    consts = [
+        node.args[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "md"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "mo"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ]
+    if not consts:
+        return None
+    consts.sort(key=lambda c: (c.lineno, c.col_offset))
+    return consts[0]
 
 
 def extract_and_strip_title(source: str) -> tuple[str | None, str]:
@@ -115,25 +129,33 @@ def extract_and_strip_title(source: str) -> tuple[str | None, str]:
     cell no longer renders it) and let the caller emit one real ``<h1>`` at the
     top of the page body (which Material then detects and leaves alone).
 
+    Works on the AST (the string *value*), not the source text, so it's immune
+    to quote style — the WASM staging round-trips the source through
+    ``ast.unparse`` (turning ``mo.md(r\"\"\"...\"\"\")`` into a single-quoted
+    literal with ``\\n`` escapes), which a source-level regex would miss.
+
     Returns ``(title, source_without_the_h1_line)``. Returns ``(None, source)``
     unchanged when the first ``mo.md`` cell doesn't begin with an ATX ``# H1``
     (nothing to hoist), so non-title-first notebooks are untouched.
     """
-    m = _MO_MD_RE.search(source)
-    if not m:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
         return None, source
-    raw = m.group("body")
-    first = next((ln for ln in textwrap.dedent(raw).splitlines() if ln.strip()), "")
+    const = _first_mo_md_constant(tree)
+    if const is None:
+        return None, source
+    md = const.value
+    first = next((ln for ln in textwrap.dedent(md).splitlines() if ln.strip()), "")
     heading = re.match(r"#[ \t]+(.+?)[ \t]*$", first)
     if not heading:
         return None, source
     title = heading.group(1).strip()
-    # Drop the first ATX H1 line (``# ...``) from the cell's raw source; ``##``+
+    # Drop the first ATX H1 line (``# ...``) from the markdown value; ``##``+
     # subheadings never match because ``#[ \t]+`` requires whitespace after a
     # single ``#``.
-    new_raw = re.sub(r"(?m)^[ \t]*#[ \t]+.+\n", "", raw, count=1)
-    new_source = source[: m.start("body")] + new_raw + source[m.end("body") :]
-    return title, new_source
+    const.value = re.sub(r"(?m)^[ \t]*#[ \t]+.+\n", "", md, count=1)
+    return title, ast.unparse(tree)
 
 
 def render_wasm_page(

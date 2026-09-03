@@ -947,3 +947,72 @@ def test_citations_render_and_bib_edits_apply_without_rerender(tmp_path: Path) -
     assert report.pages_cached == 1  # notebook untouched
     staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
     assert ">Doe, 2021</a>)" in staged  # .bib edit applied at finalize time
+
+
+# --- extra_css ----------------------------------------------------------------
+
+
+def _css_book(entries: list[str]) -> Book:
+    return Book.model_validate(
+        {
+            "title": "Test",
+            "extra_css": entries,
+            "toc": [{"file": "content/intro.md"}],
+        }
+    )
+
+
+def _staged_css(out_dir: Path) -> list[str]:
+    """The mkdocs extra_css list, with the cache-busting suffix stripped."""
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text(encoding="utf-8"))
+    return [str(item).split("?")[0] for item in mkdocs["extra_css"]]
+
+
+def test_extra_css_is_staged_and_listed_after_the_builtin(tmp_path: Path) -> None:
+    _minimal_book(tmp_path)
+    (tmp_path / "stylesheets").mkdir()
+    (tmp_path / "stylesheets" / "custom.css").write_text(
+        "pre.marimo-book-output-text { max-height: 24rem; }\n", encoding="utf-8"
+    )
+    out_dir = tmp_path / "_site_src"
+
+    Preprocessor(_css_book(["stylesheets/custom.css"]), book_dir=tmp_path).build(out_dir=out_dir)
+
+    staged = out_dir / "docs" / "stylesheets" / "custom.css"
+    assert staged.exists(), "extra_css should copy the file into the staged tree"
+    assert "max-height" in staged.read_text(encoding="utf-8")
+
+    paths = _staged_css(out_dir)
+    assert paths.index("stylesheets/extra.css") < paths.index("stylesheets/custom.css"), (
+        f"author CSS must load after the built-in sheet so its rules win; got {paths}"
+    )
+
+
+def test_extra_css_absent_by_default(tmp_path: Path) -> None:
+    _minimal_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+
+    Preprocessor(_css_book([]), book_dir=tmp_path).build(out_dir=out_dir)
+
+    assert _staged_css(out_dir) == ["stylesheets/extra.css"]
+
+
+def test_extra_css_missing_file_warns_without_failing(tmp_path: Path) -> None:
+    """A declared-but-absent sheet leaves the site buildable, just unstyled."""
+    _minimal_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+
+    report = Preprocessor(_css_book(["stylesheets/nope.css"]), book_dir=tmp_path).build(
+        out_dir=out_dir
+    )
+
+    assert any("nope.css" in w for w in report.warnings), report.warnings
+    assert "stylesheets/nope.css" not in _staged_css(out_dir)
+
+
+def test_extra_css_rejects_escaping_and_reserved_names() -> None:
+    import pytest
+
+    for bad in ("../secrets.css", "stylesheets/extra.css"):
+        with pytest.raises(ValueError):
+            _css_book([bad])

@@ -676,6 +676,7 @@ class Preprocessor:
 
         self._stage_assets(docs_dir, report)
         self._write_defaults(docs_dir)
+        extra_css = self._stage_extra_css(docs_dir, report)
 
         file_entries = _iter_file_entries(self.book.toc)
 
@@ -878,6 +879,7 @@ class Preprocessor:
             site_dir=site_dir,
             out_path=out_dir / "mkdocs.yml",
             nav=nav,
+            extra_css=extra_css or None,
             api_paths=api_paths or None,
         )
 
@@ -1275,6 +1277,26 @@ class Preprocessor:
                 assets_root / "logo_sidebar.css",
                 docs_dir / "stylesheets" / "logo_sidebar.css",
             )
+
+    def _stage_extra_css(self, docs_dir: Path, report: BuildReport) -> list[str]:
+        """Copy author stylesheets into the staged tree.
+
+        Returns the staged paths, which shell.py appends to mkdocs's
+        ``extra_css`` after the built-in sheet so author rules win. A
+        declared file that does not exist is a warning rather than an
+        error: the site is still buildable, just unstyled.
+        """
+        staged: list[str] = []
+        for relative in self.book.extra_css:
+            source = self.book_dir / relative
+            if not source.is_file():
+                report.warnings.append(f"extra_css: {relative} not found under {self.book_dir}")
+                continue
+            destination = docs_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            staged.append(relative.as_posix())
+        return staged
 
 
 # --- TOC traversal ----------------------------------------------------------

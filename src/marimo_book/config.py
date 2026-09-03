@@ -31,6 +31,11 @@ from pydantic import (
     model_validator,
 )
 
+# Stylesheets marimo-book writes into the staged tree itself. An ``extra_css``
+# entry may not claim one of these names, or it would replace the built-in
+# sheet instead of layering on top of it.
+RESERVED_STYLESHEETS = frozenset({"stylesheets/extra.css", "stylesheets/logo_sidebar.css"})
+
 # --- leaf models -------------------------------------------------------------
 
 
@@ -442,6 +447,16 @@ class Book(BaseModel):
     # OpenGraph URLs, sitemap.xml gets the right href, etc.
     url: str | None = None
 
+    # Extra stylesheets, relative to the book root, layered on top of
+    # marimo-book's own. They restyle rendered output without touching
+    # notebook sources — capping the height of a long stdout block, say.
+    # Each file is copied into the staged tree and appended to mkdocs's
+    # ``extra_css`` after the built-in sheet, so later rules win.
+    #
+    #   extra_css:
+    #     - stylesheets/custom.css
+    extra_css: list[Path] = Field(default_factory=list)
+
     # branding
     logo: Path | None = None
     favicon: Path | None = None
@@ -547,6 +562,22 @@ class Book(BaseModel):
         """Allow ``bibliography: [path1, path2]`` shorthand in YAML."""
         if isinstance(v, list):
             return {"files": v}
+        return v
+
+    @field_validator("extra_css")
+    @classmethod
+    def _check_extra_css(cls, v: list[Path]) -> list[Path]:
+        """Keep stylesheets inside the book and off the built-in names.
+
+        An absolute path or a ``..`` segment would copy from outside the
+        book root, and reusing a built-in name would silently replace
+        marimo-book's own stylesheet rather than layering on it.
+        """
+        for path in v:
+            if path.is_absolute() or ".." in path.parts:
+                raise ValueError(f"extra_css entries must be relative to the book root: {path}")
+            if path.as_posix() in RESERVED_STYLESHEETS:
+                raise ValueError(f"{path} is a built-in stylesheet name; use a different one")
         return v
 
 

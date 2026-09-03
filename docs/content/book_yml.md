@@ -133,6 +133,34 @@ Each author supports `name` (required), `orcid`, `affiliation`, and
 | `theme.palette.accent` | hex color | Material default | Highlights + active states |
 | `theme.font.text` | Google Font name | `Roboto` | Body font |
 | `theme.font.code` | Google Font name | `Roboto Mono` | Code font |
+| `extra_css` | list of paths | `[]` | Stylesheets relative to the book root, loaded after marimo-book's own |
+
+### Extra stylesheets
+
+`extra_css` restyles rendered output without touching notebook sources.
+Each file is copied into the staged tree and appended to mkdocs's
+`extra_css` **after** the built-in sheet, so your rules win. A declared
+file that does not exist is a build warning, not an error.
+
+```yaml
+extra_css:
+  - stylesheets/custom.css
+```
+
+A common use is capping the height of a long `print()` block, which
+renders as `pre.marimo-book-output-text`:
+
+```css
+pre.marimo-book-output-text {
+  max-height: 24rem;
+  overflow-y: auto;
+}
+```
+
+Paths must stay inside the book root, and cannot reuse a name
+marimo-book writes itself (`stylesheets/extra.css`,
+`stylesheets/logo_sidebar.css`) — that would replace the built-in sheet
+rather than layer on it.
 
 ### Launch buttons
 

@@ -5,6 +5,20 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`extra_css` in `book.yml`.** A list of stylesheets, relative to the book
+  root, copied into the staged tree and appended to mkdocs's `extra_css`
+  after marimo-book's own sheet, so author rules win. Lets a book restyle
+  rendered output — capping the height of a long `print()` block, say —
+  without injecting `<style>` tags into notebook sources. `emit_mkdocs_yml`
+  already accepted an `extra_css` argument and merged it; only the config
+  field and the staging step were missing. Paths must stay inside the book
+  root and cannot reuse a built-in stylesheet name; a declared file that
+  does not exist warns rather than failing the build.
+
 ## [0.1.30] — 2026-07-03
 
 ### Fixed

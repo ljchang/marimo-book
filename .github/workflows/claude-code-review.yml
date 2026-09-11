@@ -8,6 +8,12 @@ name: Claude Code Review
 # (three runs on #78 confirmed this). The prompt below does the review in
 # one session and posts inline comments plus a summary.
 #
+# With a custom --allowedTools the action passes the list through unchanged,
+# so the sticky-comment tool (mcp__github_comment__update_claude_comment) must
+# be listed explicitly — the action's own prompt tells Claude to post through
+# it, and leaving it out produced permission denials and a run that looped to
+# the turn cap.
+#
 # Auth: CLAUDE_CODE_OAUTH_TOKEN (subscription token from `claude setup-token`).
 # The Claude GitHub App must be installed on the repo. Fork PRs never see
 # repository secrets, so on those this job fails at auth — expected.
@@ -60,9 +66,10 @@ jobs:
                with `mcp__github_inline_comment__create_inline_comment` on the exact
                line, stating the problem and the concrete failure scenario in 2-4
                sentences. No duplicates, no praise comments.
-            5. Finish with a short summary comment via `gh pr comment <PR> --body ...`:
-               either "No high-confidence issues found." or a numbered list of the
-               issues you posted, each one line.
+            5. Finish by writing a short summary into the sticky Claude comment with
+               `mcp__github_comment__update_claude_comment` (body only): either
+               "No high-confidence issues found." or a numbered list of the issues
+               you posted, each one line. Do not create additional top-level comments.
           claude_args: |
-            --allowedTools "Read,Grep,Glob,LS,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(git blame:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*)"
-            --max-turns 60
+            --allowedTools "Read,Grep,Glob,LS,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(git blame:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*)"
+            --max-turns 80

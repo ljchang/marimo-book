@@ -63,8 +63,9 @@ def test_preprocessor_sandbox_override_beats_book_yml() -> None:
 
 
 def test_export_notebook_passes_sandbox_flag(tmp_path: Path) -> None:
-    """Verify that ``sandbox=True`` makes marimo_export add ``--sandbox`` to
-    the marimo subprocess invocation."""
+    """``sandbox=True`` wraps the export runner in marimo's ``uv run --isolated``
+    command (the runner replaced ``marimo export ipynb --sandbox``; see
+    ``_export_command``)."""
     fake_py = tmp_path / "nb.py"
     fake_py.write_text("import marimo\napp = marimo.App()\n")
 
@@ -77,18 +78,27 @@ def test_export_notebook_passes_sandbox_flag(tmp_path: Path) -> None:
     captured: list[list[str]] = []
 
     def fake_run(cmd, **_kw):
+        if "--output" not in cmd:
+            # marimo's construct_uv_flags shells out to `uv export` while
+            # resolving requirements; that is not the export subprocess.
+            return _FakeResult()
         captured.append(cmd)
         # Write a minimal valid .ipynb so export_notebook's JSON load succeeds.
-        out_path = Path(cmd[cmd.index("-o") + 1])
+        out_path = Path(cmd[cmd.index("--output") + 1])
         out_path.write_text('{"cells": [], "metadata": {}}')
         return _FakeResult()
 
-    with patch.object(marimo_export.subprocess, "run", side_effect=fake_run):
+    with (
+        patch.object(marimo_export.subprocess, "run", side_effect=fake_run),
+        patch.object(marimo_export, "_require_uv", return_value="uv"),
+    ):
         marimo_export.export_notebook(fake_py, sandbox=True)
-        assert "--sandbox" in captured[-1]
+        assert captured[-1][1] == "run" and "--isolated" in captured[-1]
+        assert str(marimo_export._EXPORT_RUNNER) in captured[-1]
 
         marimo_export.export_notebook(fake_py, sandbox=False)
-        assert "--sandbox" not in captured[-1]
+        assert "--isolated" not in captured[-1]
+        assert captured[-1][1] == str(marimo_export._EXPORT_RUNNER)
 
 
 def test_export_notebook_threads_suppress_warnings_env(tmp_path: Path) -> None:
@@ -105,7 +115,7 @@ def test_export_notebook_threads_suppress_warnings_env(tmp_path: Path) -> None:
 
     def fake_run(cmd, **kw):
         captured_envs.append(kw.get("env"))
-        out_path = Path(cmd[cmd.index("-o") + 1])
+        out_path = Path(cmd[cmd.index("--output") + 1])
         out_path.write_text('{"cells": [], "metadata": {}}')
         return _FakeResult()
 

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **anywidgets rendered empty on marimo ≥ 0.24** (#79). marimo 0.24 stopped
+  putting a widget's ES module on the `<marimo-anywidget>` element
+  (`data-js-url`); it now travels on the kernel's `ModelOpen` notification
+  (marimo-team/marimo#10127), so every mount the shim hydrated had no module
+  to import — in static, precompute and WASM modes. Static pages are now
+  exported by a small standalone runner (`marimo_book/_export_runner.py`)
+  that mirrors marimo's own execute-then-`export_as_ipynb` path and also
+  writes `{model_id: js_url}` from the session view (virtual-file URLs
+  inlined as `data:` URLs); `--sandbox` wraps it with marimo's own
+  `uv run --isolated` flags. WASM pages harvest the same map from the islands
+  generator's session view. `rewrite_anywidget_html` restores `data-js-url`
+  from the map. On WASM pages the runtime now renders anywidgets itself
+  after the kernel runs (its widget registry has the module), so the shim's
+  MutationObserver that rewrapped runtime-emitted widgets — which on 0.24
+  only blanked a working widget — is gone, and anywidget state round-trips
+  to the kernel natively. Regression tests execute a real inline anywidget
+  through both paths (`tests/test_anywidget_esm.py`; `anywidget` added to the
+  `dev` extra). Bumped `_RENDER_OUTPUT_VERSION` to `5`.
+
 ### Changed
 
 - **marimo 0.24 required (and supported).** The dependency pin is now

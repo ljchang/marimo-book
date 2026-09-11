@@ -30,9 +30,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .anywidgets import contains_anywidget, rewrite_anywidget_html
@@ -55,6 +55,11 @@ class ExportedNotebook:
     source: Path
     cells: list[dict]
     metadata: dict
+    # ``{model_id: js_url}`` for every anywidget the notebook created, from
+    # the session view's model notifications (marimo >= 0.24 no longer puts
+    # the module on the element; see _export_runner.py). Empty when the
+    # notebook has no anywidgets.
+    esm_by_model: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -111,20 +116,6 @@ def export_notebook(
     stderr (and from there into the rendered page).
     """
     py_path = Path(py_path)
-    cmd = [
-        sys.executable,
-        "-m",
-        "marimo",
-        "export",
-        "ipynb",
-        str(py_path),
-        "--force",
-    ]
-    if include_outputs:
-        cmd.append("--include-outputs")
-    if sandbox:
-        cmd.append("--sandbox")
-
     env = {**os.environ, "PYTHONWARNINGS": "ignore"} if suppress_warnings else None
 
     # Route the temp .ipynb through a system temp dir so `marimo-book serve`'s
@@ -134,7 +125,14 @@ def export_notebook(
     # imports inside the notebook still resolve correctly.
     with tempfile.TemporaryDirectory(prefix="marimo_book_") as tmp_dir:
         tmp_out = Path(tmp_dir) / f"{py_path.stem}.ipynb"
-        cmd.extend(["-o", str(tmp_out)])
+        tmp_models = Path(tmp_dir) / f"{py_path.stem}.models.json"
+        cmd, cleanup = _export_command(
+            py_path,
+            tmp_out,
+            tmp_models,
+            include_outputs=include_outputs,
+            sandbox=sandbox,
+        )
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, check=False, env=env, timeout=timeout
@@ -148,16 +146,109 @@ def export_notebook(
         # marimo exits non-zero when *some* cells fail to execute but still
         # produces a valid ipynb with error outputs. We accept that case
         # because the preprocessor then emits the error cell visibly.
+        finally:
+            cleanup()
         stderr = (result.stderr or "").strip()
         if result.returncode != 0 and not tmp_out.exists():
             raise RuntimeError(f"marimo export ipynb failed for {py_path}:\n{stderr[-400:]}")
         nb = json.loads(tmp_out.read_text(encoding="utf-8"))
+        esm_by_model: dict[str, str] = {}
+        if tmp_models.exists():
+            try:
+                esm_by_model = json.loads(tmp_models.read_text(encoding="utf-8"))
+            except ValueError:
+                esm_by_model = {}
 
     return ExportedNotebook(
         source=py_path,
         cells=nb.get("cells", []),
         metadata=nb.get("metadata", {}),
+        esm_by_model=esm_by_model,
     )
+
+
+_EXPORT_RUNNER = Path(__file__).resolve().parent.parent / "_export_runner.py"
+
+
+def _require_uv() -> str:
+    """Path to ``uv`` for sandbox exports; a clear error when it is missing.
+
+    marimo's flag builder shells out to ``uv export`` and would otherwise
+    surface a bare ``FileNotFoundError: 'uv'`` from deep inside subprocess.
+    """
+    import shutil
+
+    from marimo._utils.uv import find_uv_bin
+
+    uv = find_uv_bin()
+    if shutil.which(uv) is None:
+        raise RuntimeError(
+            "dependencies.mode: sandbox (or --sandbox) needs `uv` on PATH to build the "
+            "isolated export environment. Install it from https://github.com/astral-sh/uv "
+            "or switch to dependencies.mode: env."
+        )
+    return uv
+
+
+def _export_command(
+    py_path: Path,
+    tmp_out: Path,
+    tmp_models: Path,
+    *,
+    include_outputs: bool,
+    sandbox: bool,
+) -> tuple[list[str], Callable[[], None]]:
+    """The subprocess argv for one export, plus a cleanup callback.
+
+    With outputs we run :mod:`marimo_book._export_runner` (marimo's own
+    execute-then-export path plus the anywidget module map — see that
+    module's docstring). Without outputs there is nothing to capture, so
+    plain ``marimo export ipynb`` is used.
+
+    ``sandbox=True`` reproduces what ``marimo export --sandbox`` does:
+    ``uv run --isolated --with-requirements <PEP 723 deps + marimo> python
+    <runner> …``, using marimo's own ``construct_uv_flags`` so index URLs,
+    Python version and marimo's self-pin match marimo's behaviour. The
+    runner imports only marimo, so it works inside that environment. The
+    requirements temp file must outlive the subprocess; the returned
+    callback removes it.
+    """
+    if not include_outputs:
+        cmd = [sys.executable, "-m", "marimo", "export", "ipynb", str(py_path), "--force"]
+        if sandbox:
+            cmd.append("--sandbox")
+        cmd.extend(["-o", str(tmp_out)])
+        return cmd, lambda: None
+
+    runner_cmd = [
+        str(_EXPORT_RUNNER),
+        str(py_path),
+        "--output",
+        str(tmp_out),
+        "--models",
+        str(tmp_models),
+    ]
+    if not sandbox:
+        return [sys.executable, *runner_cmd], lambda: None
+
+    from marimo._cli.sandbox import construct_uv_flags
+    from marimo._utils.inline_script_metadata import PyProjectReader
+
+    uv = _require_uv()
+    pyproject = PyProjectReader.from_filename(str(py_path))
+    req_file = tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix="-marimo-book-reqs.txt", encoding="utf-8"
+    )
+    with req_file:
+        flags = construct_uv_flags(pyproject, req_file, [], ["nbformat"])
+
+    def _cleanup() -> None:
+        try:
+            os.unlink(req_file.name)
+        except OSError:
+            pass
+
+    return [uv, "run", *flags, "python", *runner_cmd], _cleanup
 
 
 def export_notebook_with_overrides(
@@ -305,6 +396,7 @@ def cells_to_markdown_segments(
             cell,
             first_md_done=first_md_done,
             widget_defaults=widget_defaults,
+            esm_by_model=exported.esm_by_model,
         )
         if rendered:
             out.append((idx, rendered))
@@ -327,12 +419,13 @@ def _render_cell(
     *,
     first_md_done: bool,
     widget_defaults: dict | None = None,
+    esm_by_model: dict[str, str] | None = None,
 ) -> str | None:
     ct = cell.get("cell_type")
     if ct == "markdown":
         return _render_markdown_cell(cell, strip_duplicate_title=first_md_done)
     if ct == "code":
-        return _render_code_cell(cell, widget_defaults=widget_defaults)
+        return _render_code_cell(cell, widget_defaults=widget_defaults, esm_by_model=esm_by_model)
     if ct == "raw":
         return _as_str(cell.get("source", ""))
     return None
@@ -345,12 +438,18 @@ def _render_markdown_cell(cell: dict, *, strip_duplicate_title: bool) -> str:
     return src
 
 
-def _render_code_cell(cell: dict, *, widget_defaults: dict | None = None) -> str:
+def _render_code_cell(
+    cell: dict,
+    *,
+    widget_defaults: dict | None = None,
+    esm_by_model: dict[str, str] | None = None,
+) -> str:
     src = _as_str(cell.get("source", ""))
     outputs_md = _render_outputs(
         cell.get("outputs", []),
         cell_source=src,
         widget_defaults=widget_defaults,
+        esm_by_model=esm_by_model,
     )
 
     hide_code = cell.get("metadata", {}).get("marimo", {}).get("config", {}).get(_HIDE_CODE, False)
@@ -372,10 +471,13 @@ def _render_outputs(
     *,
     cell_source: str = "",
     widget_defaults: dict | None = None,
+    esm_by_model: dict[str, str] | None = None,
 ) -> str:
     rendered: list[str] = []
     for out in outputs:
-        text = _render_single_output(out, cell_source=cell_source, widget_defaults=widget_defaults)
+        text = _render_single_output(
+            out, cell_source=cell_source, widget_defaults=widget_defaults, esm_by_model=esm_by_model
+        )
         if text:
             rendered.append(text)
     return "\n\n".join(rendered)
@@ -386,6 +488,7 @@ def _render_single_output(
     *,
     cell_source: str = "",
     widget_defaults: dict | None = None,
+    esm_by_model: dict[str, str] | None = None,
 ) -> str:
     ot = out.get("output_type")
     if ot == "stream":
@@ -404,7 +507,12 @@ def _render_single_output(
 
     if ot in {"display_data", "execute_result"}:
         data = out.get("data", {}) or {}
-        return _render_mime_bundle(data, cell_source=cell_source, widget_defaults=widget_defaults)
+        return _render_mime_bundle(
+            data,
+            cell_source=cell_source,
+            widget_defaults=widget_defaults,
+            esm_by_model=esm_by_model,
+        )
 
     return ""
 
@@ -414,6 +522,7 @@ def _render_mime_bundle(
     *,
     cell_source: str = "",
     widget_defaults: dict | None = None,
+    esm_by_model: dict[str, str] | None = None,
 ) -> str:
     """Pick the richest renderable representation from a MIME bundle."""
     # Priority order: HTML (most expressive) → markdown → images → plain.
@@ -422,6 +531,7 @@ def _render_mime_bundle(
             _as_str(data["text/html"]),
             cell_source=cell_source,
             widget_defaults=widget_defaults,
+            esm_by_model=esm_by_model,
         )
     if "text/markdown" in data:
         md = _as_str(data["text/markdown"]).strip()
@@ -440,6 +550,7 @@ def _render_mime_bundle(
                 html.unescape(md),
                 cell_source=cell_source,
                 widget_defaults=widget_defaults,
+                esm_by_model=esm_by_model,
             )
         return md
     for mime in ("image/png", "image/jpeg"):
@@ -460,6 +571,7 @@ def _render_html_output(
     *,
     cell_source: str = "",
     widget_defaults: dict | None = None,
+    esm_by_model: dict[str, str] | None = None,
 ) -> str:
     """Translate marimo custom elements to static HTML, pass the rest through."""
     stripped = raw_html.strip()
@@ -476,6 +588,7 @@ def _render_html_output(
             stripped,
             cell_source=cell_source,
             widget_defaults=widget_defaults,
+            esm_by_model=esm_by_model,
         ).strip()
         if not stripped:
             return ""

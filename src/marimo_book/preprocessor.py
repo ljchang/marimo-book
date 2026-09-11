@@ -369,7 +369,10 @@ def _book_signature(book: Book) -> str:
 # "4": WASM micropip bootstrap moved from an AST-injected source cell to an
 # islands JSON payload appended to the body (transforms/wasm.py); cached
 # bodies rendered the old way would keep shipping the injected cell.
-_RENDER_OUTPUT_VERSION = "4"
+# "5": anywidget mounts get data-js-url restored from the session view
+# (marimo >= 0.24 dropped it from the element); bodies rendered before carry
+# empty widgets in every mode.
+_RENDER_OUTPUT_VERSION = "5"
 
 
 def _pyodide_version() -> str | None:

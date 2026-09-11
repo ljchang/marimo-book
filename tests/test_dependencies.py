@@ -88,7 +88,10 @@ def test_export_notebook_passes_sandbox_flag(tmp_path: Path) -> None:
         out_path.write_text('{"cells": [], "metadata": {}}')
         return _FakeResult()
 
-    with patch.object(marimo_export.subprocess, "run", side_effect=fake_run):
+    with (
+        patch.object(marimo_export.subprocess, "run", side_effect=fake_run),
+        patch.object(marimo_export, "_require_uv", return_value="uv"),
+    ):
         marimo_export.export_notebook(fake_py, sandbox=True)
         assert captured[-1][1] == "run" and "--isolated" in captured[-1]
         assert str(marimo_export._EXPORT_RUNNER) in captured[-1]

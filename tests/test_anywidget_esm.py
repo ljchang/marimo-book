@@ -11,6 +11,7 @@ regression.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,12 @@ def test_export_command_uses_runner_and_sandbox_wraps_with_uv(tmp_path: Path) ->
     assert cmd[1] == str(_EXPORT_RUNNER) and "--models" in cmd
     assert _EXPORT_RUNNER.is_file()
 
+    if shutil.which("uv") is None:
+        with pytest.raises(RuntimeError, match="needs `uv`"):
+            _export_command(
+                nb, tmp_path / "o.ipynb", tmp_path / "m.json", include_outputs=True, sandbox=True
+            )
+        return
     cmd, cleanup = _export_command(
         nb, tmp_path / "o.ipynb", tmp_path / "m.json", include_outputs=True, sandbox=True
     )
@@ -107,12 +114,18 @@ def test_export_command_uses_runner_and_sandbox_wraps_with_uv(tmp_path: Path) ->
         cleanup()
     assert not Path(req).exists()
 
-    # Without outputs there is nothing to harvest: plain marimo export.
+    # Without outputs there is nothing to harvest: plain marimo export,
+    # which still honours sandbox via marimo's own flag.
     cmd, cleanup = _export_command(
         nb, tmp_path / "o.ipynb", tmp_path / "m.json", include_outputs=False, sandbox=False
     )
     cleanup()
-    assert cmd[1:5] == ["-m", "marimo", "export", "ipynb"]
+    assert cmd[1:5] == ["-m", "marimo", "export", "ipynb"] and "--sandbox" not in cmd
+    cmd, cleanup = _export_command(
+        nb, tmp_path / "o.ipynb", tmp_path / "m.json", include_outputs=False, sandbox=True
+    )
+    cleanup()
+    assert "--sandbox" in cmd
 
 
 # --- end to end: static path (subprocess runner) ------------------------------

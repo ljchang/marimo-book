@@ -170,6 +170,26 @@ def export_notebook(
 _EXPORT_RUNNER = Path(__file__).resolve().parent.parent / "_export_runner.py"
 
 
+def _require_uv() -> str:
+    """Path to ``uv`` for sandbox exports; a clear error when it is missing.
+
+    marimo's flag builder shells out to ``uv export`` and would otherwise
+    surface a bare ``FileNotFoundError: 'uv'`` from deep inside subprocess.
+    """
+    import shutil
+
+    from marimo._utils.uv import find_uv_bin
+
+    uv = find_uv_bin()
+    if shutil.which(uv) is None:
+        raise RuntimeError(
+            "dependencies.mode: sandbox (or --sandbox) needs `uv` on PATH to build the "
+            "isolated export environment. Install it from https://github.com/astral-sh/uv "
+            "or switch to dependencies.mode: env."
+        )
+    return uv
+
+
 def _export_command(
     py_path: Path,
     tmp_out: Path,
@@ -195,6 +215,8 @@ def _export_command(
     """
     if not include_outputs:
         cmd = [sys.executable, "-m", "marimo", "export", "ipynb", str(py_path), "--force"]
+        if sandbox:
+            cmd.append("--sandbox")
         cmd.extend(["-o", str(tmp_out)])
         return cmd, lambda: None
 
@@ -211,8 +233,8 @@ def _export_command(
 
     from marimo._cli.sandbox import construct_uv_flags
     from marimo._utils.inline_script_metadata import PyProjectReader
-    from marimo._utils.uv import find_uv_bin
 
+    uv = _require_uv()
     pyproject = PyProjectReader.from_filename(str(py_path))
     req_file = tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix="-marimo-book-reqs.txt", encoding="utf-8"
@@ -226,7 +248,7 @@ def _export_command(
         except OSError:
             pass
 
-    return [find_uv_bin(), "run", *flags, "python", *runner_cmd], _cleanup
+    return [uv, "run", *flags, "python", *runner_cmd], _cleanup
 
 
 def export_notebook_with_overrides(

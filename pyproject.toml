@@ -46,7 +46,12 @@ dependencies = [
     # `MarimoIslandGenerator.from_file()` propagate the notebook
     # filename so `__file__` / `mo.notebook_dir()` resolve correctly on
     # WASM pages (was: resolved to the host's `__main__`).
-    "marimo>=0.23.6,<0.24",
+    # Upper bound excludes the next minor because we import two private
+    # modules (`marimo._runtime.packages.module_name_to_pypi_name`,
+    # `marimo._utils.scripts`) in transforms/pep723.py and shell out to
+    # `marimo export ipynb`; verified against 0.24.1 (tests + strict docs
+    # build + islands hydration in a browser). Bump after re-verifying.
+    "marimo>=0.23.6,<0.25",
     # marimo declares nbformat as an optional extra; we always use
     # `marimo export ipynb` under the hood, so pin it as a hard dep.
     "nbformat>=5.0",

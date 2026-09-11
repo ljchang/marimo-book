@@ -163,6 +163,35 @@ the apex pointing at GitHub's Pages IPs, plus a `www` `CNAME` →
 `<user>.github.io`). The `marimo-book` self-hosted docs use this
 pattern for `marimobook.org` (see `docs/CNAME`).
 
+## Bumping the marimo pin
+
+`pyproject.toml` pins `marimo>=0.23.6,<NEXT_MINOR`. The upper bound is
+deliberate: `transforms/pep723.py` imports two private marimo modules
+and the build shells out to `marimo export ipynb`. When a new marimo
+minor ships, widen the bound only after this checklist passes against
+it (all four ran clean for 0.24.1 on 2026-09-11):
+
+1. `uv pip install --python .venv/bin/python 'marimo==X.Y.Z'` then
+   `pytest -q` and `ruff check`.
+2. `marimo-book build -b docs/book.yml --strict --rebuild` (real
+   `marimo export` + `MarimoIslandGenerator`; needs the cairo env var
+   from your shell on macOS).
+3. `curl -I https://cdn.jsdelivr.net/npm/@marimo-team/islands@X.Y.Z/dist/main.js`
+   — `render_head()` defaults `version_override` to the installed
+   marimo version, so WASM pages 404 at runtime if the npm bundle for
+   that version is missing.
+4. Serve `docs/_site` and open `/wasm_demo/` in a browser: expect
+   "Initializing 4 island(s)" and a `completed-run` message with zero
+   console errors. (One warning, "Failed to get version from mount
+   config", comes from marimo's own islands bundle before any of our
+   markup is read; hydration completes regardless, so ignore it.)
+
+Read the upstream release notes for anything touching `_islands`,
+`export ipynb`, `_utils/scripts`, or `module_name_to_pypi_name`.
+Since 0.24 islands can also hydrate from an opt-in JSON payload
+(`render_body(include_payload=True)`); we stay on the DOM-parsing
+fallback on purpose (see the comment in `transforms/wasm.py`).
+
 ## Theme + CSS
 
 Default styling lives in `src/marimo_book/assets/extra.css` —

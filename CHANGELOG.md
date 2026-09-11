@@ -5,6 +5,23 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **marimo 0.24 supported.** Widened the dependency pin from `<0.24` to
+  `<0.25`. Verified against marimo 0.24.1: the unit suite, the strict docs
+  build (`marimo export ipynb` + `MarimoIslandGenerator`), and a browser
+  hydration check of the WASM demo page against the
+  `@marimo-team/islands@0.24.1` CDN bundle all pass with no code changes.
+  marimo 0.24 adds an opt-in JSON hydration payload for islands
+  (`render_body(include_payload=True)`, marimo-team/marimo#9987); marimo-book
+  keeps using the DOM-parsing path, which remains the documented fallback, so
+  rendered pages are byte-identical between 0.23.x and 0.24.x apart from the
+  bundle version in the CDN URL. Islands still do not read PEP 723
+  dependencies (marimo-team/marimo#9778 is open), so the micropip bootstrap
+  injection is unchanged.
+
 ## [0.1.30] — 2026-07-03
 
 ### Fixed

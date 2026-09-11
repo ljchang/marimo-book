@@ -226,6 +226,12 @@ def _render_wasm_body(
     # show a stuck spinner above already-working reactive cells. Cells'
     # static-export initial output already gives the user something to
     # look at during hydration, so dropping the spinner is a clear UX win.
+    # ``include_payload`` (marimo >= 0.24, marimo-team/marimo#9987) is left at
+    # its default (off): the islands runtime then recovers cell source and
+    # metadata from the DOM, which upstream keeps as the supported fallback.
+    # Opting in would duplicate every cell's output HTML inside a JSON
+    # script tag and change the body our anywidget rewrite + cache key see,
+    # for no functional gain on our pages. Revisit if DOM parsing is dropped.
     body = gen.render_body(style="", include_init_island=False)
     # Re-target anywidgets to our static-shim mount form. See module docstring
     # for the full rationale; in short, marimo's islands runtime won't load

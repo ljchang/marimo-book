@@ -12,9 +12,10 @@ from marimo_book.transforms.pep723 import (
     derive_dependencies,
     extract_imports,
     has_pep723_block,
-    inject_micropip_bootstrap,
     map_to_distributions,
+    micropip_bootstrap_code,
     read_existing_dependencies,
+    thread_bootstrap_sentinel,
     write_pep723_block,
 )
 
@@ -256,166 +257,37 @@ def test_read_existing_dependencies_empty_block() -> None:
     assert read_existing_dependencies(src) == []
 
 
-# --- inject_micropip_bootstrap ----------------------------------------------
+# --- WASM micropip bootstrap (payload cell helpers) --------------------------
 
 
-_NOTEBOOK_SRC = """import marimo
-app = marimo.App()
+def test_bootstrap_code_installs_packages_and_defines_sentinel() -> None:
+    """The payload cell body awaits the install and defines the sentinel.
 
-
-@app.cell(hide_code=True)
-def _():
-    import marimo as mo
-    return (mo,)
-
-
-@app.cell
-def _(mo):
-    import nltools
-    return (nltools,)
-"""
-
-
-def test_inject_bootstrap_inserts_one_async_cell() -> None:
-    """A single new ``@app.cell`` carries the install; existing cells stay sync.
-
-    An earlier prepend-into-existing design converted user cells to
-    ``async def`` and broke real notebooks (cells whose body raised
-    before their return statement stopped exporting variables, leading
-    to ``Name 'mo' is not defined`` cascades downstream). The current
-    design adds ONE new async cell at the top and leaves user cell
-    bodies untouched — only their parameter lists gain a sentinel
-    (verified by the next test).
+    ``await`` is what makes marimo's islands runtime wrap the synthesized
+    cell as ``async def``; the sentinel assignment is what every other
+    cell's prefix references.
     """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools", "numpy"])
-    assert out.count("async def _") == 1
-    assert out.count("await micropip.install(['nltools', 'numpy'])") == 1
-    # User cell bodies survive without modification.
-    assert "import marimo as mo" in out
-    assert "import nltools" in out
+    code = micropip_bootstrap_code(["nltools", "numpy>=1.26"])
+    assert "await micropip.install(['nltools', 'numpy>=1.26'])" in code
+    assert code.rstrip().endswith("marimo_book_micropip_done = True")
+    # Safe under CPython too: micropip is only importable in Pyodide.
+    assert "except ImportError:" in code
 
 
-def test_inject_bootstrap_threads_sentinel_to_every_cell() -> None:
-    """Every existing ``@app.cell`` gains the sentinel parameter.
-
-    Marimo's static analyzer reads parameter names as the cell's input
-    variables. Adding the sentinel makes every existing cell depend on
-    the bootstrap, so marimo's dataflow scheduler runs the bootstrap
-    before any other cell — even if the source-order-first cell only
-    does ``mo.md(...)`` and would otherwise be runtime-second.
-    """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    sentinel = "_marimo_book_micropip_done"
-    # Two original cells; both should now have the sentinel as a parameter.
-    # The bootstrap cell defines + returns it (so it appears in `return (...)`).
-    assert out.count(f"def _({sentinel})") + out.count(f", {sentinel})") == 2
-    # The bootstrap cell's body sets and returns the sentinel.
-    assert f"{sentinel} = True" in out
-    assert f"return ({sentinel},)" in out
+def test_thread_sentinel_prefixes_bare_reference() -> None:
+    out = thread_bootstrap_sentinel("import nltools\nnltools.__version__")
+    assert out.startswith("marimo_book_micropip_done\n")
+    # Body untouched below the prefix — including the last expression,
+    # which is what marimo displays as the cell output.
+    assert out.endswith("import nltools\nnltools.__version__")
 
 
-def test_inject_bootstrap_no_double_threading_on_re_run() -> None:
-    """Running the injector twice doesn't add the sentinel parameter twice."""
-    once = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    twice = inject_micropip_bootstrap(once, ["nltools"])
-    # The sentinel parameter should appear exactly the same number of times,
-    # not be duplicated. Count occurrences in the args (after a comma-or-paren).
-    sentinel_in_params = twice.count("_marimo_book_micropip_done)") + twice.count(
-        "_marimo_book_micropip_done,"
-    )
-    once_count = once.count("_marimo_book_micropip_done)") + once.count(
-        "_marimo_book_micropip_done,"
-    )
-    assert sentinel_in_params == once_count
+def test_thread_sentinel_idempotent() -> None:
+    once = thread_bootstrap_sentinel("x = 1")
+    assert thread_bootstrap_sentinel(once) == once
 
 
-def test_inject_bootstrap_handles_notebook_without_app_assignment() -> None:
-    """A file without an ``app = marimo.App(...)`` assignment is unchanged.
-
-    Not a marimo notebook in any meaningful sense; we skip rather than
-    insert a bootstrap that would have no app to decorate.
-    """
-    src = "@app.cell\ndef _():\n    import nltools\n    return (nltools,)\n"
-    assert inject_micropip_bootstrap(src, ["nltools"]) == src
-
-
-def test_inject_bootstrap_wraps_in_try_except() -> None:
-    """Build-time CPython lacks micropip; the wrapper must swallow ImportError.
-
-    Without this, the build crashes when MarimoIslandGenerator.build()
-    runs the cell locally before the browser ever sees it.
-    """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    assert "try:" in out
-    assert "except ImportError:" in out
-
-
-def test_inject_bootstrap_preserves_decorator_kwargs() -> None:
-    """The ``@app.cell(hide_code=True)`` form survives the AST round-trip."""
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["pkg"])
-    assert "@app.cell(hide_code=True)" in out
-
-
-def test_inject_bootstrap_handles_already_async_user_cell() -> None:
-    """User cells already authored as ``async def`` keep their signature.
-
-    The new design adds one separate bootstrap cell + a sentinel
-    parameter to existing cells. An async user cell stays async, gains
-    the sentinel, and its body is untouched.
-    """
-    src = """import marimo
-
-app = marimo.App()
-
-
-@app.cell
-async def _():
-    import some_pkg
-
-    await some_async_thing()
-    return
-"""
-    out = inject_micropip_bootstrap(src, ["pkg"])
-    # Two ``async def _`` lines: the new bootstrap + the original async cell.
-    assert out.count("async def _") == 2
-    # User cell's body stays — the await line is preserved.
-    assert "await some_async_thing()" in out
-
-
-def test_inject_bootstrap_empty_packages_no_op() -> None:
-    """Empty package list returns source unchanged."""
-    assert inject_micropip_bootstrap(_NOTEBOOK_SRC, []) == _NOTEBOOK_SRC
-
-
-def test_inject_bootstrap_no_app_cell_no_op() -> None:
-    """A file without ``@app.cell`` decorators is returned unchanged.
-
-    Possible cases: a marimo notebook stub still being authored, or a
-    plain Python script accidentally fed to this function.
-    """
-    src = "import marimo\napp = marimo.App()\n"
-    assert inject_micropip_bootstrap(src, ["pkg"]) == src
-
-
-def test_inject_bootstrap_syntax_error_no_op() -> None:
-    """Malformed source returns unchanged rather than crashing the build."""
-    src = "def : not python\n"
-    assert inject_micropip_bootstrap(src, ["pkg"]) == src
-
-
-def test_inject_bootstrap_runs_before_user_cells_at_runtime() -> None:
-    """The bootstrap cell appears before any user ``@app.cell`` in source.
-
-    Marimo's dataflow scheduler doesn't follow source order; what
-    actually orders the bootstrap first at *runtime* is the sentinel
-    parameter on every other cell. Source order matters only for
-    decorator binding (the new ``@app.cell`` needs to bind to ``app``,
-    so it must come after the ``app = marimo.App(...)`` assignment).
-    Both invariants are checked here.
-    """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    app_pos = out.index("app = marimo.App()")
-    bootstrap_pos = out.index("await micropip.install")
-    first_user_cell_pos = out.index("def _(_marimo_book_micropip_done):")
-    # Bootstrap is between `app = ...` and the first existing cell.
-    assert app_pos < bootstrap_pos < first_user_cell_pos
+def test_thread_sentinel_leaves_empty_cells_alone() -> None:
+    """Empty bodies become ``pass`` in the runtime file; nothing to order."""
+    assert thread_bootstrap_sentinel("") == ""
+    assert thread_bootstrap_sentinel("   \n") == "   \n"

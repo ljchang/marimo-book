@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **WASM micropip bootstrap now travels in marimo's islands JSON payload,
+  not in the executed source.** Pages with pure-Python PyPI-only deps get a
+  `<script type="application/vnd.marimo.islands+json">` carrying marimo's own
+  cell payload plus one extra, anchor-less cell that
+  `await micropip.install([...])`s the derived dependency list; every user
+  cell's payload code is prefixed with a bare reference to the sentinel
+  `marimo_book_micropip_done` so marimo's dataflow runs the bootstrap first.
+  The notebook `MarimoIslandGenerator` executes is no longer rewritten for
+  this (the old AST injection round-tripped every WASM page with PyPI-only
+  deps through `ast.unparse`, which is what tripped the 0.1.28–0.1.30
+  title-hoist bugs; the title hoist itself still stages an `ast.unparse`d
+  copy for notebooks with a leading H1), the
+  `with app.setup:` limitation is gone (setup code is an ordinary cell to the
+  islands runtime), and pages whose notebooks only import marimo emit no
+  payload at all. Verified in a browser against marimo 0.24.1: a notebook
+  importing a non-Pyodide package raised `ModuleNotFoundError` before and
+  renders after. Bumped `_RENDER_OUTPUT_VERSION` to `4` so cached/committed
+  WASM bodies re-render. Requires marimo ≥ 0.24 for the payload to take
+  effect (older bundles ignore the script tag and lose the bootstrap).
+
 - **marimo 0.24 supported.** Widened the dependency pin from `<0.24` to
   `<0.25`. Verified against marimo 0.24.1: the unit suite, the strict docs
   build (`marimo export ipynb` + `MarimoIslandGenerator`), and a browser
@@ -18,9 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`render_body(include_payload=True)`, marimo-team/marimo#9987); marimo-book
   keeps using the DOM-parsing path, which remains the documented fallback, so
   rendered pages are byte-identical between 0.23.x and 0.24.x apart from the
-  bundle version in the CDN URL. Islands still do not read PEP 723
-  dependencies (marimo-team/marimo#9778 is open), so the micropip bootstrap
-  injection is unchanged.
+  bundle version in the CDN URL.
 
 ## [0.1.30] — 2026-07-03
 

@@ -215,3 +215,88 @@ def test_wasm_anywidgets_rewritten_to_static_mount(tmp_path: Path) -> None:
     # The surrounding <marimo-island> wrapper stays — cells still go through
     # marimo's islands runtime; only the anywidget child got rewrapped.
     assert "<marimo-island" in out
+
+
+def _wasm_book_with_pypi_dep(book_dir: Path) -> Book:
+    """Notebook importing ``pybtex`` — installed here, absent from Pyodide's bundle."""
+    content = book_dir / "content"
+    content.mkdir()
+    (content / "demo.py").write_text(
+        "import marimo\n\n"
+        "app = marimo.App()\n\n"
+        "@app.cell(hide_code=True)\n"
+        "def _():\n"
+        "    import marimo as mo\n"
+        "    return (mo,)\n\n"
+        "@app.cell\n"
+        "def _(mo):\n"
+        "    import pybtex\n"
+        "    mo.md(f'pybtex {pybtex.__version__}')\n"
+        "    return\n\n"
+        'if __name__ == "__main__":\n'
+        "    app.run()\n",
+        encoding="utf-8",
+    )
+    return Book.model_validate(
+        {"title": "Test", "toc": [{"file": "content/demo.py", "mode": "wasm"}]}
+    )
+
+
+def test_wasm_page_without_pypi_deps_has_no_payload(tmp_path: Path) -> None:
+    """A notebook that only imports marimo keeps the plain DOM-parsed islands."""
+    book = _wasm_book(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    assert not report.errors
+    staged = (out_dir / "docs" / "index.md").read_text(encoding="utf-8")
+    assert wasm_module.ISLANDS_PAYLOAD_SCRIPT_TYPE not in staged
+    assert "micropip" not in staged
+
+
+def test_wasm_page_with_pypi_dep_ships_payload_bootstrap(tmp_path: Path) -> None:
+    """A PyPI-only import yields an islands JSON payload with a bootstrap cell.
+
+    The executed notebook is untouched (no ``micropip`` in any island's
+    code), the payload's bootstrap cell installs the derived list, every
+    user cell's payload code is prefixed with the sentinel, and each
+    anchored cell's ``outputHtml`` equals the island's DOM output.
+    """
+    import json
+    from urllib.parse import unquote
+
+    from bs4 import BeautifulSoup
+
+    from marimo_book.transforms.pep723 import BOOTSTRAP_CELL_ID, BOOTSTRAP_SENTINEL
+
+    book = _wasm_book_with_pypi_dep(tmp_path)
+    out_dir = tmp_path / "_site_src"
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    assert not report.errors, report.errors
+    staged = (out_dir / "docs" / "index.md").read_text(encoding="utf-8")
+
+    soup = BeautifulSoup(staged, "html.parser")
+    script = soup.find("script", attrs={"type": wasm_module.ISLANDS_PAYLOAD_SCRIPT_TYPE})
+    assert script is not None, "payload script missing"
+    payload = json.loads(script.string)
+    assert payload["schemaVersion"] == 1
+
+    cells = payload["cells"]
+    assert cells[0]["cellId"] == BOOTSTRAP_CELL_ID
+    assert "await micropip.install(['pybtex'])" in cells[0]["code"]
+    assert cells[0]["displayOutput"] is False and cells[0]["reactive"] is True
+
+    # Anchored user cells: one island per payload cell (bootstrap has none).
+    islands = soup.find_all("marimo-island")
+    assert len(islands) == len(cells) - 1
+    dom_outputs = {
+        i["data-cell-id"]: i.find("marimo-cell-output").decode_contents() for i in islands
+    }
+    for cell in cells[1:]:
+        assert cell["code"].startswith(BOOTSTRAP_SENTINEL + "\n")
+        assert cell["outputHtml"] == dom_outputs[cell["cellId"]]
+
+    # The DOM islands (what gen.build() executed) never saw the bootstrap.
+    for island in islands:
+        code = unquote(island.find("marimo-cell-code").get_text())
+        assert "micropip" not in code
+        assert BOOTSTRAP_SENTINEL not in code

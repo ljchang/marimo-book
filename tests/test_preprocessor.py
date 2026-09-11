@@ -415,8 +415,9 @@ def test_maybe_stage_applies_extras_and_overrides(tmp_path: Path) -> None:
 
 def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     """``stage_page`` for a WASM entry must call ``render_wasm_page`` with a
-    staged source path whose contents include both the PEP 723 block AND
-    the micropip bootstrap injected into the first ``@app.cell``.
+    staged source path carrying the PEP 723 block, and hand the derived
+    dependency list over as ``packages`` for the islands-payload micropip
+    bootstrap — WITHOUT injecting anything into the executed source.
 
     Verified by mocking ``render_wasm_page`` to capture the args before
     the tempdir is cleaned up.
@@ -440,12 +441,15 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
             "defaults": {"mode": "static"},
         }
     )
-    captured: dict[str, str] = {}
+    captured: dict = {}
 
-    def fake_render(py_path, *, display_code=False, staged_source_path=None, timeout=None):
+    def fake_render(
+        py_path, *, display_code=False, staged_source_path=None, timeout=None, packages=()
+    ):
         # Capture the staged source content while the tempdir still exists.
         assert staged_source_path is not None, "WASM path must receive a staged source"
         captured["content"] = staged_source_path.read_text()
+        captured["packages"] = list(packages)
         return "<!-- mocked wasm body -->"
 
     with patch("marimo_book.preprocessor.render_wasm_page", side_effect=fake_render):
@@ -455,10 +459,11 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     assert has_pep723_block(captured["content"])
     deps = read_existing_dependencies(captured["content"]) or []
     assert "numpy" in deps
-    # WASM bootstrap injected: try/except + await micropip.install in the
-    # first cell. Without this the islands runtime can't provision deps.
-    assert "await micropip.install" in captured["content"]
-    assert "except ImportError" in captured["content"]
+    # The executed source is NOT rewritten for the bootstrap any more (the
+    # old AST injection round-tripped every page through ast.unparse);
+    # the install list travels separately, into the islands payload.
+    assert "await micropip.install" not in captured["content"]
+    assert "numpy" in captured["packages"]
 
 
 def test_stage_page_auto_pep723_static_mode_skips_bootstrap(tmp_path: Path) -> None:

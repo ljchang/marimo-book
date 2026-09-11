@@ -372,6 +372,15 @@ def _book_signature(book: Book) -> str:
 _RENDER_OUTPUT_VERSION = "4"
 
 
+def _pyodide_version() -> str | None:
+    """The Pyodide release marimo's WASM runtime targets (``None`` if unknown)."""
+    try:
+        from marimo._pyodide.pyodide_constraints import PYODIDE_VERSION
+    except ImportError:
+        return None
+    return str(PYODIDE_VERSION)
+
+
 def _render_body_signature(book: Book) -> str:
     """Hash the fields that change a notebook's *rendered body*.
 
@@ -396,6 +405,13 @@ def _render_body_signature(book: Book) -> str:
         "dependencies": book.dependencies.model_dump(mode="json"),
         "widget_defaults": book.widget_defaults,
         "render_output_version": _RENDER_OUTPUT_VERSION,
+        # WASM bodies bake in the micropip install list, which is filtered
+        # against the package set bundled with the Pyodide release marimo
+        # pins (transforms/pep723.py::wasm_install_packages). A marimo
+        # upgrade that moves to a new Pyodide can change that set, so track
+        # the Pyodide version — it changes far less often than marimo's own
+        # version, which deliberately stays out of this signature.
+        "pyodide_version": _pyodide_version(),
     }
     payload = json.dumps(relevant, sort_keys=True, default=str)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()

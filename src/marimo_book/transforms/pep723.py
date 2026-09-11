@@ -446,9 +446,15 @@ def wasm_install_packages(
     host-pinned ``numpy==X`` to micropip would make it hunt PyPI for a
     wheel Pyodide can't use.
     """
-    derived = derive_dependencies(source, extras=extras, overrides=overrides, pin=pin)
-    merged: dict[str, str] = {_canonical_name(d): d for d in derived}
+    # Same precedence as write_pep723_block: the notebook's own block wins on
+    # a canonical-name collision (a hand-written ``nltools==0.4.0`` must not
+    # be replaced by the unpinned import-derived ``nltools``), and derived
+    # entries only fill in names the block doesn't list.
+    merged: dict[str, str] = {}
     for dep in read_existing_dependencies(source) or []:
+        merged.setdefault(_canonical_name(dep), dep)
+    derived = derive_dependencies(source, extras=extras, overrides=overrides, pin=pin)
+    for dep in derived:
         merged.setdefault(_canonical_name(dep), dep)
     bundled = pyodide_bundled_packages(cache_dir)
     if bundled is not None:

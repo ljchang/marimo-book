@@ -373,6 +373,16 @@ def test_wasm_install_packages_merges_block_and_drops_bundled() -> None:
     assert set(pkgs) == {"nltools", "pyarrow>=15"}
 
 
+def test_wasm_install_packages_hand_written_pin_wins() -> None:
+    """A pin in the notebook's own block beats the unpinned import-derived
+    name — the same precedence ``write_pep723_block`` gives the staged
+    manifest, so sandbox/molab and the browser install the same thing."""
+    src = _WASM_SRC.replace('"pandas", "pyarrow>=15"', '"nltools==0.4.0", "pyarrow>=15"')
+    pkgs = wasm_install_packages(src)
+    assert "nltools==0.4.0" in pkgs
+    assert "nltools" not in pkgs
+
+
 def test_wasm_install_packages_without_lockfile_keeps_everything(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MARIMO_PYODIDE_LOCK_FILE", str(tmp_path / "missing.json"))
     pkgs = wasm_install_packages(_WASM_SRC)

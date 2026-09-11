@@ -65,10 +65,13 @@ def _(mo):
 
     ## How it works
 
-    1. During build, `marimo export ipynb` outputs each anywidget as a
-       `<marimo-anywidget>` custom element with the widget's ES module
-       **inlined as a base64 data URL** on the `data-js-url` attribute.
-    2. The preprocessor rewraps it as
+    1. During build, the notebook is executed and each anywidget comes
+       out as a `<marimo-anywidget>` custom element. The widget's ES
+       module isn't on that element any more (marimo ≥ 0.24 sends it to
+       the frontend on a kernel notification instead), so marimo-book
+       captures it from the session and **inlines it as a base64 data
+       URL**.
+    2. The preprocessor rewraps the element as
        `<div class="marimo-book-anywidget" data-js-url="...">`.
     3. At page load, a ~150-line JS shim
        (`marimo_book.js`, bundled via `extra_javascript`) finds each mount,

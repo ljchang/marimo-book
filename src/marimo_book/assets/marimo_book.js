@@ -229,88 +229,26 @@
     });
   }
 
-  // ---- WASM-mode anywidget intercept --------------------------------------
+  // ---- WASM mode and runtime-emitted anywidgets -----------------------------
   //
   // Build-time `rewrite_anywidget_html` rewrites every `<marimo-anywidget>`
-  // marimo emits into our `<div class="marimo-book-anywidget">` mount form,
-  // so static + precompute pages never see a `<marimo-anywidget>` in the DOM.
+  // marimo emits into our `<div class="marimo-book-anywidget">` mount, and
+  // (marimo >= 0.24) restores its `data-js-url` from the session view, so
+  // static, precompute AND the pre-hydration paint of WASM pages all go
+  // through `hydrateMount` above.
   //
-  // WASM-mode pages are different. The build-time rewrite catches the
-  // initial render produced by `MarimoIslandGenerator.build()`, but once
-  // Pyodide boots in the browser and the islands runtime re-executes the
-  // anywidget cells, marimo's React renderer emits FRESH `<marimo-anywidget>`
-  // elements with `data-js-url="data:text/javascript;base64,..."` payloads.
-  // The islands runtime's `WidgetDefRegistry.getModule` then runs an
-  // `isTrustedVirtualFileUrl` check that rejects every data: URL emitted
-  // before the kernel has finished initialising (the trust flag is set by
-  // the kernel's `initialized` message — there's a race on the first batch
-  // of widget cells), throwing
-  //   "Refusing to load anywidget module from untrusted URL: data:..."
-  // and leaving the cell's output area empty.
-  //
-  // We intercept those runtime emissions with a MutationObserver on
-  // `document.body`. When a `<marimo-anywidget>` is inserted (anywhere,
-  // any depth), we copy its data-* attributes onto a fresh
-  // `<div class="marimo-book-anywidget">`, replace it, and call the same
-  // `hydrateMount` we use for the static-rewritten mounts — which loads
-  // the data: URL via the host page's `import()` (no trust check on the
-  // host) and wires up the local model. Marimo's React renderer fires
-  // first (and logs the trust warning into a now-doomed render), then
-  // the observer's callback fires and removes the element entirely; the
-  // React tree's disconnectedCallback unmounts cleanly.
-  //
-  // The current-static-shim model is local-only — anywidget state set in
-  // the browser doesn't round-trip to Pyodide. For widgets that take
-  // `mo.ui.*` controls as kwargs (where state flows kernel → widget),
-  // the cell re-execution will emit a new `<marimo-anywidget>` with
-  // updated `data-initial-value` and our intercept re-hydrates with the
-  // new state. For widgets the user mutates client-side (slider in the
-  // widget, button click), the change stays in the local model — same
-  // trade-off as static / precompute pages.
-  function rewrapMarimoAnywidget(node) {
-    if (!(node instanceof Element)) return;
-    if (node.tagName !== "MARIMO-ANYWIDGET") return;
-    if (node.dataset.mbRewrapped) return;
-    node.dataset.mbRewrapped = "1";
-    const div = document.createElement("div");
-    div.className = "marimo-book-anywidget";
-    for (const attr of node.attributes) {
-      if (attr.name === "data-mb-rewrapped") continue;
-      div.setAttribute(attr.name, attr.value);
-    }
-    node.replaceWith(div);
-    div.setAttribute("data-mb-hydrated", "1");
-    hydrateMount(div);
-  }
-
-  let _anywidgetObserver = null;
-  function installAnywidgetRuntimeIntercept(scope) {
-    scope = scope || document;
-    // Catch elements present at install time (defense if the runtime emitted
-    // some before our observer was attached).
-    scope.querySelectorAll("marimo-anywidget").forEach(rewrapMarimoAnywidget);
-    if (_anywidgetObserver) return;
-    if (typeof MutationObserver === "undefined") return;
-    _anywidgetObserver = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          if (!(node instanceof Element)) continue;
-          if (node.tagName === "MARIMO-ANYWIDGET") {
-            rewrapMarimoAnywidget(node);
-          } else if (node.querySelectorAll) {
-            // Marimo's runtime sometimes inserts a wrapper that contains
-            // the <marimo-anywidget> as a descendant rather than at top
-            // level — scan inside.
-            node.querySelectorAll("marimo-anywidget").forEach(rewrapMarimoAnywidget);
-          }
-        }
-      }
-    });
-    _anywidgetObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-  }
+  // Once Pyodide boots and the islands runtime re-executes the widget cells,
+  // marimo's own runtime renders the fresh `<marimo-anywidget>` elements
+  // itself: since marimo 0.24 (marimo-team/marimo#10127) the widget's ES
+  // module reaches the frontend through the kernel's model notifications and
+  // a widget registry, and the old "Refusing to load anywidget module from
+  // untrusted URL" failure is gone. Verified in a browser: with no shim at
+  // all, the runtime paints the widget into the element's shadow root, and
+  // its state round-trips to the kernel natively. An earlier MutationObserver
+  // here rewrapped those runtime elements into our static mount — on 0.24
+  // that only replaced a working widget with an empty div — so the runtime
+  // is left alone. Our build-time mounts are simply replaced when the
+  // kernel repaints the island.
 
   // ---- Static reactivity (precompute) ------------------------------------
   //
@@ -972,7 +910,6 @@
     mountHeaderButtons(scope);
     hydratePlotly(scope);
     hydrateReleaseDownloads(scope);
-    installAnywidgetRuntimeIntercept(document);
   }
 
   // Boot chain: belt-and-suspenders so we run on direct page loads AND

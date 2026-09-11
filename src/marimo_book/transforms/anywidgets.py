@@ -45,6 +45,7 @@ def rewrite_anywidget_html(
     widget_defaults: dict | None = None,
     keep_marimo_controls: bool = False,
     notebook_source: str | None = None,
+    esm_by_model: dict[str, str] | None = None,
 ) -> str:
     """Rewrite marimo custom elements for static rendering.
 
@@ -67,6 +68,15 @@ def rewrite_anywidget_html(
     must NOT be stripped. We still rewrap anywidgets (because marimo's
     runtime refuses to load anywidget modules from data URLs) but leave
     every other custom element in place.
+
+    ``esm_by_model`` (``{model_id: js_url}``): since marimo 0.24 the widget's
+    ES module no longer rides on the element as ``data-js-url`` — it travels
+    on the kernel's ``ModelOpen`` notification (marimo-team/marimo#10127).
+    The build harvests it from the session view (``_export_runner.py`` for
+    static pages, the islands generator for WASM pages) and this map
+    restores ``data-js-url`` on each mount, keyed by ``data-model-id``, so
+    ``marimo_book.js`` can import the module as before. An element that
+    already carries ``data-js-url`` (marimo < 0.24) is left alone.
 
     ``notebook_source`` (full ``.py`` text): when provided, an extra pass
     cross-references the AST against the rendered HTML to emit
@@ -95,7 +105,7 @@ def rewrite_anywidget_html(
 
     # Pass 1: rewrap <marimo-anywidget> → <div class="marimo-book-anywidget">.
     for node in list(soup.find_all("marimo-anywidget")):
-        _rewrap_anywidget(node, soup, seeded_state)
+        _rewrap_anywidget(node, soup, seeded_state, esm_by_model=esm_by_model)
 
     # Pass 2: rewrap <marimo-plotly data-figure='{json}'> → mount div.
     # The marimo_book.js shim loads Plotly.js on first hit and renders.
@@ -133,6 +143,8 @@ def _rewrap_anywidget(
     node: Tag,
     soup: BeautifulSoup,
     seeded_state: dict,
+    *,
+    esm_by_model: dict[str, str] | None = None,
 ) -> None:
     """Convert ``<marimo-anywidget>`` into our static mount div.
 
@@ -151,6 +163,13 @@ def _rewrap_anywidget(
         val = node.get(attr)
         if val is not None:
             div[attr] = val
+    # marimo >= 0.24: no data-js-url on the element; restore it from the
+    # session-view map (JSON-encoded string, marimo's attribute convention).
+    if div.get("data-js-url") is None and esm_by_model:
+        model_id = _decode_attr_string(node.get("data-model-id"))
+        url = esm_by_model.get(model_id) if model_id else None
+        if url:
+            div["data-js-url"] = json.dumps(url)
     # Merge seeded state into data-initial-value. BeautifulSoup applies HTML
     # entity encoding (&quot;, etc.) when it serialises the attribute, so we
     # emit plain JSON here — matching marimo's own encoding convention.
@@ -181,6 +200,22 @@ def _rewrap_plotly(node: Tag, soup: BeautifulSoup) -> None:
         if val is not None:
             div[attr] = val
     node.replace_with(div)
+
+
+def _decode_attr_string(raw: str | None) -> str | None:
+    """Decode a marimo ``data-*`` attribute holding a JSON-encoded string.
+
+    marimo writes ``data-model-id='"abc123"'`` (JSON inside the HTML
+    attribute); BeautifulSoup hands back the JSON text. Fall back to the
+    raw value for plain (un-encoded) attributes.
+    """
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return str(raw)
+    return value if isinstance(value, str) else str(raw)
 
 
 def _parse_initial_attr(raw: str | None) -> dict | None:

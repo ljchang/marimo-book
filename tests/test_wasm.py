@@ -158,22 +158,12 @@ def test_static_page_unchanged_alongside_wasm_entry(tmp_path: Path) -> None:
 
 
 def test_wasm_anywidgets_rewritten_to_static_mount(tmp_path: Path) -> None:
-    """Anywidgets in a WASM-mode page get rewrapped as static mounts.
+    """The islands body goes through ``rewrite_anywidget_html`` (fixture-driven).
 
-    Why: ``MarimoIslandGenerator`` runs under ``ScriptRuntimeContext``
-    which hardcodes ``virtual_files_supported=False``, so every
-    anywidget's ES module is emitted as a ``data:text/javascript;base64,…``
-    URL. Marimo's islands runtime explicitly refuses to load those
-    ("Refusing to load anywidget module from untrusted URL"), so
-    anywidgets render as empty in WASM-mode pages by default.
-
-    ``render_wasm_page`` post-processes the islands body with
-    ``rewrite_anywidget_html`` so anywidgets become
-    ``<div class="marimo-book-anywidget">`` mounts that
-    ``marimo_book.js`` hydrates by importing the data URL directly.
-    The cells themselves still go through marimo's runtime + Pyodide
-    for full Python reactivity; only the anywidget modules are
-    mounted by the static shim.
+    Mounts become ``<div class="marimo-book-anywidget">`` for the
+    pre-hydration paint; ``marimo_book.js`` imports the ``data-js-url``
+    module. (Real-marimo coverage, including restoring ``data-js-url`` from
+    the session view on marimo >= 0.24, lives in tests/test_anywidget_esm.py.)
     """
     py_path = tmp_path / "demo.py"
     py_path.write_text(

@@ -62,36 +62,34 @@ for WASM-rendered pages: the preprocessor's ``_run_precompute`` is
 called only for static-mode entries.
 
 **Anywidget rewrite (the reason this module also imports
-:func:`rewrite_anywidget_html`).** ``MarimoIslandGenerator`` runs
-under marimo's ``ScriptRuntimeContext``, which hardcodes
-``virtual_files_supported=False`` — so every anywidget's ES module
-gets emitted as a ``data:text/javascript;base64,...`` URL. The
-marimo islands runtime then refuses to load those modules
-("Refusing to load anywidget module from untrusted URL"); only
-``@file/...`` URLs are trusted. Result: anywidgets render as empty
-in WASM-mode pages.
+:func:`rewrite_anywidget_html`).** Since marimo 0.24
+(marimo-team/marimo#10127) a widget's ES module no longer rides on the
+``<marimo-anywidget>`` element as ``data-js-url``: it travels on the
+kernel's ``ModelOpen`` notification as an ``EsmSpec`` and the islands
+generator's session view keeps it per model. :func:`anywidget_esm_by_model`
+harvests ``{model_id: js_url}`` from there (under marimo's script runtime
+context the URL is already a ``data:text/javascript`` URL) and
+:func:`rewrite_anywidget_html` restores ``data-js-url`` on each mount, so
+the page's *pre-hydration* paint shows the widget through the same
+``marimo_book.js`` shim static pages use.
 
-We sidestep that by post-processing the islands body with the same
-:func:`rewrite_anywidget_html` we use in static mode — rewrapping
-``<marimo-anywidget>`` to ``<div class="marimo-book-anywidget">``,
-which our ``marimo_book.js`` shim hydrates by importing the data URL
-directly. The cells themselves still go through marimo's islands
-runtime + Pyodide for full Python reactivity; only the anywidget
-modules are mounted by the static shim.
-
-The trade-off: anywidget state set by the shim doesn't round-trip
-back to Pyodide (kernel can't see the in-browser model state), so
-cells that read ``widget.value`` after the user moves an anywidget
-slider see the *initial* value. For widgets driven by ``mo.ui.*``
-controls (which DO round-trip via marimo's runtime) full reactivity
-is preserved — only "anywidget reading anywidget" patterns are
-affected.
+Once Pyodide boots and the islands runtime re-executes the widget cells,
+marimo's own runtime renders the fresh ``<marimo-anywidget>`` elements
+itself (widget registry fed by the model notifications; the pre-0.24
+"Refusing to load anywidget module from untrusted URL" failure is gone —
+verified in a browser with no shim at all). Our mounts are simply replaced
+by that repaint, and from then on widget state round-trips to the kernel
+natively: cells reading ``widget.value`` see live values. The shim
+therefore no longer intercepts runtime-emitted anywidgets (it used to
+rewrap them into static mounts, which on 0.24 only blanked a working
+widget).
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
+import base64
 import html as _html
 import re
 import textwrap
@@ -278,7 +276,12 @@ def _render_wasm_body(
     # the shim's rerender() can pull live UIElement values into widget traits.
     notebook_source = target.read_text(encoding="utf-8")
     raw_body = body
-    body = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_source)
+    body = rewrite_anywidget_html(
+        body,
+        keep_marimo_controls=True,
+        notebook_source=notebook_source,
+        esm_by_model=anywidget_esm_by_model(gen),
+    )
     if packages:
         # Must come AFTER the anywidget rewrite: the payload copies each
         # island's (rewritten) output HTML so the runtime's materialization
@@ -293,6 +296,48 @@ def _render_wasm_body(
         payload = build_bootstrap_payload(gen, body, packages, rewritten=body != raw_body)
         body += "\n" + payload_script(payload)
     return head + "\n" + body
+
+
+def anywidget_esm_by_model(gen: MarimoIslandGenerator) -> dict[str, str]:
+    """``{model_id: js_url}`` for every anywidget the islands build created.
+
+    marimo >= 0.24 delivers a widget's ES module on the kernel's ``ModelOpen``
+    notification (``EsmSpec.url``) instead of the element; the islands
+    generator's session view retains it per model. Under marimo's script
+    runtime context virtual files are unsupported, so the URL is already a
+    ``data:text/javascript`` URL; a ``/@file/`` URL (should marimo change
+    that) is read from the virtual-file store and inlined. Empty when the
+    notebook has no anywidgets or before ``gen.build()``.
+    """
+    from marimo._messaging.notification import ModelOpen
+
+    stubs = getattr(gen, "stubs", ()) or ()
+    session_view = next(
+        (getattr(s, "_session_view", None) for s in stubs if getattr(s, "_session_view", None)),
+        None,
+    )
+    if session_view is None:
+        return {}
+    out: dict[str, str] = {}
+    for notification in session_view.get_model_notifications():
+        message = notification.message
+        if not isinstance(message, ModelOpen) or message.esm_spec is None:
+            continue
+        url = message.esm_spec.url
+        if url.startswith(("/@file/", "./@file/")):
+            from marimo._runtime.virtual_file import read_virtual_file
+
+            spec = url.split("@file/", 1)[1]
+            try:
+                byte_length, basename = spec.split("-", 1)
+                payload = read_virtual_file(basename, int(byte_length))
+            except Exception:  # noqa: BLE001 — unreadable ⇒ widget stays empty, as today
+                continue
+            url = "data:text/javascript;base64," + base64.b64encode(payload).decode("ascii")
+        elif not url.startswith(("data:", "http://", "https://")):
+            continue
+        out[str(notification.model_id)] = url
+    return out
 
 
 def build_bootstrap_payload(

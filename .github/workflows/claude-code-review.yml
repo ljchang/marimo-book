@@ -40,6 +40,10 @@ jobs:
           # and history through gh/git, and posts via gh pr comment + the
           # inline-comment MCP tool. Restricting to the MCP tool alone (first
           # attempt) made every step a permission denial and posted nothing.
+          # Full output lands in the (public) Actions log so permission
+          # denials are visible; the second run on #78 logged 17 denials
+          # and posted nothing. Turn off once the allowlist is settled.
+          show_full_output: true
           claude_args: |
-            --allowedTools "Agent,Task,Read,Grep,Glob,LS,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(gh api:*),Bash(git blame:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*)"
+            --allowedTools "Agent,Task,Read,Grep,Glob,LS,TodoWrite,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(gh api:*),Bash(gh repo view:*),Bash(git blame:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(git rev-parse:*),Bash(git ls-files:*),Bash(git fetch:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(rg:*),Bash(grep:*),Bash(sed -n:*)"
             --max-turns 40

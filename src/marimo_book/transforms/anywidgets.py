@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 
 from .mime_outputs import render_json_output, render_mime_fragment
+from .widget_state import AnywidgetContext, buffer_rel_url
 
 # marimo UI elements that make no sense in a static site. When an
 # <marimo-ui-element> wraps *only* one of these, drop the whole thing.
@@ -48,6 +49,7 @@ def rewrite_anywidget_html(
     keep_marimo_controls: bool = False,
     notebook_source: str | None = None,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> str:
     """Rewrite marimo custom elements for static rendering.
 
@@ -63,6 +65,10 @@ def rewrite_anywidget_html(
     2. Literal kwargs parsed out of ``cell_source`` by :mod:`ast`
     3. Anything marimo itself inlined into ``data-initial-value`` (rare for
        static exports — usually just a ``model_id`` reference)
+    4. The model state recorded at export time (``anywidget_ctx``): the
+       widget's actual synced traits. Its binary buffers are written to the
+       context's :class:`~.widget_state.BufferStore` and referenced from the
+       mount via ``data-buffers``; ``_css`` travels as ``data-css``.
 
     ``keep_marimo_controls=True`` is set by the WASM render path: in that
     mode marimo's own runtime serves ``<marimo-slider>`` /
@@ -110,7 +116,9 @@ def rewrite_anywidget_html(
 
     # Pass 1: rewrap <marimo-anywidget> → <div class="marimo-book-anywidget">.
     for node in list(soup.find_all("marimo-anywidget")):
-        _rewrap_anywidget(node, soup, seeded_state, esm_by_model=esm_by_model)
+        _rewrap_anywidget(
+            node, soup, seeded_state, esm_by_model=esm_by_model, anywidget_ctx=anywidget_ctx
+        )
 
     # Pass 2: rewrap <marimo-plotly data-figure='{json}'> → mount div.
     # The marimo_book.js shim loads Plotly.js on first hit and renders.
@@ -155,12 +163,16 @@ def _rewrap_anywidget(
     seeded_state: dict,
     *,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> None:
     """Convert ``<marimo-anywidget>`` into our static mount div.
 
     If ``seeded_state`` has literal kwargs harvested from the Python source,
     merge them into ``data-initial-value`` so the widget's JS sees them when
-    it calls ``model.get("key")``.
+    it calls ``model.get("key")``. When ``anywidget_ctx`` knows this mount's
+    ``data-model-id``, the recorded kernel state wins over both: scalar
+    traits go into ``data-initial-value``, buffers into the store (referenced
+    by ``data-buffers``), and ``_css`` into ``data-css``.
     """
     div = soup.new_tag("div", attrs={"class": "marimo-book-anywidget"})
     for attr in (
@@ -183,12 +195,29 @@ def _rewrap_anywidget(
     # Merge seeded state into data-initial-value. BeautifulSoup applies HTML
     # entity encoding (&quot;, etc.) when it serialises the attribute, so we
     # emit plain JSON here — matching marimo's own encoding convention.
-    if seeded_state:
+    recorded = (
+        anywidget_ctx.get(_decode_attr_string(node.get("data-model-id"))) if anywidget_ctx else None
+    )
+    if seeded_state or recorded is not None:
         initial = _parse_initial_attr(div.get("data-initial-value"))
         if initial is None:
             initial = {}
-        merged = {**seeded_state, **initial}  # explicit initial wins
+        merged = {**seeded_state, **initial}  # explicit initial wins…
+        if recorded is not None:
+            merged.update(recorded.state)  # …and the kernel's real state wins over that
         div["data-initial-value"] = json.dumps(merged)
+    if recorded is not None and anywidget_ctx is not None:
+        refs = []
+        for path, blob in recorded.buffers:
+            if not blob:
+                refs.append({"path": path, "empty": True})
+                continue
+            digest = anywidget_ctx.store.put(blob)
+            refs.append({"path": path, "url": buffer_rel_url(digest), "size": len(blob)})
+        if refs:
+            div["data-buffers"] = json.dumps(refs)
+        if recorded.css:
+            div["data-css"] = recorded.css
     for child in list(node.children):
         div.append(child.extract())
     node.replace_with(div)

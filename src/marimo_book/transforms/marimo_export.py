@@ -44,6 +44,12 @@ from .mime_outputs import (
     render_mimebundle,
     render_vega_mount,
 )
+from .widget_state import (
+    AnywidgetContext,
+    BufferStore,
+    WidgetModelState,
+    load_widget_states,
+)
 
 # Marimo metadata lives under ``cell.metadata["marimo"]`` in the exported
 # notebook. The key names we care about for v0.1:
@@ -67,6 +73,10 @@ class ExportedNotebook:
     # the module on the element; see _export_runner.py). Empty when the
     # notebook has no anywidgets.
     esm_by_model: dict[str, str] = field(default_factory=dict)
+    # Every anywidget model's recorded state (traits, buffers, ``_css``),
+    # keyed the same way — written by the runner's ``--states`` sidecar (see
+    # :mod:`.widget_state`). Empty when there are no anywidgets.
+    widget_states: dict[str, WidgetModelState] = field(default_factory=dict)
 
 
 @dataclass
@@ -133,10 +143,12 @@ def export_notebook(
     with tempfile.TemporaryDirectory(prefix="marimo_book_") as tmp_dir:
         tmp_out = Path(tmp_dir) / f"{py_path.stem}.ipynb"
         tmp_models = Path(tmp_dir) / f"{py_path.stem}.models.json"
+        tmp_states = Path(tmp_dir) / f"{py_path.stem}.states.json"
         cmd, cleanup = _export_command(
             py_path,
             tmp_out,
             tmp_models,
+            tmp_states,
             include_outputs=include_outputs,
             sandbox=sandbox,
         )
@@ -165,12 +177,14 @@ def export_notebook(
                 esm_by_model = json.loads(tmp_models.read_text(encoding="utf-8"))
             except ValueError:
                 esm_by_model = {}
+        widget_states = load_widget_states(tmp_states)
 
     return ExportedNotebook(
         source=py_path,
         cells=nb.get("cells", []),
         metadata=nb.get("metadata", {}),
         esm_by_model=esm_by_model,
+        widget_states=widget_states,
     )
 
 
@@ -201,6 +215,7 @@ def _export_command(
     py_path: Path,
     tmp_out: Path,
     tmp_models: Path,
+    tmp_states: Path | None = None,
     *,
     include_outputs: bool,
     sandbox: bool,
@@ -235,6 +250,8 @@ def _export_command(
         "--models",
         str(tmp_models),
     ]
+    if tmp_states is not None:
+        runner_cmd.extend(["--states", str(tmp_states)])
     if not sandbox:
         return [sys.executable, *runner_cmd], lambda: None
 
@@ -360,6 +377,7 @@ def cells_to_markdown(
     *,
     hide_first_code_cell: bool = True,
     widget_defaults: dict | None = None,
+    buffer_store: BufferStore | None = None,
 ) -> str:
     """Render the notebook's cells to a single Markdown string.
 
@@ -372,6 +390,7 @@ def cells_to_markdown(
         exported,
         hide_first_code_cell=hide_first_code_cell,
         widget_defaults=widget_defaults,
+        buffer_store=buffer_store,
     )
     return _join_segments(segments)
 
@@ -381,6 +400,7 @@ def cells_to_markdown_segments(
     *,
     hide_first_code_cell: bool = True,
     widget_defaults: dict | None = None,
+    buffer_store: BufferStore | None = None,
 ) -> list[tuple[int, str]]:
     """Render the notebook into ``(cell_index, body)`` tuples, in order.
 
@@ -391,6 +411,12 @@ def cells_to_markdown_segments(
     public API joins these into a single Markdown string for the normal
     render path.
     """
+    # Recorded anywidget state is baked into mounts only when the caller
+    # supplies a store for the binary buffers; without one (unit tests,
+    # ad-hoc callers) mounts fall back to widget_defaults + literal kwargs.
+    anywidget_ctx: AnywidgetContext | None = None
+    if buffer_store is not None and exported.widget_states:
+        anywidget_ctx = AnywidgetContext(exported.widget_states, buffer_store)
     out: list[tuple[int, str]] = []
     first_md_done = False
     first_code_seen = False
@@ -404,6 +430,7 @@ def cells_to_markdown_segments(
             first_md_done=first_md_done,
             widget_defaults=widget_defaults,
             esm_by_model=exported.esm_by_model,
+            anywidget_ctx=anywidget_ctx,
         )
         if rendered:
             out.append((idx, rendered))
@@ -427,12 +454,18 @@ def _render_cell(
     first_md_done: bool,
     widget_defaults: dict | None = None,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> str | None:
     ct = cell.get("cell_type")
     if ct == "markdown":
         return _render_markdown_cell(cell, strip_duplicate_title=first_md_done)
     if ct == "code":
-        return _render_code_cell(cell, widget_defaults=widget_defaults, esm_by_model=esm_by_model)
+        return _render_code_cell(
+            cell,
+            widget_defaults=widget_defaults,
+            esm_by_model=esm_by_model,
+            anywidget_ctx=anywidget_ctx,
+        )
     if ct == "raw":
         return _as_str(cell.get("source", ""))
     return None
@@ -450,6 +483,7 @@ def _render_code_cell(
     *,
     widget_defaults: dict | None = None,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> str:
     src = _as_str(cell.get("source", ""))
     outputs_md = _render_outputs(
@@ -457,6 +491,7 @@ def _render_code_cell(
         cell_source=src,
         widget_defaults=widget_defaults,
         esm_by_model=esm_by_model,
+        anywidget_ctx=anywidget_ctx,
     )
 
     hide_code = cell.get("metadata", {}).get("marimo", {}).get("config", {}).get(_HIDE_CODE, False)
@@ -479,11 +514,16 @@ def _render_outputs(
     cell_source: str = "",
     widget_defaults: dict | None = None,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> str:
     rendered: list[str] = []
     for out in outputs:
         text = _render_single_output(
-            out, cell_source=cell_source, widget_defaults=widget_defaults, esm_by_model=esm_by_model
+            out,
+            cell_source=cell_source,
+            widget_defaults=widget_defaults,
+            esm_by_model=esm_by_model,
+            anywidget_ctx=anywidget_ctx,
         )
         if text:
             rendered.append(text)
@@ -496,6 +536,7 @@ def _render_single_output(
     cell_source: str = "",
     widget_defaults: dict | None = None,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> str:
     ot = out.get("output_type")
     if ot == "stream":
@@ -519,6 +560,7 @@ def _render_single_output(
             cell_source=cell_source,
             widget_defaults=widget_defaults,
             esm_by_model=esm_by_model,
+            anywidget_ctx=anywidget_ctx,
         )
 
     return ""
@@ -530,6 +572,7 @@ def _render_mime_bundle(
     cell_source: str = "",
     widget_defaults: dict | None = None,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> str:
     """Pick the richest renderable representation from a MIME bundle."""
     # Priority order: HTML (most expressive) → markdown → images → plain.
@@ -539,6 +582,7 @@ def _render_mime_bundle(
             cell_source=cell_source,
             widget_defaults=widget_defaults,
             esm_by_model=esm_by_model,
+            anywidget_ctx=anywidget_ctx,
         )
     if "text/markdown" in data:
         md = _as_str(data["text/markdown"]).strip()
@@ -558,6 +602,7 @@ def _render_mime_bundle(
                 cell_source=cell_source,
                 widget_defaults=widget_defaults,
                 esm_by_model=esm_by_model,
+                anywidget_ctx=anywidget_ctx,
             )
         return md
     # marimo formats a bare list/tuple/dict as application/json and an
@@ -607,6 +652,7 @@ def _render_html_output(
     cell_source: str = "",
     widget_defaults: dict | None = None,
     esm_by_model: dict[str, str] | None = None,
+    anywidget_ctx: AnywidgetContext | None = None,
 ) -> str:
     """Translate marimo custom elements to static HTML, pass the rest through."""
     stripped = raw_html.strip()
@@ -624,6 +670,7 @@ def _render_html_output(
             cell_source=cell_source,
             widget_defaults=widget_defaults,
             esm_by_model=esm_by_model,
+            anywidget_ctx=anywidget_ctx,
         ).strip()
         if not stripped:
             return ""

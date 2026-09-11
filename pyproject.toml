@@ -50,11 +50,13 @@ dependencies = [
     # islands JSON payload (marimo-team/marimo#9987, new in 0.24); older
     # islands bundles ignore that script tag and would silently lose the
     # install (see transforms/wasm.py::build_bootstrap_payload).
-    # Upper bound excludes the next minor because we import two private
-    # modules (`marimo._runtime.packages.module_name_to_pypi_name`,
-    # `marimo._utils.scripts`) in transforms/pep723.py and shell out to
-    # `marimo export ipynb`; verified against 0.24.1 (tests + strict docs
-    # build + islands hydration in a browser). Bump after re-verifying.
+    # Upper bound excludes the next minor because we import private marimo
+    # modules — `marimo._runtime.packages.module_name_to_pypi_name`,
+    # `marimo._utils.scripts`, `marimo._pyodide.pyodide_constraints` in
+    # transforms/pep723.py; `marimo._schemas.islands`, `marimo._templates`
+    # in transforms/wasm.py — and shell out to `marimo export ipynb`;
+    # verified against 0.24.1 (tests + strict docs build + islands
+    # hydration in a browser). Bump after re-verifying.
     "marimo>=0.24,<0.25",
     # marimo declares nbformat as an optional extra; we always use
     # `marimo export ipynb` under the hood, so pin it as a hard dep.

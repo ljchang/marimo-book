@@ -167,8 +167,11 @@ pattern for `marimobook.org` (see `docs/CNAME`).
 
 `pyproject.toml` pins `marimo>=0.24,<NEXT_MINOR` (the floor is where the
 islands JSON payload the WASM bootstrap rides on first shipped). The upper bound is
-deliberate: `transforms/pep723.py` imports two private marimo modules
-and the build shells out to `marimo export ipynb`. When a new marimo
+deliberate: marimo-book imports private marimo modules
+(`transforms/pep723.py`: `_runtime.packages.module_name_to_pypi_name`,
+`_utils.scripts`, `_pyodide.pyodide_constraints`; `transforms/wasm.py`:
+`_schemas.islands`, `_templates`) and the build shells out to
+`marimo export ipynb`. When a new marimo
 minor ships, widen the bound only after this checklist passes against
 it (all four ran clean for 0.24.1 on 2026-09-11):
 
@@ -188,7 +191,8 @@ it (all four ran clean for 0.24.1 on 2026-09-11):
    markup is read; hydration completes regardless, so ignore it.)
 
 Read the upstream release notes for anything touching `_islands`,
-`export ipynb`, `_utils/scripts`, or `module_name_to_pypi_name`.
+`export ipynb`, `_utils/scripts`, `module_name_to_pypi_name`,
+`_pyodide/pyodide_constraints`, `_schemas/islands`, or `_templates`.
 Since 0.24 islands can also hydrate from a JSON payload
 (`render_body(include_payload=True)`); marimo-book builds its own copy
 of that payload — only for pages with PyPI-only deps — to carry the

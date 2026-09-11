@@ -93,7 +93,6 @@ from __future__ import annotations
 import ast
 import asyncio
 import html as _html
-import json
 import re
 import textwrap
 from collections.abc import Sequence
@@ -102,12 +101,18 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from marimo import MarimoIslandGenerator
 
+# Same private-module rationale as transforms/pep723.py (see the marimo pin
+# comment in pyproject.toml): importing the constant and the escaper marimo's
+# own render_payload_script() uses means a rename upstream surfaces as an
+# ImportError at the pin bump instead of a silently ignored script tag.
+from marimo._schemas.islands import ISLANDS_JSON_SCRIPT_TYPE
+from marimo._templates import json_script
+
 from .anywidgets import rewrite_anywidget_html
 from .marimo_export import staged_sibling_file
 from .pep723 import BOOTSTRAP_CELL_ID, micropip_bootstrap_code, thread_bootstrap_sentinel
 
-# Script type marimo's islands runtime looks for (frontend/src/core/islands/constants.ts).
-ISLANDS_PAYLOAD_SCRIPT_TYPE = "application/vnd.marimo.islands+json"
+ISLANDS_PAYLOAD_SCRIPT_TYPE = ISLANDS_JSON_SCRIPT_TYPE
 
 
 def _first_mo_md_constant(tree: ast.AST) -> ast.Constant | None:
@@ -211,21 +216,21 @@ def render_wasm_page(
     # page (see extract_and_strip_title): otherwise MkDocs Material can't see
     # the islands-encoded heading and injects the nav title, duplicating it.
     title, stripped = extract_and_strip_title(target.read_text(encoding="utf-8"))
-    if title:
-        with staged_sibling_file(
-            target, prefix="marimo_book_title_", content=stripped
-        ) as stripped_target:
-            body = _render_wasm_body(
-                stripped_target,
-                display_code=display_code,
-                timeout=timeout,
-                py_path=py_path,
-                packages=packages,
-            )
-        return f"<h1>{_html.escape(title)}</h1>\n\n" + body
-    return _render_wasm_body(
-        target, display_code=display_code, timeout=timeout, py_path=py_path, packages=packages
-    )
+    if not title:
+        return _render_wasm_body(
+            target, display_code=display_code, timeout=timeout, py_path=py_path, packages=packages
+        )
+    with staged_sibling_file(
+        target, prefix="marimo_book_title_", content=stripped
+    ) as stripped_target:
+        body = _render_wasm_body(
+            stripped_target,
+            display_code=display_code,
+            timeout=timeout,
+            py_path=py_path,
+            packages=packages,
+        )
+    return f"<h1>{_html.escape(title)}</h1>\n\n" + body
 
 
 def _render_wasm_body(
@@ -272,17 +277,30 @@ def _render_wasm_body(
     # `notebook_source` enables the AST-driven `data-driven-by` injection so
     # the shim's rerender() can pull live UIElement values into widget traits.
     notebook_source = target.read_text(encoding="utf-8")
+    raw_body = body
     body = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_source)
     if packages:
         # Must come AFTER the anywidget rewrite: the payload copies each
-        # island's (rewritten) output HTML so the runtime's parse-time
-        # materialization writes back exactly what the DOM already shows.
-        body += "\n" + payload_script(build_bootstrap_payload(gen, body, packages))
+        # island's (rewritten) output HTML so the runtime's materialization
+        # writes back exactly what the DOM already shows. Emitted as a plain
+        # <script type=...> because that is the shape the islands runtime
+        # queries for. Caveat: Material's navigation.instant re-creates
+        # inline scripts on page swap and drops the type attribute (the
+        # hazard precompute.py dodges with <template>). Harmless today —
+        # islands only initialize on a full document load, never on an
+        # instant-nav arrival — but if that is ever wired up, this script
+        # will need the same treatment.
+        payload = build_bootstrap_payload(gen, body, packages, rewritten=body != raw_body)
+        body += "\n" + payload_script(payload)
     return head + "\n" + body
 
 
 def build_bootstrap_payload(
-    gen: MarimoIslandGenerator, body_html: str, packages: Sequence[str]
+    gen: MarimoIslandGenerator,
+    body_html: str,
+    packages: Sequence[str],
+    *,
+    rewritten: bool = True,
 ) -> dict:
     """Marimo's islands payload for ``gen`` plus a micropip bootstrap cell.
 
@@ -300,21 +318,26 @@ def build_bootstrap_payload(
       :func:`~marimo_book.transforms.pep723.thread_bootstrap_sentinel`) so
       marimo's dataflow runs the bootstrap before it.
 
-    ``outputHtml`` for anchored cells is taken from ``body_html`` (the
-    already anywidget-rewritten island markup) rather than from marimo's
-    raw output: at parse time the runtime overwrites each anchored
-    island's ``<marimo-cell-output>`` with the payload's ``outputHtml``,
-    so the two must agree or the build-time anywidget rewrite would be
-    undone before ``marimo_book.js`` sees the page.
+    When ``rewritten`` is true, ``outputHtml`` for anchored cells is taken
+    from ``body_html`` (the anywidget-rewritten island markup) rather than
+    from marimo's raw output: the runtime overwrites each anchored island's
+    ``<marimo-cell-output>`` with the payload's ``outputHtml`` when it
+    materializes the payload — which happens once the Pyodide worker is
+    ready, i.e. *after* ``marimo_book.js`` has hydrated the page — so the two
+    must agree, and the shim re-hydrates on the runtime's
+    ``marimo-island-source-changed`` event. When nothing was rewritten the
+    payload's own output HTML is already identical and the re-parse is
+    skipped.
     """
     payload = dict(gen.render_payload())
-    soup = BeautifulSoup(body_html, "html.parser")
     outputs: dict[str, str] = {}
-    for island in soup.find_all("marimo-island"):
-        cell_id = island.get("data-cell-id")
-        output = island.find("marimo-cell-output")
-        if cell_id and output is not None:
-            outputs[str(cell_id)] = output.decode_contents()
+    if rewritten:
+        soup = BeautifulSoup(body_html, "html.parser")
+        for island in soup.find_all("marimo-island"):
+            cell_id = island.get("data-cell-id")
+            output = island.find("marimo-cell-output")
+            if cell_id and output is not None:
+                outputs[str(cell_id)] = output.decode_contents()
 
     cells = []
     for cell in payload["cells"]:
@@ -341,11 +364,8 @@ def build_bootstrap_payload(
 def payload_script(payload: dict) -> str:
     """Serialize ``payload`` into the ``<script>`` tag the islands runtime reads.
 
-    ``<``, ``>`` and ``&`` are emitted as JSON ``\\uXXXX`` escapes (the
-    same trick as Django's ``json_script``) so cell output HTML inside the
-    JSON can never terminate the script element or be parsed as markup.
+    Delegates escaping to marimo's ``json_script`` (``<``, ``>``, ``&`` as
+    ``\\uXXXX``) — the same helper ``render_payload_script`` uses — so cell
+    output HTML inside the JSON can never terminate the script element.
     """
-    text = (
-        json.dumps(payload).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    )
-    return f'<script type="{ISLANDS_PAYLOAD_SCRIPT_TYPE}">{text}</script>'
+    return f'<script type="{ISLANDS_PAYLOAD_SCRIPT_TYPE}">{json_script(payload)}</script>'

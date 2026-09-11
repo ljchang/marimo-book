@@ -128,10 +128,16 @@ and uses it in two ways:
        pass
    marimo_book_micropip_done = True
    ```
-   Every other cell's payload code is prefixed with a bare reference to
-   `marimo_book_micropip_done`, so marimo's dataflow runs the bootstrap
+   Every other cell's payload code is prefixed with
+   `_ = marimo_book_micropip_done`, so marimo's dataflow runs the bootstrap
    strictly first. The cell has no visible output and no island of its
-   own; the notebook the build *executes* is never modified for this.
+   own; the notebook the build *executes* is never modified for this. The
+   install list is the import-derived dependencies merged with any
+   hand-written `dependencies` in the notebook's own `# /// script` block,
+   minus packages Pyodide already bundles (marimo's lockfile resolver
+   supplies that list; set `MARIMO_PYODIDE_LOCK_FILE` to a local
+   `pyodide-lock.json` for offline builds — if it can't be read, the full
+   list is installed, which is safe but slower).
 
    This is necessary because the marimo islands runtime only installs
    packages listed in a PEP 723 block of the notebook file it
@@ -140,10 +146,8 @@ and uses it in two ways:
    scientific packages (numpy/pandas/scipy/sklearn/matplotlib/nilearn/
    nibabel/…) via `loadPackagesFromImports`, so only pure-Python
    PyPI-only deps (`nltools` is the canonical case) would fail without
-   the bootstrap. Pyodide's micropip skips anything already
-   importable, so passing the full dependency list is safe — bundled
-   packages no-op, non-bundled ones install. Pages whose notebooks only
-   import marimo get no payload at all.
+   the bootstrap. Pages whose imports are all bundled (or marimo-only)
+   get no payload at all.
 
 Your source `.py` files are never modified by the build.
 

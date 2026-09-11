@@ -428,9 +428,9 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     (book_dir / "content").mkdir()
     nb = book_dir / "content" / "nb.py"
     # Use the real fixture as the body so MarimoIslandGenerator never
-    # actually runs (we mock the call). Adding `import numpy` so we have
-    # something to install.
-    nb.write_text(NOTEBOOK_FIXTURE.read_text(encoding="utf-8") + "\nimport numpy\n")
+    # actually runs (we mock the call). numpy is Pyodide-bundled (per the
+    # tests' lockfile fixture), nltools is PyPI-only.
+    nb.write_text(NOTEBOOK_FIXTURE.read_text(encoding="utf-8") + "\nimport numpy\nimport nltools\n")
     docs_dir = tmp_path / "_site_src" / "docs"
     docs_dir.mkdir(parents=True)
 
@@ -455,23 +455,25 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     with patch("marimo_book.preprocessor.render_wasm_page", side_effect=fake_render):
         stage_page(book, book_dir, book.toc[0], docs_dir)
 
-    # PEP 723 block present and lists numpy.
+    # PEP 723 block present and lists everything (the manifest is for
+    # sandbox/molab, where numpy must be installed too).
     assert has_pep723_block(captured["content"])
     deps = read_existing_dependencies(captured["content"]) or []
-    assert "numpy" in deps
+    assert {"numpy", "nltools"} <= set(deps)
     # The executed source is NOT rewritten for the bootstrap any more (the
     # old AST injection round-tripped every page through ast.unparse);
-    # the install list travels separately, into the islands payload.
+    # the install list travels separately, into the islands payload — and
+    # excludes Pyodide-bundled numpy, which loadPackagesFromImports handles.
     assert "await micropip.install" not in captured["content"]
-    assert "numpy" in captured["packages"]
+    assert captured["packages"] == ["nltools"]
 
 
 def test_stage_page_auto_pep723_static_mode_skips_bootstrap(tmp_path: Path) -> None:
-    """``auto_pep723: true`` for static pages writes the block but NOT the bootstrap.
+    """``auto_pep723: true`` for static pages writes the block and nothing else.
 
-    The bootstrap is WASM-specific (the islands runtime can't install
-    deps any other way). Static pages run under a real Python env at
-    build time and don't need a runtime micropip call.
+    Guards the staging path: the staged copy is the PEP 723 manifest only.
+    (The WASM bootstrap no longer touches staged source at all; this test
+    stays as the static-mode contract for the block.)
     """
     from marimo_book.preprocessor import stage_page
 

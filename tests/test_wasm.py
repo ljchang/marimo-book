@@ -291,9 +291,16 @@ def test_wasm_page_with_pypi_dep_ships_payload_bootstrap(tmp_path: Path) -> None
     dom_outputs = {
         i["data-cell-id"]: i.find("marimo-cell-output").decode_contents() for i in islands
     }
+
+    def _norm(html: str) -> str:
+        return BeautifulSoup(html.strip(), "html.parser").decode()
+
     for cell in cells[1:]:
-        assert cell["code"].startswith(BOOTSTRAP_SENTINEL + "\n")
-        assert cell["outputHtml"] == dom_outputs[cell["cellId"]]
+        assert cell["code"].startswith(f"_ = {BOOTSTRAP_SENTINEL}\n")
+        # Same markup either way; only serialization differs (marimo pads the
+        # DOM output with newlines and orders attributes differently from
+        # BeautifulSoup), so compare normalized parses.
+        assert _norm(cell["outputHtml"]) == _norm(dom_outputs[cell["cellId"]])
 
     # The DOM islands (what gen.build() executed) never saw the bootstrap.
     for island in islands:

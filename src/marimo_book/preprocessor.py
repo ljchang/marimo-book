@@ -64,6 +64,7 @@ from .transforms.marimo_export import (
 )
 from .transforms.pep723 import (
     derive_dependencies,
+    wasm_install_packages,
     write_pep723_block,
 )
 from .transforms.precompute import (
@@ -477,18 +478,22 @@ def _splice_controls_inline(
     return body[:pos] + widget_html + "\n\n" + body[pos:]
 
 
-def _wasm_packages(src_abs: Path, deps_cfg: Dependencies) -> list[str]:
+def _wasm_packages(src_abs: Path, deps_cfg: Dependencies, book_dir: Path) -> list[str]:
     """Requirement strings a WASM page must ``micropip.install`` in the browser.
 
-    The same derivation the PEP 723 staging uses (extras/overrides/pin
-    from ``book.yml`` apply), read from the *source* notebook so the list
-    is independent of whatever staging did to the executed copy.
+    See :func:`~marimo_book.transforms.pep723.wasm_install_packages`: the
+    import-derived list merged with the notebook's own PEP 723 block
+    (matching the staged manifest) minus Pyodide-bundled packages. The
+    bundled list is cached under the book cache dir per Pyodide version.
+    Re-derives from the source notebook rather than threading the list out
+    of :func:`_maybe_stage_with_pep723` (one extra AST walk per WASM page).
     """
-    return derive_dependencies(
+    return wasm_install_packages(
         src_abs.read_text(encoding="utf-8"),
         extras=deps_cfg.extras,
         overrides=deps_cfg.overrides,
         pin=deps_cfg.pin,
+        cache_dir=book_dir / _CACHE_DIR_NAME,
     )
 
 
@@ -1362,7 +1367,7 @@ def stage_page(
                     src_abs,
                     staged_source_path=staged,
                     timeout=book.defaults.execution_timeout,
-                    packages=_wasm_packages(src_abs, book.dependencies),
+                    packages=_wasm_packages(src_abs, book.dependencies, book_dir),
                 )
                 apply_rewrites = False
             else:

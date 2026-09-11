@@ -1,0 +1,32 @@
+{
+ "info": {
+  "version": "test"
+ },
+ "packages": {
+  "numpy": {
+   "name": "numpy",
+   "version": "0.0",
+   "package_type": "package"
+  },
+  "pandas": {
+   "name": "pandas",
+   "version": "0.0",
+   "package_type": "package"
+  },
+  "matplotlib": {
+   "name": "matplotlib",
+   "version": "0.0",
+   "package_type": "package"
+  },
+  "scipy": {
+   "name": "scipy",
+   "version": "0.0",
+   "package_type": "package"
+  },
+  "numpy-tests": {
+   "name": "numpy-tests",
+   "version": "0.0",
+   "package_type": "package"
+  }
+ }
+}

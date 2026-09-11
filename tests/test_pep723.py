@@ -14,8 +14,10 @@ from marimo_book.transforms.pep723 import (
     has_pep723_block,
     map_to_distributions,
     micropip_bootstrap_code,
+    pyodide_bundled_packages,
     read_existing_dependencies,
     thread_bootstrap_sentinel,
+    wasm_install_packages,
     write_pep723_block,
 )
 
@@ -260,26 +262,40 @@ def test_read_existing_dependencies_empty_block() -> None:
 # --- WASM micropip bootstrap (payload cell helpers) --------------------------
 
 
-def test_bootstrap_code_installs_packages_and_defines_sentinel() -> None:
-    """The payload cell body awaits the install and defines the sentinel.
+def test_bootstrap_code_installs_packages_and_always_binds_sentinel() -> None:
+    """The payload cell body awaits the install and binds the sentinel last.
 
     ``await`` is what makes marimo's islands runtime wrap the synthesized
-    cell as ``async def``; the sentinel assignment is what every other
-    cell's prefix references.
+    cell as ``async def``. The sentinel must be bound even when the install
+    raises: every user cell reads it, so an unbound sentinel would cancel
+    the whole page — and the anchor-less bootstrap cell has no island to
+    show a traceback in. Hence a catch-all that prints instead of raising.
     """
     code = micropip_bootstrap_code(["nltools", "numpy>=1.26"])
     assert "await micropip.install(['nltools', 'numpy>=1.26'])" in code
     assert code.rstrip().endswith("marimo_book_micropip_done = True")
-    # Safe under CPython too: micropip is only importable in Pyodide.
     assert "except ImportError:" in code
+    assert "except Exception as _exc:" in code
+    # The sentinel assignment is at top level, after the try block.
+    assert code.index("except Exception") < code.index("marimo_book_micropip_done = True")
+    compile(code.replace("await ", ""), "<bootstrap>", "exec")
 
 
-def test_thread_sentinel_prefixes_bare_reference() -> None:
+def test_thread_sentinel_prefixes_assignment() -> None:
     out = thread_bootstrap_sentinel("import nltools\nnltools.__version__")
-    assert out.startswith("marimo_book_micropip_done\n")
+    assert out.startswith("_ = marimo_book_micropip_done\n")
     # Body untouched below the prefix — including the last expression,
     # which is what marimo displays as the cell output.
     assert out.endswith("import nltools\nnltools.__version__")
+
+
+def test_thread_sentinel_creates_dataflow_edge_without_a_def() -> None:
+    """marimo must see the sentinel as a ref and ``_`` as cell-local (no def)."""
+    from marimo._ast.compiler import compile_cell
+
+    cell = compile_cell(thread_bootstrap_sentinel("x = 1"), cell_id="t")
+    assert "marimo_book_micropip_done" in cell.refs
+    assert "_" not in cell.defs
 
 
 def test_thread_sentinel_idempotent() -> None:
@@ -287,7 +303,77 @@ def test_thread_sentinel_idempotent() -> None:
     assert thread_bootstrap_sentinel(once) == once
 
 
-def test_thread_sentinel_leaves_empty_cells_alone() -> None:
-    """Empty bodies become ``pass`` in the runtime file; nothing to order."""
+def test_thread_sentinel_leaves_statement_free_cells_alone() -> None:
+    """Empty and comment-only bodies compile to no statements; the runtime
+    emits ``pass`` for them and a prefix would become their (displayed)
+    last expression."""
     assert thread_bootstrap_sentinel("") == ""
     assert thread_bootstrap_sentinel("   \n") == "   \n"
+    assert thread_bootstrap_sentinel("# scratch\n") == "# scratch\n"
+
+
+def test_thread_sentinel_mention_in_comment_still_prefixed() -> None:
+    """Only the exact prefix counts as already-threaded; a cell that merely
+    mentions the sentinel in a comment or string must still get the edge."""
+    src = "# see marimo_book_micropip_done\nimport nltools"
+    assert thread_bootstrap_sentinel(src) == "_ = marimo_book_micropip_done\n" + src
+
+
+# --- wasm_install_packages ---------------------------------------------------
+
+
+def test_bundled_packages_come_from_lockfile_fixture() -> None:
+    bundled = pyodide_bundled_packages(None)
+    assert bundled is not None
+    assert {"numpy", "pandas"} <= bundled
+    # ``-tests`` entries are excluded by marimo's resolver.
+    assert "numpy-tests" not in bundled
+
+
+def test_bundled_packages_unreadable_lockfile_returns_none(monkeypatch, tmp_path) -> None:
+    """An unreadable lockfile must mean "don't filter", never "drop installs"."""
+    monkeypatch.setenv("MARIMO_PYODIDE_LOCK_FILE", str(tmp_path / "missing.json"))
+    assert pyodide_bundled_packages(None) is None
+
+
+def test_bundled_packages_cached_on_disk_per_pyodide_version(monkeypatch, tmp_path) -> None:
+    """Without the env override the list is read from / written to the cache dir."""
+    from marimo._pyodide.pyodide_constraints import PYODIDE_VERSION
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / f"pyodide-bundled-{PYODIDE_VERSION}.json").write_text('["onlythis"]')
+    monkeypatch.delenv("MARIMO_PYODIDE_LOCK_FILE")
+    assert pyodide_bundled_packages(cache) == frozenset({"onlythis"})
+
+
+_WASM_SRC = """# /// script
+# dependencies = ["pandas", "pyarrow>=15"]
+# ///
+import marimo
+app = marimo.App()
+
+
+@app.cell
+def _():
+    import numpy
+    import pandas as pd
+    import nltools
+    return
+"""
+
+
+def test_wasm_install_packages_merges_block_and_drops_bundled() -> None:
+    """Import-derived ∪ hand-written PEP 723 deps, minus Pyodide-bundled.
+
+    ``pyarrow`` only appears in the notebook's own block (no import), so it
+    must survive; numpy/pandas are bundled in the fixture lock and go.
+    """
+    pkgs = wasm_install_packages(_WASM_SRC)
+    assert set(pkgs) == {"nltools", "pyarrow>=15"}
+
+
+def test_wasm_install_packages_without_lockfile_keeps_everything(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MARIMO_PYODIDE_LOCK_FILE", str(tmp_path / "missing.json"))
+    pkgs = wasm_install_packages(_WASM_SRC)
+    assert {"numpy", "pandas", "nltools", "pyarrow>=15"} <= set(pkgs)

@@ -8,11 +8,11 @@ name: Claude Code Review
 # (three runs on #78 confirmed this). The prompt below does the review in
 # one session and posts inline comments plus a summary.
 #
-# With a custom --allowedTools the action passes the list through unchanged,
-# so the sticky-comment tool (mcp__github_comment__update_claude_comment) must
-# be listed explicitly — the action's own prompt tells Claude to post through
-# it, and leaving it out produced permission denials and a run that looped to
-# the turn cap.
+# No use_sticky_comment: in this (prompt-driven) mode the action never creates
+# the sticky comment, so its update tool fails with "CLAUDE_COMMENT_ID ... is
+# required". The summary goes through `gh pr comment` instead. A custom
+# --allowedTools list is passed through unchanged, so everything the review
+# needs is listed below.
 #
 # Auth: CLAUDE_CODE_OAUTH_TOKEN (subscription token from `claude setup-token`).
 # The Claude GitHub App must be installed on the repo. Fork PRs never see
@@ -43,16 +43,16 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          use_sticky_comment: true
-          # Diagnostic: surfaces permission_denied entries in the Actions log.
-          show_full_output: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
             Review this pull request for correctness. Do the whole review yourself in
             this session: do NOT launch sub-agents or background tasks (a headless run
-            ends when you stop, so anything you delegate is lost).
+            ends when you stop, so anything you delegate is lost). The project and its
+            dependencies are NOT installed on this runner: do not try python, pip, or
+            uv; judge the code by reading it. Run `gh pr diff` directly (no shell
+            redirection) and read its output.
 
             Steps:
             1. `gh pr view <PR> --json title,body` and `gh pr diff <PR>` to read the change.
@@ -68,10 +68,10 @@ jobs:
                with `mcp__github_inline_comment__create_inline_comment` on the exact
                line, stating the problem and the concrete failure scenario in 2-4
                sentences. No duplicates, no praise comments.
-            5. Finish by writing a short summary into the sticky Claude comment with
-               `mcp__github_comment__update_claude_comment` (body only): either
-               "No high-confidence issues found." or a numbered list of the issues
-               you posted, each one line. Do not create additional top-level comments.
+            5. Finish with ONE summary comment via `gh pr comment <PR> --body "..."`:
+               either "No high-confidence issues found." or a numbered list of the
+               issues you posted, each one line, prefixed with the head commit SHA
+               so re-runs on later pushes are distinguishable.
           claude_args: |
-            --allowedTools "Read,Grep,Glob,LS,mcp__github_inline_comment__create_inline_comment,mcp__github_comment__update_claude_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(git blame:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*)"
+            --allowedTools "Read,Grep,Glob,LS,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api:*),Bash(git blame:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git rev-parse:*)"
             --max-turns 80

@@ -415,8 +415,9 @@ def test_maybe_stage_applies_extras_and_overrides(tmp_path: Path) -> None:
 
 def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     """``stage_page`` for a WASM entry must call ``render_wasm_page`` with a
-    staged source path whose contents include both the PEP 723 block AND
-    the micropip bootstrap injected into the first ``@app.cell``.
+    staged source path carrying the PEP 723 block, and hand the derived
+    dependency list over as ``packages`` for the islands-payload micropip
+    bootstrap — WITHOUT injecting anything into the executed source.
 
     Verified by mocking ``render_wasm_page`` to capture the args before
     the tempdir is cleaned up.
@@ -427,9 +428,9 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     (book_dir / "content").mkdir()
     nb = book_dir / "content" / "nb.py"
     # Use the real fixture as the body so MarimoIslandGenerator never
-    # actually runs (we mock the call). Adding `import numpy` so we have
-    # something to install.
-    nb.write_text(NOTEBOOK_FIXTURE.read_text(encoding="utf-8") + "\nimport numpy\n")
+    # actually runs (we mock the call). numpy is Pyodide-bundled (per the
+    # tests' lockfile fixture), nltools is PyPI-only.
+    nb.write_text(NOTEBOOK_FIXTURE.read_text(encoding="utf-8") + "\nimport numpy\nimport nltools\n")
     docs_dir = tmp_path / "_site_src" / "docs"
     docs_dir.mkdir(parents=True)
 
@@ -440,33 +441,39 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
             "defaults": {"mode": "static"},
         }
     )
-    captured: dict[str, str] = {}
+    captured: dict = {}
 
-    def fake_render(py_path, *, display_code=False, staged_source_path=None, timeout=None):
+    def fake_render(
+        py_path, *, display_code=False, staged_source_path=None, timeout=None, packages=()
+    ):
         # Capture the staged source content while the tempdir still exists.
         assert staged_source_path is not None, "WASM path must receive a staged source"
         captured["content"] = staged_source_path.read_text()
+        captured["packages"] = list(packages)
         return "<!-- mocked wasm body -->"
 
     with patch("marimo_book.preprocessor.render_wasm_page", side_effect=fake_render):
         stage_page(book, book_dir, book.toc[0], docs_dir)
 
-    # PEP 723 block present and lists numpy.
+    # PEP 723 block present and lists everything (the manifest is for
+    # sandbox/molab, where numpy must be installed too).
     assert has_pep723_block(captured["content"])
     deps = read_existing_dependencies(captured["content"]) or []
-    assert "numpy" in deps
-    # WASM bootstrap injected: try/except + await micropip.install in the
-    # first cell. Without this the islands runtime can't provision deps.
-    assert "await micropip.install" in captured["content"]
-    assert "except ImportError" in captured["content"]
+    assert {"numpy", "nltools"} <= set(deps)
+    # The executed source is NOT rewritten for the bootstrap any more (the
+    # old AST injection round-tripped every page through ast.unparse);
+    # the install list travels separately, into the islands payload — and
+    # excludes Pyodide-bundled numpy, which loadPackagesFromImports handles.
+    assert "await micropip.install" not in captured["content"]
+    assert captured["packages"] == ["nltools"]
 
 
 def test_stage_page_auto_pep723_static_mode_skips_bootstrap(tmp_path: Path) -> None:
-    """``auto_pep723: true`` for static pages writes the block but NOT the bootstrap.
+    """``auto_pep723: true`` for static pages writes the block and nothing else.
 
-    The bootstrap is WASM-specific (the islands runtime can't install
-    deps any other way). Static pages run under a real Python env at
-    build time and don't need a runtime micropip call.
+    Guards the staging path: the staged copy is the PEP 723 manifest only.
+    (The WASM bootstrap no longer touches staged source at all; this test
+    stays as the static-mode contract for the block.)
     """
     from marimo_book.preprocessor import stage_page
 

@@ -992,4 +992,24 @@
   if (typeof document$ !== "undefined" && document$.subscribe) {
     document$.subscribe(() => bootAll(document));
   }
+
+  // WASM pages that carry an islands JSON payload (build_bootstrap_payload
+  // in transforms/wasm.py): once the Pyodide worker is ready, marimo's
+  // runtime *materializes* the payload — it replaces every anchored
+  // island's <marimo-cell-output> innerHTML with the payload's outputHtml
+  // and dispatches `marimo-island-source-changed` on the island. That
+  // outputHtml is the build-time markup, so the anywidget / plotly mounts
+  // inside it are fresh, un-hydrated divs replacing the ones we hydrated at
+  // DOMContentLoaded. Re-run the (idempotent) hydrators on that island. The
+  // event is dispatched without `bubbles`, so listen in the capture phase.
+  document.addEventListener(
+    "marimo-island-source-changed",
+    (event) => {
+      const island = event.target;
+      if (!(island instanceof Element)) return;
+      hydrateAll(island);
+      hydratePlotly(island);
+    },
+    true
+  );
 })();

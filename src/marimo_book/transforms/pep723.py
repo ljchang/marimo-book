@@ -1,52 +1,54 @@
 """Notebook dependency analysis: PEP 723 generation + WASM micropip bootstrap.
 
-Two related transforms operate on a marimo ``.py`` notebook source:
+Two jobs:
 
-1. **PEP 723 inline-script-metadata** — extract imports, map to PyPI
-   distribution names via marimo's own table, and write/merge a
-   ``# /// script`` block at the top of the file. This is the
-   manifest format ``uv run --script`` and ``marimo --sandbox`` read.
-   Used by the build for sandbox-mode pages and by ``sync-deps`` for
-   committing the block back into source for ``molab`` portability.
+1. **PEP 723 generation** — walk a notebook's AST, collect its imports,
+   map module names to PyPI distributions, and write a
+   ``# /// script`` inline-metadata block (the format read by ``uv run``,
+   ``marimo --sandbox``, molab, and any other PEP-723-aware tool).
+   Build-time staging writes the block into a sibling copy of the
+   notebook; ``marimo-book sync-deps`` writes it back into the source.
 
 2. **WASM micropip bootstrap** — for pages rendered through
-   ``MarimoIslandGenerator`` (WASM mode), AST-inject a try/except
-   ``await micropip.install([...])`` block at the top of the first
-   ``@app.cell`` function. The islands JS bundle has no codepath that
-   reads PEP 723 (we verified empirically — it auto-loads only
-   Pyodide-bundled packages via ``loadPackagesFromImports``), so we
-   ship the install call inside cell code instead. Pyodide's micropip
-   filters out packages already in ``sys.modules`` from
-   ``loadPackagesFromImports``, so passing the full ``derive_dependencies()``
-   list is safe — bundled deps no-op, non-bundled deps install. The
-   try/except wraps ``ImportError`` so build-time CPython execution
-   (where ``micropip`` doesn't exist) doesn't crash.
+   ``MarimoIslandGenerator`` (WASM mode), provide the pieces of an
+   islands JSON payload (marimo >= 0.24, marimo-team/marimo#9987) that
+   installs pure-Python PyPI-only deps before any user cell runs:
+   :func:`micropip_bootstrap_code` is the body of an extra, DOM-less
+   payload cell that ``await micropip.install([...])``s the derived
+   dependency list and defines a sentinel variable;
+   :func:`thread_bootstrap_sentinel` prefixes every user cell's payload
+   code with a bare reference to that sentinel, so marimo's dataflow
+   analyzer schedules the bootstrap strictly first. The islands JS
+   bundle auto-loads Pyodide-bundled packages via
+   ``loadPackagesFromImports`` but only honours a PEP 723 block at column
+   zero of the notebook file it synthesizes from cell bodies — which it
+   never carries over from the source — so without this the install
+   never happens (see marimo-team/marimo#9778). The payload is assembled
+   in :mod:`marimo_book.transforms.wasm`; the executed/staged notebook
+   source is never touched for this.
 
-The module is pure: no I/O, no subprocess shelling. Callers
-(``preprocessor._maybe_stage_with_pep723`` and the ``sync-deps`` CLI)
-read source from disk, call these helpers, and write back where
-appropriate.
-
-Reuses marimo's own helpers so that what we write matches what the
-WASM kernel will resolve at runtime:
+Uses marimo's own internals so the mapping stays in sync with marimo:
 
 - ``marimo._runtime.packages.module_name_to_pypi_name`` — the same
   mapping table marimo uses for its own micropip fallback resolution.
 - ``marimo._utils.scripts.read_pyproject_from_script`` — the PEP 723
-  reference parser.
+  parser.
 - ``marimo._utils.scripts.wrap_script_metadata`` — adds ``# `` prefixes
-  to a TOML body.
+  to TOML lines.
 """
 
 from __future__ import annotations
 
 import ast
+import json
+import os
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
 from typing import Literal
 
 import tomlkit
@@ -300,199 +302,161 @@ def _insert_at_top(source: str, block: str) -> str:
     return block + "\n" + source
 
 
-# --- WASM micropip bootstrap injection --------------------------------------
+# --- WASM micropip bootstrap (islands JSON payload cell) ----------------------
+
+BOOTSTRAP_SENTINEL = "marimo_book_micropip_done"
+"""Variable the bootstrap cell defines and every user cell references.
+
+Marimo's dataflow analyzer derives a cell's inputs from the names it
+*reads*, so a bare ``marimo_book_micropip_done`` expression statement at
+the top of a cell body makes that cell depend on — and run strictly
+after — the cell that defines it. It must NOT start with an underscore:
+marimo makes underscore-prefixed names cell-local, and the reference in
+every other cell would raise ``NameError`` (verified in the browser).
+"""
+
+BOOTSTRAP_CELL_ID = "marimo-book-micropip-bootstrap"
+"""``cellId`` of the payload-only bootstrap cell (no ``<marimo-island>`` anchor)."""
 
 
-_BOOTSTRAP_SENTINEL = "_marimo_book_micropip_done"
+def micropip_bootstrap_code(packages: Sequence[str]) -> str:
+    """Cell body that installs ``packages`` via micropip and defines the sentinel.
 
-
-def inject_micropip_bootstrap(source: str, packages: Sequence[str]) -> str:
-    """Insert a top-level ``micropip.install`` cell + thread it as a dependency.
-
-    For WASM-mode rendering: marimo's islands JS bundle auto-loads
-    Pyodide-bundled packages via ``loadPackagesFromImports`` but has
-    no codepath to install pure-Python PyPI-only deps (e.g.
-    ``nltools``, ``dartbrains-tools``). We ship the install call
-    inside cell code instead.
-
-    **Why a separate cell, not a prepend-into-existing.** An earlier
-    iteration of this transform prepended ``await micropip.install``
-    directly into each ``@app.cell`` that had imports, converting
-    sync cells to ``async def`` along the way. That broke real
-    notebooks: a cell whose existing body did
-    ``_ROOT = next(...)`` for a ``Path.cwd()`` walk would
-    sometimes raise ``StopIteration`` from the staged tempdir, the
-    cell would abort *before* its return statement, and downstream
-    cells failed with ``Name 'mo' is not defined`` because marimo
-    only collects exported variables from a cell that returns
-    successfully.
-
-    The current transform is non-destructive: it inserts a new
-    ``@app.cell`` after ``app = marimo.App(...)`` whose only job is
-    to ``await micropip.install([...])`` and define a sentinel
-    ``_marimo_book_micropip_done = True``. Then it adds that
-    sentinel as a parameter to every existing ``@app.cell`` (and
-    ``@app.function``-style decorators are left alone). Marimo's
-    dataflow analyzer treats the parameter as a dependency, so the
-    bootstrap cell runs strictly before every other cell — without
-    rewriting any user cell body or changing any existing function
-    signature except by appending one parameter.
-
-    Pyodide's ``micropip`` filters out packages already in
-    ``sys.modules``, so bundled deps no-op. The injected install is
-    wrapped in ``try/except ImportError`` so build-time CPython
-    execution (where ``micropip`` doesn't exist) falls through.
-    Marimo's CPython shim emits one informational
-    ``"['…'] was not installed: micropip is only available in WASM
-    notebooks."`` per build; expected and harmless.
-
-    Comments inside the original ``.py`` survive — only the new cell
-    is added and existing function signatures get one extra
-    parameter; ``ast.unparse`` runs over the whole tree, so cell
-    bodies are reformatted but their semantics are preserved.
-
-    Returns ``source`` unchanged when ``packages`` is empty, when no
-    ``@app.cell`` is found, or on syntax error.
+    Runs only in the browser (payload cells are never executed at build
+    time). The sentinel is bound **whatever happens** in the install: every
+    user cell reads it, so an unbound sentinel would make marimo cancel the
+    whole page — and this cell has no island of its own to show a
+    traceback in. Failures are printed instead (they land in the browser
+    console via marimo's stderr forwarding) and cells then fail
+    individually at their own ``import``, which *is* visible. Pyodide's
+    micropip skips anything already importable; the list is pre-filtered
+    against Pyodide's bundled set by :func:`wasm_install_packages`. The
+    ``await`` makes marimo's islands runtime wrap the cell as ``async def``.
     """
-    if not packages:
-        return source
-    # Idempotency: skip if the source already carries our sentinel.
-    # Otherwise re-running the transform (e.g. on an already-staged copy)
-    # would append the parameter to every cell signature N times.
-    if _BOOTSTRAP_SENTINEL in source:
-        return source
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return source
-
-    cell_nodes = [
-        n
-        for n in tree.body
-        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and _is_app_cell_decorated(n)
-    ]
-    if not cell_nodes:
-        return source
-
-    insert_idx = _find_app_assignment_index(tree)
-    if insert_idx is None:
-        return source
-
-    # Add the sentinel parameter to every existing @app.cell. Marimo's
-    # static analyzer reads parameter names as the cell's input
-    # variables, so this makes every cell depend on the bootstrap.
-    for cell in cell_nodes:
-        existing = {a.arg for a in cell.args.args}
-        if _BOOTSTRAP_SENTINEL not in existing:
-            cell.args.args.append(ast.arg(arg=_BOOTSTRAP_SENTINEL, annotation=None))
-
-    bootstrap_src = (
-        "@app.cell(hide_code=True)\n"
-        "async def _():\n"
-        "    try:\n"
-        "        import micropip\n"
-        f"        await micropip.install({list(packages)!r})\n"
-        "    except ImportError:\n"
-        "        pass\n"
-        f"    {_BOOTSTRAP_SENTINEL} = True\n"
-        f"    return ({_BOOTSTRAP_SENTINEL},)\n"
+    return (
+        "try:\n"
+        "    import micropip\n"
+        f"    await micropip.install({list(packages)!r})\n"
+        "except ImportError:\n"
+        "    pass\n"
+        "except Exception as _exc:\n"
+        "    print(f'marimo-book: micropip install failed: {_exc!r}')\n"
+        f"{BOOTSTRAP_SENTINEL} = True\n"
     )
-    bootstrap_nodes = ast.parse(bootstrap_src).body
-    tree.body[insert_idx:insert_idx] = bootstrap_nodes
-
-    ast.fix_missing_locations(tree)
-    return ast.unparse(tree) + "\n"
 
 
-def _is_app_cell_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """Whether ``node`` carries ``@app.cell`` or ``@app.cell(...)``."""
-    for dec in node.decorator_list:
-        target = dec.func if isinstance(dec, ast.Call) else dec
-        if (
-            isinstance(target, ast.Attribute)
-            and isinstance(target.value, ast.Name)
-            and target.value.id == "app"
-            and target.attr == "cell"
-        ):
-            return True
-    return False
+_SENTINEL_PREFIX = f"_ = {BOOTSTRAP_SENTINEL}\n"
 
 
-def has_app_setup_block(source_or_tree: str | ast.Module) -> bool:
-    """Whether the notebook uses marimo's ``with app.setup:`` construct.
+def thread_bootstrap_sentinel(code: str) -> str:
+    """Prefix a cell body with ``_ = <sentinel>`` so it depends on the bootstrap.
 
-    Marimo's setup block runs at module-import time before any
-    ``@app.cell``; it's the user's escape hatch for "imports + globals
-    every cell needs." Our sentinel-parameter approach can't inject a
-    micropip install before it runs (see comment in
-    :func:`inject_micropip_bootstrap`). Callers should fall back to a
-    build-time warning for notebooks that hit this path.
+    An assignment rather than a bare expression: marimo displays a cell's
+    *last* expression, so a bare name would render as ``True`` in a cell
+    whose body is otherwise only comments. ``_`` is cell-local in marimo,
+    so the assignment defines nothing globally; the read of the sentinel
+    is what creates the dataflow edge. Cells that compile to no statements
+    at all (empty or comment-only; the islands runtime emits ``pass`` for
+    those) are left alone. Idempotent on the exact prefix only — a cell
+    that merely *mentions* the sentinel in a string or comment still gets
+    the edge.
     """
-    tree = ast.parse(source_or_tree) if isinstance(source_or_tree, str) else source_or_tree
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.With):
-            continue
-        for item in node.items:
-            ctx = item.context_expr
-            # Match either ``app.setup`` (attribute) or ``app.setup(...)`` (call).
-            target = ctx.func if isinstance(ctx, ast.Call) else ctx
-            if (
-                isinstance(target, ast.Attribute)
-                and isinstance(target.value, ast.Name)
-                and target.value.id == "app"
-                and target.attr == "setup"
-            ):
-                return True
-    return False
+    if code.startswith(_SENTINEL_PREFIX):
+        return code
+    try:
+        if not ast.parse(code).body:
+            return code
+    except SyntaxError:
+        return code
+    return _SENTINEL_PREFIX + code
 
 
-def _find_app_assignment_index(tree: ast.Module) -> int | None:
-    """Return the index just after ``app = marimo.App(...)``, skipping any
-    immediately-following ``with app.setup:`` block.
+# --- Pyodide bundled-package filter --------------------------------------
 
-    The bootstrap cell needs ``@app.cell`` to bind to the right
-    ``app`` object, so it must come after the assignment. It also
-    needs to come *after* any ``with app.setup:`` block — empirically,
-    inserting an ``@app.cell`` between ``app =`` and ``with app.setup:``
-    confuses marimo's runtime variable resolution and downstream cells
-    error out with ``name 'mo' is not defined``. Setup blocks are
-    nearly always immediately after ``app =`` in marimo notebooks, so
-    we just walk past them.
+_PYODIDE_LOCK_ENV = "MARIMO_PYODIDE_LOCK_FILE"
+_bundled_warned = False
 
-    Returns ``None`` when no ``app = ...`` is found (not a marimo
-    notebook in any meaningful sense, so we skip injection).
+
+def pyodide_bundled_packages(cache_dir: Path | None) -> frozenset[str] | None:
+    """Canonical names of packages bundled with the Pyodide release marimo targets.
+
+    Uses marimo's own resolver (``marimo._pyodide.pyodide_constraints``),
+    which honours ``$MARIMO_PYODIDE_LOCK_FILE`` for offline use and
+    otherwise fetches marimo's patched ``pyodide-lock.json`` once. The
+    result is cached under ``cache_dir`` keyed by marimo's pinned Pyodide
+    version, so a book build touches the network at most once per Pyodide
+    bump. Returns ``None`` (caller: don't filter) when the lockfile can't
+    be read — a stale or missing list must never *drop* an install.
     """
-    app_idx = None
-    for i, node in enumerate(tree.body):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "app":
-                    app_idx = i
-                    break
-            if app_idx is not None:
-                break
-    if app_idx is None:
+    global _bundled_warned
+    try:
+        from marimo._pyodide.pyodide_constraints import (
+            PYODIDE_VERSION,
+            fetch_pyodide_package_versions,
+        )
+    except ImportError:
         return None
+    cache_file = (
+        None
+        if cache_dir is None or _PYODIDE_LOCK_ENV in os.environ
+        else cache_dir / f"pyodide-bundled-{PYODIDE_VERSION}.json"
+    )
+    if cache_file is not None and cache_file.is_file():
+        try:
+            return frozenset(json.loads(cache_file.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+    try:
+        names = frozenset(_canonical_name(n) for n in fetch_pyodide_package_versions())
+    except Exception as exc:  # network / parse / msgspec — all mean "unknown"
+        if not _bundled_warned:
+            _bundled_warned = True
+            print(
+                f"  note: could not read Pyodide's package list ({exc.__class__.__name__}); "
+                "WASM pages will micropip-install their full dependency list.",
+                file=sys.stderr,
+            )
+        return None
+    if cache_file is not None:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(sorted(names)), encoding="utf-8")
+        except OSError:
+            pass
+    return names
 
-    # Skip past any ``with app.setup:`` block(s) that follow the assignment.
-    insert_idx = app_idx + 1
-    while insert_idx < len(tree.body):
-        node = tree.body[insert_idx]
-        if not isinstance(node, ast.With):
-            break
-        is_app_setup = False
-        for item in node.items:
-            ctx = item.context_expr
-            target = ctx.func if isinstance(ctx, ast.Call) else ctx
-            if (
-                isinstance(target, ast.Attribute)
-                and isinstance(target.value, ast.Name)
-                and target.value.id == "app"
-                and target.attr == "setup"
-            ):
-                is_app_setup = True
-                break
-        if not is_app_setup:
-            break
-        insert_idx += 1
-    return insert_idx
+
+def wasm_install_packages(
+    source: str,
+    *,
+    extras: Iterable[str] = (),
+    overrides: Mapping[str, str] | None = None,
+    pin: PinMode = "none",
+    cache_dir: Path | None = None,
+) -> list[str]:
+    """Requirement strings a WASM page must ``micropip.install`` in the browser.
+
+    The union of the import-derived list (:func:`derive_dependencies`, with
+    the book's ``extras``/``overrides``/``pin``) and any hand-written
+    ``dependencies`` in the notebook's own PEP 723 block — the same merge
+    :func:`write_pep723_block` performs for the staged manifest, so the
+    manifest the build ships and the list the browser installs agree.
+    Packages bundled with Pyodide are then removed: the islands runtime
+    auto-loads those via ``loadPackagesFromImports``, and handing a
+    host-pinned ``numpy==X`` to micropip would make it hunt PyPI for a
+    wheel Pyodide can't use.
+    """
+    # Same precedence as write_pep723_block: the notebook's own block wins on
+    # a canonical-name collision (a hand-written ``nltools==0.4.0`` must not
+    # be replaced by the unpinned import-derived ``nltools``), and derived
+    # entries only fill in names the block doesn't list.
+    merged: dict[str, str] = {}
+    for dep in read_existing_dependencies(source) or []:
+        merged.setdefault(_canonical_name(dep), dep)
+    derived = derive_dependencies(source, extras=extras, overrides=overrides, pin=pin)
+    for dep in derived:
+        merged.setdefault(_canonical_name(dep), dep)
+    bundled = pyodide_bundled_packages(cache_dir)
+    if bundled is not None:
+        merged = {k: v for k, v in merged.items() if k not in bundled}
+    return list(merged.values())

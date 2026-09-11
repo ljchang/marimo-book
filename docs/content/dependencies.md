@@ -111,38 +111,48 @@ which is typical for a course or long-form tutorial.
 
 `marimo-book` walks each notebook's AST, derives a dependency list
 (via marimo's own ~777-entry import → distribution mapping table),
-and stages a build-time copy with two things injected:
+and uses it in two ways:
 
-1. A **PEP 723 `# /// script` block** at the top of the file. This is
-   the standard inline-script-metadata format read by `uv run`,
+1. A **PEP 723 `# /// script` block** is written at the top of a
+   build-time staged copy of the notebook. This is the standard
+   inline-script-metadata format read by `uv run`,
    `marimo --sandbox`, molab, and any other PEP-723-aware tool.
-2. For WASM-mode pages only, a **`micropip` bootstrap** prepended to
-   the first `@app.cell` function:
+2. For WASM-mode pages only, a **`micropip` bootstrap cell** is shipped
+   to the browser inside marimo's islands JSON payload
+   (`<script type="application/vnd.marimo.islands+json">`, marimo ≥ 0.24):
    ```python
    try:
        import micropip
        await micropip.install(["nltools", "numpy", ...])
    except ImportError:
        pass
+   marimo_book_micropip_done = True
    ```
-   This is necessary because the marimo islands JS bundle that
-   renders WASM pages has no codepath for reading PEP 723 itself —
-   it auto-loads only Pyodide-bundled scientific packages
-   (numpy/pandas/scipy/sklearn/matplotlib/nilearn/nibabel/…) via
-   `loadPackagesFromImports`. Pure-Python PyPI-only deps (`nltools`
-   is the canonical case) silently fail to import without an
-   explicit `micropip.install`. Pyodide's micropip filters out
-   anything already in `sys.modules`, so passing the full dependency
-   list is safe — bundled packages no-op, non-bundled ones install.
+   Every other cell's payload code is prefixed with
+   `_ = marimo_book_micropip_done`, so marimo's dataflow runs the bootstrap
+   strictly first. The cell has no visible output and no island of its
+   own; the notebook the build *executes* is never modified for this. The
+   install list is the import-derived dependencies merged with any
+   hand-written `dependencies` in the notebook's own `# /// script` block,
+   minus packages Pyodide already bundles (marimo's lockfile resolver
+   supplies that list; set `MARIMO_PYODIDE_LOCK_FILE` to a local
+   `pyodide-lock.json` for offline builds — if it can't be read, the full
+   list is installed, which is safe but slower).
 
-   The `try/except ImportError` makes the cell safe to execute
-   under build-time CPython (where `micropip` doesn't exist) — only
-   the in-browser run actually installs.
+   This is necessary because the marimo islands runtime only installs
+   packages listed in a PEP 723 block of the notebook file it
+   synthesizes in the browser from cell code — and that file never
+   carries the block over. It still auto-loads Pyodide-bundled
+   scientific packages (numpy/pandas/scipy/sklearn/matplotlib/nilearn/
+   nibabel/…) via `loadPackagesFromImports`, so only pure-Python
+   PyPI-only deps (`nltools` is the canonical case) would fail without
+   the bootstrap. Pages whose imports are all bundled (or marimo-only)
+   get no payload at all.
 
 Your source `.py` files are never modified by the build.
 
-**For WASM pages, both injections are unconditional** — those pages
-don't work without them. For static or sandbox pages, opt in to the
+**For WASM pages, both are unconditional** — those pages don't work
+without them. For static or sandbox pages, opt in to the
 PEP 723 block via `book.yml`:
 
 ```yaml

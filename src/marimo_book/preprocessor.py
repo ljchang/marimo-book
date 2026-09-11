@@ -64,8 +64,7 @@ from .transforms.marimo_export import (
 )
 from .transforms.pep723 import (
     derive_dependencies,
-    has_app_setup_block,
-    inject_micropip_bootstrap,
+    wasm_install_packages,
     write_pep723_block,
 )
 from .transforms.precompute import (
@@ -367,7 +366,19 @@ def _book_signature(book: Book) -> str:
 # (transforms/wasm.py) — a render-output change, so cached bodies must invalidate.
 # "3": that hoist was a no-op on staged (ast.unparse'd) sources until 0.1.30
 # made extract_and_strip_title AST-based; bump again so the fixed output lands.
-_RENDER_OUTPUT_VERSION = "3"
+# "4": WASM micropip bootstrap moved from an AST-injected source cell to an
+# islands JSON payload appended to the body (transforms/wasm.py); cached
+# bodies rendered the old way would keep shipping the injected cell.
+_RENDER_OUTPUT_VERSION = "4"
+
+
+def _pyodide_version() -> str | None:
+    """The Pyodide release marimo's WASM runtime targets (``None`` if unknown)."""
+    try:
+        from marimo._pyodide.pyodide_constraints import PYODIDE_VERSION
+    except ImportError:
+        return None
+    return str(PYODIDE_VERSION)
 
 
 def _render_body_signature(book: Book) -> str:
@@ -394,6 +405,13 @@ def _render_body_signature(book: Book) -> str:
         "dependencies": book.dependencies.model_dump(mode="json"),
         "widget_defaults": book.widget_defaults,
         "render_output_version": _RENDER_OUTPUT_VERSION,
+        # WASM bodies bake in the micropip install list, which is filtered
+        # against the package set bundled with the Pyodide release marimo
+        # pins (transforms/pep723.py::wasm_install_packages). A marimo
+        # upgrade that moves to a new Pyodide can change that set, so track
+        # the Pyodide version — it changes far less often than marimo's own
+        # version, which deliberately stays out of this signature.
+        "pyodide_version": _pyodide_version(),
     }
     payload = json.dumps(relevant, sort_keys=True, default=str)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -476,13 +494,31 @@ def _splice_controls_inline(
     return body[:pos] + widget_html + "\n\n" + body[pos:]
 
 
+def _wasm_packages(src_abs: Path, deps_cfg: Dependencies, book_dir: Path) -> list[str]:
+    """Requirement strings a WASM page must ``micropip.install`` in the browser.
+
+    See :func:`~marimo_book.transforms.pep723.wasm_install_packages`: the
+    import-derived list merged with the notebook's own PEP 723 block
+    (matching the staged manifest) minus Pyodide-bundled packages. The
+    bundled list is cached under the book cache dir per Pyodide version.
+    Re-derives from the source notebook rather than threading the list out
+    of :func:`_maybe_stage_with_pep723` (one extra AST walk per WASM page).
+    """
+    return wasm_install_packages(
+        src_abs.read_text(encoding="utf-8"),
+        extras=deps_cfg.extras,
+        overrides=deps_cfg.overrides,
+        pin=deps_cfg.pin,
+        cache_dir=book_dir / _CACHE_DIR_NAME,
+    )
+
+
 @contextlib.contextmanager
 def _maybe_stage_with_pep723(
     src_abs: Path,
     deps_cfg: Dependencies,
     *,
     enabled: bool,
-    wasm_bootstrap: bool = False,
 ) -> Iterator[Path | None]:
     """Yield a path to a sibling-file copy of ``src_abs`` with PEP 723 injected.
 
@@ -492,15 +528,11 @@ def _maybe_stage_with_pep723(
     ``# /// script`` block to a sibling file in ``src_abs.parent`` (see
     :func:`~marimo_book.transforms.marimo_export.staged_sibling_file`).
 
-    When ``wasm_bootstrap=True`` (set for ``mode: wasm`` pages), also
-    AST-injects ``await micropip.install([...])`` into the first
-    ``@app.cell`` of the staged copy. Marimo's islands JS bundle has
-    no codepath that reads PEP 723 — Pyodide's ``loadPackagesFromImports``
-    auto-loads bundled scientific packages by import-scanning, but
-    pure-Python PyPI-only deps (the dartbrains-flavoured ``nltools``
-    case) silently fail. Shipping the install call inside cell code
-    is currently the only way to provision them. See
-    :func:`~marimo_book.transforms.pep723.inject_micropip_bootstrap`.
+    WASM pages need their pure-Python PyPI-only deps installed in the
+    browser too; that is no longer done here (it used to AST-inject a
+    micropip cell into this copy) but via an islands JSON payload built
+    at render time — see :func:`_wasm_packages` and
+    :func:`~marimo_book.transforms.wasm.build_bootstrap_payload`.
 
     The staged file lives next to the original notebook (rather than under
     ``.marimo_book_cache/``) so marimo's cell-execution cwd matches the
@@ -524,36 +556,7 @@ def _maybe_stage_with_pep723(
     )
     requires_python = deps_cfg.requires_python or _running_python_version_constraint()
 
-    # Order matters: AST-inject the bootstrap FIRST (round-trips through
-    # ast.unparse, dropping cell-level comments), then add the PEP 723
-    # block via the comment-preserving string-level writer. Doing it the
-    # other way around would have ast.unparse strip the just-written
-    # block too. Bootstrap fires only when wasm_bootstrap is set AND we
-    # have something to install.
     new_source = source
-    if wasm_bootstrap and deps:
-        # Setup blocks run before any @app.cell, so our sentinel-based
-        # ordering can't get the install in first. Pyodide auto-loads
-        # *bundled* scientific packages (numpy, pandas, scipy, sklearn,
-        # matplotlib, …) via ``loadPackagesFromImports`` during cell
-        # parsing, so a setup block whose imports are all bundled works
-        # fine. A setup block with any non-bundled import (the
-        # dartbrains-tools / nltools class) will fail before our
-        # bootstrap can run. We can't tell the two apart cheaply
-        # (there's no maintained Pyodide-bundle list in our pipeline),
-        # so on detection of any setup block we still inject the
-        # bootstrap (covers cells outside the setup block) and emit an
-        # advisory warning so the author can audit their setup imports.
-        if has_app_setup_block(source):
-            print(
-                f"  note: {src_abs.name} uses `with app.setup:`. Setup-block "
-                "imports run before WASM micropip install; make sure every "
-                "import there is in Pyodide's bundled package set, or move "
-                "non-bundled imports (nltools, dartbrains-tools, etc.) into "
-                "a regular `@app.cell` so the auto-install can run first.",
-                file=sys.stderr,
-            )
-        new_source = inject_micropip_bootstrap(new_source, deps)
     new_source = write_pep723_block(new_source, deps, requires_python=requires_python)
 
     with staged_sibling_file(src_abs, prefix="marimo_book_pep723_", content=new_source) as staged:
@@ -1188,9 +1191,7 @@ class Preprocessor:
     ) -> str:
         """Render a .py blog post to static markdown (reuses the page path)."""
         needs_pep723 = self.book.dependencies.auto_pep723
-        with _maybe_stage_with_pep723(
-            src, self.book.dependencies, enabled=needs_pep723, wasm_bootstrap=False
-        ) as staged:
+        with _maybe_stage_with_pep723(src, self.book.dependencies, enabled=needs_pep723) as staged:
             return _render_marimo(
                 staged or src, self.book, sandbox=False, on_cell_errors=on_cell_errors
             )
@@ -1357,22 +1358,21 @@ def stage_page(
 
     mode = entry.effective_mode(book.defaults.mode)
     if src_abs.suffix == ".py":
-        # WASM pages always get the staging pipeline (PEP 723 block +
-        # micropip bootstrap injected into the first cell, since the
-        # islands runtime can't otherwise provision pure-Python PyPI
-        # deps). Static / sandbox pages opt in via
-        # ``dependencies.auto_pep723`` and only get the PEP 723 block;
-        # the bootstrap is WASM-specific. The build never modifies the
-        # source ``.py`` — it writes a sibling tempdir copy and feeds
-        # marimo that copy. Sibling-tempdir location matches the
-        # existing precompute pattern so cwd-based relative imports
-        # inside the notebook still resolve.
+        # WASM pages always get the staging pipeline (PEP 723 block);
+        # static / sandbox pages opt in via ``dependencies.auto_pep723``.
+        # The build never modifies the source ``.py`` — it writes a
+        # sibling tempdir copy and feeds marimo that copy. Sibling-tempdir
+        # location matches the existing precompute pattern so cwd-based
+        # relative imports inside the notebook still resolve. WASM pages
+        # additionally get their derived dependency list handed to the
+        # renderer, which ships it as a micropip bootstrap cell inside an
+        # islands JSON payload (the islands runtime can't otherwise
+        # provision pure-Python PyPI-only deps).
         needs_pep723 = mode == "wasm" or book.dependencies.auto_pep723
         with _maybe_stage_with_pep723(
             src_abs,
             book.dependencies,
             enabled=needs_pep723,
-            wasm_bootstrap=mode == "wasm",
         ) as staged:
             if mode == "wasm":
                 # WASM-mode pages bypass our static cell rendering. Marimo's
@@ -1383,6 +1383,7 @@ def stage_page(
                     src_abs,
                     staged_source_path=staged,
                     timeout=book.defaults.execution_timeout,
+                    packages=_wasm_packages(src_abs, book.dependencies, book_dir),
                 )
                 apply_rewrites = False
             else:
@@ -1470,7 +1471,6 @@ def render_py_body(
         src_abs,
         book.dependencies,
         enabled=book.dependencies.auto_pep723,
-        wasm_bootstrap=False,
     ) as staged:
         return _render_marimo(
             staged or src_abs, book, sandbox=sandbox, on_cell_errors=on_cell_errors

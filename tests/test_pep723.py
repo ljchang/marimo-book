@@ -12,9 +12,12 @@ from marimo_book.transforms.pep723 import (
     derive_dependencies,
     extract_imports,
     has_pep723_block,
-    inject_micropip_bootstrap,
     map_to_distributions,
+    micropip_bootstrap_code,
+    pyodide_bundled_packages,
     read_existing_dependencies,
+    thread_bootstrap_sentinel,
+    wasm_install_packages,
     write_pep723_block,
 )
 
@@ -256,166 +259,131 @@ def test_read_existing_dependencies_empty_block() -> None:
     assert read_existing_dependencies(src) == []
 
 
-# --- inject_micropip_bootstrap ----------------------------------------------
+# --- WASM micropip bootstrap (payload cell helpers) --------------------------
 
 
-_NOTEBOOK_SRC = """import marimo
+def test_bootstrap_code_installs_packages_and_always_binds_sentinel() -> None:
+    """The payload cell body awaits the install and binds the sentinel last.
+
+    ``await`` is what makes marimo's islands runtime wrap the synthesized
+    cell as ``async def``. The sentinel must be bound even when the install
+    raises: every user cell reads it, so an unbound sentinel would cancel
+    the whole page — and the anchor-less bootstrap cell has no island to
+    show a traceback in. Hence a catch-all that prints instead of raising.
+    """
+    code = micropip_bootstrap_code(["nltools", "numpy>=1.26"])
+    assert "await micropip.install(['nltools', 'numpy>=1.26'])" in code
+    assert code.rstrip().endswith("marimo_book_micropip_done = True")
+    assert "except ImportError:" in code
+    assert "except Exception as _exc:" in code
+    # The sentinel assignment is at top level, after the try block.
+    assert code.index("except Exception") < code.index("marimo_book_micropip_done = True")
+    compile(code.replace("await ", ""), "<bootstrap>", "exec")
+
+
+def test_thread_sentinel_prefixes_assignment() -> None:
+    out = thread_bootstrap_sentinel("import nltools\nnltools.__version__")
+    assert out.startswith("_ = marimo_book_micropip_done\n")
+    # Body untouched below the prefix — including the last expression,
+    # which is what marimo displays as the cell output.
+    assert out.endswith("import nltools\nnltools.__version__")
+
+
+def test_thread_sentinel_creates_dataflow_edge_without_a_def() -> None:
+    """marimo must see the sentinel as a ref and ``_`` as cell-local (no def)."""
+    from marimo._ast.compiler import compile_cell
+
+    cell = compile_cell(thread_bootstrap_sentinel("x = 1"), cell_id="t")
+    assert "marimo_book_micropip_done" in cell.refs
+    assert "_" not in cell.defs
+
+
+def test_thread_sentinel_idempotent() -> None:
+    once = thread_bootstrap_sentinel("x = 1")
+    assert thread_bootstrap_sentinel(once) == once
+
+
+def test_thread_sentinel_leaves_statement_free_cells_alone() -> None:
+    """Empty and comment-only bodies compile to no statements; the runtime
+    emits ``pass`` for them and a prefix would become their (displayed)
+    last expression."""
+    assert thread_bootstrap_sentinel("") == ""
+    assert thread_bootstrap_sentinel("   \n") == "   \n"
+    assert thread_bootstrap_sentinel("# scratch\n") == "# scratch\n"
+
+
+def test_thread_sentinel_mention_in_comment_still_prefixed() -> None:
+    """Only the exact prefix counts as already-threaded; a cell that merely
+    mentions the sentinel in a comment or string must still get the edge."""
+    src = "# see marimo_book_micropip_done\nimport nltools"
+    assert thread_bootstrap_sentinel(src) == "_ = marimo_book_micropip_done\n" + src
+
+
+# --- wasm_install_packages ---------------------------------------------------
+
+
+def test_bundled_packages_come_from_lockfile_fixture() -> None:
+    bundled = pyodide_bundled_packages(None)
+    assert bundled is not None
+    assert {"numpy", "pandas"} <= bundled
+    # ``-tests`` entries are excluded by marimo's resolver.
+    assert "numpy-tests" not in bundled
+
+
+def test_bundled_packages_unreadable_lockfile_returns_none(monkeypatch, tmp_path) -> None:
+    """An unreadable lockfile must mean "don't filter", never "drop installs"."""
+    monkeypatch.setenv("MARIMO_PYODIDE_LOCK_FILE", str(tmp_path / "missing.json"))
+    assert pyodide_bundled_packages(None) is None
+
+
+def test_bundled_packages_cached_on_disk_per_pyodide_version(monkeypatch, tmp_path) -> None:
+    """Without the env override the list is read from / written to the cache dir."""
+    from marimo._pyodide.pyodide_constraints import PYODIDE_VERSION
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / f"pyodide-bundled-{PYODIDE_VERSION}.json").write_text('["onlythis"]')
+    monkeypatch.delenv("MARIMO_PYODIDE_LOCK_FILE")
+    assert pyodide_bundled_packages(cache) == frozenset({"onlythis"})
+
+
+_WASM_SRC = """# /// script
+# dependencies = ["pandas", "pyarrow>=15"]
+# ///
+import marimo
 app = marimo.App()
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _():
-    import marimo as mo
-    return (mo,)
-
-
-@app.cell
-def _(mo):
+    import numpy
+    import pandas as pd
     import nltools
-    return (nltools,)
-"""
-
-
-def test_inject_bootstrap_inserts_one_async_cell() -> None:
-    """A single new ``@app.cell`` carries the install; existing cells stay sync.
-
-    An earlier prepend-into-existing design converted user cells to
-    ``async def`` and broke real notebooks (cells whose body raised
-    before their return statement stopped exporting variables, leading
-    to ``Name 'mo' is not defined`` cascades downstream). The current
-    design adds ONE new async cell at the top and leaves user cell
-    bodies untouched — only their parameter lists gain a sentinel
-    (verified by the next test).
-    """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools", "numpy"])
-    assert out.count("async def _") == 1
-    assert out.count("await micropip.install(['nltools', 'numpy'])") == 1
-    # User cell bodies survive without modification.
-    assert "import marimo as mo" in out
-    assert "import nltools" in out
-
-
-def test_inject_bootstrap_threads_sentinel_to_every_cell() -> None:
-    """Every existing ``@app.cell`` gains the sentinel parameter.
-
-    Marimo's static analyzer reads parameter names as the cell's input
-    variables. Adding the sentinel makes every existing cell depend on
-    the bootstrap, so marimo's dataflow scheduler runs the bootstrap
-    before any other cell — even if the source-order-first cell only
-    does ``mo.md(...)`` and would otherwise be runtime-second.
-    """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    sentinel = "_marimo_book_micropip_done"
-    # Two original cells; both should now have the sentinel as a parameter.
-    # The bootstrap cell defines + returns it (so it appears in `return (...)`).
-    assert out.count(f"def _({sentinel})") + out.count(f", {sentinel})") == 2
-    # The bootstrap cell's body sets and returns the sentinel.
-    assert f"{sentinel} = True" in out
-    assert f"return ({sentinel},)" in out
-
-
-def test_inject_bootstrap_no_double_threading_on_re_run() -> None:
-    """Running the injector twice doesn't add the sentinel parameter twice."""
-    once = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    twice = inject_micropip_bootstrap(once, ["nltools"])
-    # The sentinel parameter should appear exactly the same number of times,
-    # not be duplicated. Count occurrences in the args (after a comma-or-paren).
-    sentinel_in_params = twice.count("_marimo_book_micropip_done)") + twice.count(
-        "_marimo_book_micropip_done,"
-    )
-    once_count = once.count("_marimo_book_micropip_done)") + once.count(
-        "_marimo_book_micropip_done,"
-    )
-    assert sentinel_in_params == once_count
-
-
-def test_inject_bootstrap_handles_notebook_without_app_assignment() -> None:
-    """A file without an ``app = marimo.App(...)`` assignment is unchanged.
-
-    Not a marimo notebook in any meaningful sense; we skip rather than
-    insert a bootstrap that would have no app to decorate.
-    """
-    src = "@app.cell\ndef _():\n    import nltools\n    return (nltools,)\n"
-    assert inject_micropip_bootstrap(src, ["nltools"]) == src
-
-
-def test_inject_bootstrap_wraps_in_try_except() -> None:
-    """Build-time CPython lacks micropip; the wrapper must swallow ImportError.
-
-    Without this, the build crashes when MarimoIslandGenerator.build()
-    runs the cell locally before the browser ever sees it.
-    """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    assert "try:" in out
-    assert "except ImportError:" in out
-
-
-def test_inject_bootstrap_preserves_decorator_kwargs() -> None:
-    """The ``@app.cell(hide_code=True)`` form survives the AST round-trip."""
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["pkg"])
-    assert "@app.cell(hide_code=True)" in out
-
-
-def test_inject_bootstrap_handles_already_async_user_cell() -> None:
-    """User cells already authored as ``async def`` keep their signature.
-
-    The new design adds one separate bootstrap cell + a sentinel
-    parameter to existing cells. An async user cell stays async, gains
-    the sentinel, and its body is untouched.
-    """
-    src = """import marimo
-
-app = marimo.App()
-
-
-@app.cell
-async def _():
-    import some_pkg
-
-    await some_async_thing()
     return
 """
-    out = inject_micropip_bootstrap(src, ["pkg"])
-    # Two ``async def _`` lines: the new bootstrap + the original async cell.
-    assert out.count("async def _") == 2
-    # User cell's body stays — the await line is preserved.
-    assert "await some_async_thing()" in out
 
 
-def test_inject_bootstrap_empty_packages_no_op() -> None:
-    """Empty package list returns source unchanged."""
-    assert inject_micropip_bootstrap(_NOTEBOOK_SRC, []) == _NOTEBOOK_SRC
+def test_wasm_install_packages_merges_block_and_drops_bundled() -> None:
+    """Import-derived ∪ hand-written PEP 723 deps, minus Pyodide-bundled.
 
-
-def test_inject_bootstrap_no_app_cell_no_op() -> None:
-    """A file without ``@app.cell`` decorators is returned unchanged.
-
-    Possible cases: a marimo notebook stub still being authored, or a
-    plain Python script accidentally fed to this function.
+    ``pyarrow`` only appears in the notebook's own block (no import), so it
+    must survive; numpy/pandas are bundled in the fixture lock and go.
     """
-    src = "import marimo\napp = marimo.App()\n"
-    assert inject_micropip_bootstrap(src, ["pkg"]) == src
+    pkgs = wasm_install_packages(_WASM_SRC)
+    assert set(pkgs) == {"nltools", "pyarrow>=15"}
 
 
-def test_inject_bootstrap_syntax_error_no_op() -> None:
-    """Malformed source returns unchanged rather than crashing the build."""
-    src = "def : not python\n"
-    assert inject_micropip_bootstrap(src, ["pkg"]) == src
+def test_wasm_install_packages_hand_written_pin_wins() -> None:
+    """A pin in the notebook's own block beats the unpinned import-derived
+    name — the same precedence ``write_pep723_block`` gives the staged
+    manifest, so sandbox/molab and the browser install the same thing."""
+    src = _WASM_SRC.replace('"pandas", "pyarrow>=15"', '"nltools==0.4.0", "pyarrow>=15"')
+    pkgs = wasm_install_packages(src)
+    assert "nltools==0.4.0" in pkgs
+    assert "nltools" not in pkgs
 
 
-def test_inject_bootstrap_runs_before_user_cells_at_runtime() -> None:
-    """The bootstrap cell appears before any user ``@app.cell`` in source.
-
-    Marimo's dataflow scheduler doesn't follow source order; what
-    actually orders the bootstrap first at *runtime* is the sentinel
-    parameter on every other cell. Source order matters only for
-    decorator binding (the new ``@app.cell`` needs to bind to ``app``,
-    so it must come after the ``app = marimo.App(...)`` assignment).
-    Both invariants are checked here.
-    """
-    out = inject_micropip_bootstrap(_NOTEBOOK_SRC, ["nltools"])
-    app_pos = out.index("app = marimo.App()")
-    bootstrap_pos = out.index("await micropip.install")
-    first_user_cell_pos = out.index("def _(_marimo_book_micropip_done):")
-    # Bootstrap is between `app = ...` and the first existing cell.
-    assert app_pos < bootstrap_pos < first_user_cell_pos
+def test_wasm_install_packages_without_lockfile_keeps_everything(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MARIMO_PYODIDE_LOCK_FILE", str(tmp_path / "missing.json"))
+    pkgs = wasm_install_packages(_WASM_SRC)
+    assert {"numpy", "pandas", "nltools", "pyarrow>=15"} <= set(pkgs)

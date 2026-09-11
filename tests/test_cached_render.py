@@ -348,3 +348,23 @@ def test_cached_page_with_committed_cell_error_fails_strict_build(tmp_path: Path
     assert report.pages_cached > 0  # sourced from the committed artifact
     assert not report.ok
     assert any("ValueError: boom" in e for e in report.errors)
+
+
+def test_render_body_sig_tracks_pyodide_version(tmp_path: Path) -> None:
+    """A marimo upgrade that moves to a new Pyodide must invalidate WASM bodies.
+
+    The micropip install list baked into a WASM body is filtered against the
+    packages bundled with marimo's pinned Pyodide release; if that release
+    changes, a cached body could keep omitting a package Pyodide no longer
+    bundles. marimo's *own* version stays out of the signature on purpose.
+    """
+    from unittest.mock import patch
+
+    from marimo_book.preprocessor import _render_body_signature
+
+    book = Book.model_validate({"title": "T", "toc": [{"file": "nb.py"}]})
+    with patch("marimo_book.preprocessor._pyodide_version", return_value="314.0.0"):
+        sig_a = _render_body_signature(book)
+    with patch("marimo_book.preprocessor._pyodide_version", return_value="315.0.0"):
+        sig_b = _render_body_signature(book)
+    assert sig_a != sig_b

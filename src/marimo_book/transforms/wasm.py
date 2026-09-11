@@ -22,35 +22,40 @@ The head + body are concatenated and embedded in the staged ``.md``.
 so Material's content area controls width.
 
 **Dependency loading in islands (and why PEP 723 alone doesn't fix it).**
-``MarimoIslandGenerator`` does not propagate any dependency manifest
-into its rendered HTML, and the ``@marimo-team/islands`` worker
-bundle has no codepath that reads ``<marimo-code>`` or PEP 723
-metadata from the page. The bundle uses two distinct package paths:
+The ``@marimo-team/islands`` worker is marimo's regular WASM controller,
+so it *does* run ``find_packages()`` + ``micropip.install(missing)`` on
+the notebook file it starts — but that file is synthesized in the
+browser from the per-cell code (``createMarimoFile`` in
+``frontend/src/core/islands/parse.ts``), indented four spaces per line,
+with no header. ``find_packages()`` (since marimo dropped import
+scanning) only honours a column-zero ``# /// script`` block, which the
+synthesized file can never contain, so the install list is always empty.
+Pyodide's ``loadPackagesFromImports`` still auto-loads *bundled*
+scientific packages (numpy, pandas, scipy, sklearn, matplotlib, nilearn,
+nibabel, …) by AST-scanning cell code; anything pure-Python and
+PyPI-only (``nltools``, ``dartbrains-tools``) silently fails to import.
+Upstream tracking: marimo-team/marimo#9778.
 
-- ``pyodide.loadPackagesFromImports(cell_source)`` — auto-loads
-  Pyodide-bundled scientific packages (numpy, pandas, scipy, sklearn,
-  matplotlib, sympy, nilearn, nibabel, …) by AST-scanning cell code
-  for imports. This is how most scientific notebooks "just work".
-- ``micropip.install(<hardcoded list>)`` at bootstrap — installs
-  marimo itself plus a fixed set (jedi, pygments, docutils,
-  pyodide_http, plus pandas/duckdb/sqlglot/pyarrow when ``mo.sql``
-  or polars is detected). The list is baked into the JS bundle; no
-  path lets a notebook's PEP 723 block extend it.
-
-The result for dartbrains-flavoured pages: any third-party package
-that's pure-Python on PyPI but **not** in Pyodide's bundle (the
-canonical example being ``nltools``) silently fails to import in the
-browser, and there is no add-deps hook in the islands runtime to fix
-it from the host page. The fundamental fix requires either switching
-this module to ``marimo export html-wasm`` (which DOES read PEP 723)
-or upstream changes to the islands runtime.
+Our workaround rides on the islands JSON payload marimo added in 0.24
+(``<script type="application/vnd.marimo.islands+json">``,
+marimo-team/marimo#9987). When a payload is present the runtime takes
+cell code from it instead of the DOM, and payload cells with no matching
+``<marimo-island>`` anchor are still sent to the kernel. So
+:func:`build_bootstrap_payload` emits marimo's own payload with two
+edits: an extra anchor-less cell that ``await micropip.install([...])``s
+the derived dependency list and defines a sentinel variable, and every
+user cell's code prefixed with a bare reference to that sentinel so
+marimo's dataflow runs the bootstrap first. The staged notebook that
+``gen.build()`` executes is never modified for this (the earlier
+approach AST-injected the same cell into the source, which round-tripped
+every page through ``ast.unparse``). ``with app.setup:`` blocks are
+ordinary cells to the islands runtime, so they are covered too.
 
 The preprocessor still stages a copy of the notebook with an
 auto-generated PEP 723 block before handing it to
-``MarimoIslandGenerator`` — that block is invisible to the islands
-runtime today, but it's the correct manifest, useful for sandbox
-mode, ``marimo-book sync-deps`` (molab portability), and as the
-prerequisite for any future migration to the html-wasm export path.
+``MarimoIslandGenerator`` — the correct manifest for sandbox mode,
+``marimo-book sync-deps`` (molab portability), and the day upstream
+carries the block into the runtime file.
 
 Static reactivity (``precompute.enabled``) is automatically a no-op
 for WASM-rendered pages: the preprocessor's ``_run_precompute`` is
@@ -90,12 +95,24 @@ import asyncio
 import html as _html
 import re
 import textwrap
+from collections.abc import Sequence
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from marimo import MarimoIslandGenerator
+
+# Same private-module rationale as transforms/pep723.py (see the marimo pin
+# comment in pyproject.toml): importing the constant and the escaper marimo's
+# own render_payload_script() uses means a rename upstream surfaces as an
+# ImportError at the pin bump instead of a silently ignored script tag.
+from marimo._schemas.islands import ISLANDS_JSON_SCRIPT_TYPE
+from marimo._templates import json_script
 
 from .anywidgets import rewrite_anywidget_html
 from .marimo_export import staged_sibling_file
+from .pep723 import BOOTSTRAP_CELL_ID, micropip_bootstrap_code, thread_bootstrap_sentinel
+
+ISLANDS_PAYLOAD_SCRIPT_TYPE = ISLANDS_JSON_SCRIPT_TYPE
 
 
 def _first_mo_md_constant(tree: ast.AST) -> ast.Constant | None:
@@ -164,6 +181,7 @@ def render_wasm_page(
     display_code: bool = False,
     staged_source_path: Path | None = None,
     timeout: float | None = None,
+    packages: Sequence[str] = (),
 ) -> str:
     """Render a marimo notebook as a WASM-interactive page body.
 
@@ -186,31 +204,49 @@ def render_wasm_page(
     kernel knows which packages to ``micropip.install`` before any
     cell runs. ``py_path`` is still accepted for backwards
     compatibility and standalone test usage.
+
+    ``packages``: PyPI requirement strings to ``micropip.install`` in the
+    browser before any cell runs. When non-empty the page gets an islands
+    JSON payload with a bootstrap cell (see :func:`build_bootstrap_payload`);
+    when empty no payload is emitted and the runtime parses the DOM as
+    before.
     """
     target = staged_source_path or py_path
     # Hoist the notebook's first ``# H1`` to a real ``<h1>`` at the top of the
     # page (see extract_and_strip_title): otherwise MkDocs Material can't see
     # the islands-encoded heading and injects the nav title, duplicating it.
     title, stripped = extract_and_strip_title(target.read_text(encoding="utf-8"))
-    if title:
-        with staged_sibling_file(
-            target, prefix="marimo_book_title_", content=stripped
-        ) as stripped_target:
-            body = _render_wasm_body(
-                stripped_target, display_code=display_code, timeout=timeout, py_path=py_path
-            )
-        return f"<h1>{_html.escape(title)}</h1>\n\n" + body
-    return _render_wasm_body(target, display_code=display_code, timeout=timeout, py_path=py_path)
+    if not title:
+        return _render_wasm_body(
+            target, display_code=display_code, timeout=timeout, py_path=py_path, packages=packages
+        )
+    with staged_sibling_file(
+        target, prefix="marimo_book_title_", content=stripped
+    ) as stripped_target:
+        body = _render_wasm_body(
+            stripped_target,
+            display_code=display_code,
+            timeout=timeout,
+            py_path=py_path,
+            packages=packages,
+        )
+    return f"<h1>{_html.escape(title)}</h1>\n\n" + body
 
 
 def _render_wasm_body(
-    target: Path, *, display_code: bool, timeout: float | None, py_path: Path
+    target: Path,
+    *,
+    display_code: bool,
+    timeout: float | None,
+    py_path: Path,
+    packages: Sequence[str] = (),
 ) -> str:
     """Build the islands head + body for ``target`` (see render_wasm_page)."""
     gen = MarimoIslandGenerator.from_file(str(target), display_code=display_code)
-    # ``gen.build()`` executes the notebook in-process (no subprocess), so it
-    # doesn't get export_notebook's timeout for free — bound it here so a
-    # hung wasm notebook can't stall build/serve/CI.
+    # ``gen.build()`` executes the notebook through marimo's own session
+    # machinery (not our ``marimo export`` subprocess), so it doesn't get
+    # export_notebook's timeout for free — bound it here so a hung wasm
+    # notebook can't stall build/serve/CI.
     try:
         asyncio.run(asyncio.wait_for(gen.build(), timeout))
     except TimeoutError as exc:
@@ -226,12 +262,11 @@ def _render_wasm_body(
     # show a stuck spinner above already-working reactive cells. Cells'
     # static-export initial output already gives the user something to
     # look at during hydration, so dropping the spinner is a clear UX win.
-    # ``include_payload`` (marimo >= 0.24, marimo-team/marimo#9987) is left at
-    # its default (off): the islands runtime then recovers cell source and
-    # metadata from the DOM, which upstream keeps as the supported fallback.
-    # Opting in would duplicate every cell's output HTML inside a JSON
-    # script tag and change the body our anywidget rewrite + cache key see,
-    # for no functional gain on our pages. Revisit if DOM parsing is dropped.
+    # ``include_payload`` (marimo >= 0.24, marimo-team/marimo#9987) stays
+    # off here: when a page needs the micropip bootstrap we build our own
+    # copy of that payload below (build_bootstrap_payload) from the
+    # *rewritten* body; pages without PyPI-only deps stay on the DOM-parsing
+    # path, which upstream keeps as the supported fallback.
     body = gen.render_body(style="", include_init_island=False)
     # Re-target anywidgets to our static-shim mount form. See module docstring
     # for the full rationale; in short, marimo's islands runtime won't load
@@ -242,5 +277,95 @@ def _render_wasm_body(
     # `notebook_source` enables the AST-driven `data-driven-by` injection so
     # the shim's rerender() can pull live UIElement values into widget traits.
     notebook_source = target.read_text(encoding="utf-8")
+    raw_body = body
     body = rewrite_anywidget_html(body, keep_marimo_controls=True, notebook_source=notebook_source)
+    if packages:
+        # Must come AFTER the anywidget rewrite: the payload copies each
+        # island's (rewritten) output HTML so the runtime's materialization
+        # writes back exactly what the DOM already shows. Emitted as a plain
+        # <script type=...> because that is the shape the islands runtime
+        # queries for. Caveat: Material's navigation.instant re-creates
+        # inline scripts on page swap and drops the type attribute (the
+        # hazard precompute.py dodges with <template>). Harmless today —
+        # islands only initialize on a full document load, never on an
+        # instant-nav arrival — but if that is ever wired up, this script
+        # will need the same treatment.
+        payload = build_bootstrap_payload(gen, body, packages, rewritten=body != raw_body)
+        body += "\n" + payload_script(payload)
     return head + "\n" + body
+
+
+def build_bootstrap_payload(
+    gen: MarimoIslandGenerator,
+    body_html: str,
+    packages: Sequence[str],
+    *,
+    rewritten: bool = True,
+) -> dict:
+    """Marimo's islands payload for ``gen`` plus a micropip bootstrap cell.
+
+    Starts from ``gen.render_payload()`` (schema v1: ``schemaVersion``,
+    ``appId``, ``cells[{cellId, code, outputHtml, outputMimetype, reactive,
+    displayCode, displayOutput}]``) and applies two edits:
+
+    - **A bootstrap cell is prepended** with ``cellId`` =
+      :data:`~marimo_book.transforms.pep723.BOOTSTRAP_CELL_ID`, no output,
+      ``displayOutput: false``. It has no ``<marimo-island>`` anchor in the
+      DOM; the runtime's payload parser only requires that *some* cell of
+      the payload matches an anchor, and still puts every payload cell into
+      the notebook file it synthesizes for the kernel.
+    - **Every reactive cell's code gets the sentinel prefix** (see
+      :func:`~marimo_book.transforms.pep723.thread_bootstrap_sentinel`) so
+      marimo's dataflow runs the bootstrap before it.
+
+    When ``rewritten`` is true, ``outputHtml`` for anchored cells is taken
+    from ``body_html`` (the anywidget-rewritten island markup) rather than
+    from marimo's raw output: the runtime overwrites each anchored island's
+    ``<marimo-cell-output>`` with the payload's ``outputHtml`` when it
+    materializes the payload — which happens once the Pyodide worker is
+    ready, i.e. *after* ``marimo_book.js`` has hydrated the page — so the two
+    must agree, and the shim re-hydrates on the runtime's
+    ``marimo-island-source-changed`` event. When nothing was rewritten the
+    payload's own output HTML is already identical and the re-parse is
+    skipped.
+    """
+    payload = dict(gen.render_payload())
+    outputs: dict[str, str] = {}
+    if rewritten:
+        soup = BeautifulSoup(body_html, "html.parser")
+        for island in soup.find_all("marimo-island"):
+            cell_id = island.get("data-cell-id")
+            output = island.find("marimo-cell-output")
+            if cell_id and output is not None:
+                outputs[str(cell_id)] = output.decode_contents()
+
+    cells = []
+    for cell in payload["cells"]:
+        cell = dict(cell)
+        if cell["cellId"] in outputs:
+            cell["outputHtml"] = outputs[cell["cellId"]]
+        if cell.get("reactive"):
+            cell["code"] = thread_bootstrap_sentinel(cell["code"])
+        cells.append(cell)
+
+    bootstrap = {
+        "cellId": BOOTSTRAP_CELL_ID,
+        "code": micropip_bootstrap_code(packages),
+        "outputHtml": "",
+        "outputMimetype": "text/plain",
+        "reactive": True,
+        "displayCode": False,
+        "displayOutput": False,
+    }
+    payload["cells"] = [bootstrap, *cells]
+    return payload
+
+
+def payload_script(payload: dict) -> str:
+    """Serialize ``payload`` into the ``<script>`` tag the islands runtime reads.
+
+    Delegates escaping to marimo's ``json_script`` (``<``, ``>``, ``&`` as
+    ``\\uXXXX``) — the same helper ``render_payload_script`` uses — so cell
+    output HTML inside the JSON can never terminate the script element.
+    """
+    return f'<script type="{ISLANDS_PAYLOAD_SCRIPT_TYPE}">{json_script(payload)}</script>'

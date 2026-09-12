@@ -121,6 +121,23 @@ def load_widget_states(sidecar: Path) -> dict[str, WidgetModelState]:
     return out
 
 
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def normalize_gzip_mtime(blob: bytes) -> bytes:
+    """Zero the MTIME field of a gzip member so identical payloads hash alike.
+
+    ``gzip.compress()`` stamps the current time into bytes 4–8 of the header,
+    so the same volume compressed on two exports yields different bytes and
+    two blobs in the store (a precompute grid re-exports per slider value).
+    The timestamp is metadata: zeroing it leaves a valid stream that inflates
+    to the same payload. Non-gzip blobs pass through untouched.
+    """
+    if len(blob) >= 10 and blob[:2] == _GZIP_MAGIC and blob[4:8] != b"\x00\x00\x00\x00":
+        return blob[:4] + b"\x00\x00\x00\x00" + blob[8:]
+    return blob
+
+
 class BufferStore:
     """Content-addressed blob directory: ``<root>/<sha256>.bin``."""
 
@@ -128,6 +145,7 @@ class BufferStore:
         self.root = Path(root)
 
     def put(self, blob: bytes) -> str:
+        blob = normalize_gzip_mtime(blob)
         digest = hashlib.sha256(blob).hexdigest()
         path = self.path(digest)
         if not path.exists():

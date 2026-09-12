@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cell — now including its baked buffers — was copied into the lookup table
   once per slider value. The diff key masks those ids; real state
   differences (traits, buffer content hashes, ESM) still register.
+- **Identical gzip buffers never de-duplicated.** `gzip.compress()` stamps
+  the current time into the header, so the same volume produced on two
+  exports hashed differently and the store kept one copy per render.
+  `BufferStore` now zeroes the gzip MTIME field before hashing (a valid
+  stream with the same payload); nltools' viewer volumes and any other
+  gzip-compressed trait collapse to one blob per distinct payload. On
+  dartbrains' Connectivity chapter this plus the model-id masking takes the
+  precomputed grid from ~100 MB of volumes to roughly one per component.
 
 ## [0.1.32] — 2026-09-11
 

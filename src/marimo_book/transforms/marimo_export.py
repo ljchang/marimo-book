@@ -37,6 +37,13 @@ from pathlib import Path
 
 from .anywidgets import contains_anywidget, rewrite_anywidget_html
 from .callouts import render_callout_html
+from .mime_outputs import (
+    MIMEBUNDLE_MIME,
+    VEGA_MIME_TYPES,
+    render_json_output,
+    render_mimebundle,
+    render_vega_mount,
+)
 
 # Marimo metadata lives under ``cell.metadata["marimo"]`` in the exported
 # notebook. The key names we care about for v0.1:
@@ -553,6 +560,34 @@ def _render_mime_bundle(
                 esm_by_model=esm_by_model,
             )
         return md
+    # marimo formats a bare list/tuple/dict as application/json and an
+    # Altair chart as a Vega(-Lite) spec — neither has an HTML form, so
+    # without these branches the cell shows code and no output (#73).
+    for mime in VEGA_MIME_TYPES:
+        if mime in data:
+            return f'<div class="marimo-book-output">\n{render_vega_mount(_as_str(data[mime]), mime)}\n</div>'
+    if "application/json" in data:
+        raw = data["application/json"]
+        raw = raw if isinstance(raw, str) else json.dumps(raw)
+        return f'<div class="marimo-book-output">\n{render_json_output(raw)}\n</div>'
+    if MIMEBUNDLE_MIME in data:
+        # A nested {mime: data} dict (e.g. an Altair chart rendered to PNG
+        # with metadata). Route its entries back through this picker so
+        # HTML inside still gets the custom-element rewriter.
+        try:
+            inner = json.loads(_as_str(data[MIMEBUNDLE_MIME]))
+        except ValueError:
+            inner = None
+        if isinstance(inner, dict) and ("text/html" in inner or "text/markdown" in inner):
+            inner.pop("__metadata__", None)
+            return _render_mime_bundle(
+                inner,
+                cell_source=cell_source,
+                widget_defaults=widget_defaults,
+                esm_by_model=esm_by_model,
+            )
+        rendered = render_mimebundle(_as_str(data[MIMEBUNDLE_MIME]))
+        return f'<div class="marimo-book-output">\n{rendered}\n</div>' if rendered else ""
     for mime in ("image/png", "image/jpeg"):
         if mime in data:
             return _render_image(_as_str(data[mime]), mime)

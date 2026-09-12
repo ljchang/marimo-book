@@ -372,7 +372,10 @@ def _book_signature(book: Book) -> str:
 # "5": anywidget mounts get data-js-url restored from the session view
 # (marimo >= 0.24 dropped it from the element); bodies rendered before carry
 # empty widgets in every mode.
-_RENDER_OUTPUT_VERSION = "5"
+# "6": application/json (bare list/dict), Vega(-Lite) (Altair) and the
+# <marimo-json-output> / <marimo-mime-renderer> elements now render; bodies
+# rendered before show no output for those cells (#73).
+_RENDER_OUTPUT_VERSION = "6"
 
 
 def _pyodide_version() -> str | None:

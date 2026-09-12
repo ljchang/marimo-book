@@ -5,6 +5,27 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **List, dict and Altair outputs rendered as nothing on static pages** (#73).
+  marimo formats a bare `list`/`tuple`/`dict` as an `application/json`
+  bundle and an Altair chart as a Vega(-Lite) spec — neither has an HTML
+  form — and, inside `mo.vstack` & co., as `<marimo-json-output>` /
+  `<marimo-mime-renderer>` custom elements that only marimo's frontend can
+  draw. The mime picker skipped the bundles and the rewriter passed the
+  elements through, so the page showed code and no output. New
+  `transforms/mime_outputs.py`: JSON structures become a fully static
+  `<ul>` tree (marimo's `text/plain+<type>:` leaf/key markers decoded to
+  Python literals; nested rich objects, `value_types`, `name` honoured);
+  Vega specs become a `<div class="marimo-book-vega" data-spec>` mount that
+  `marimo_book.js` hydrates with vega-embed from jsdelivr — the Plotly
+  pattern — re-embedding on the light/dark toggle.
+  `application/vnd.marimo+mimebundle` payloads are unpacked too. Docs:
+  live Altair + dict demos on the Widgets page (`altair` added to the docs
+  CI install and the `dev` extra). Bumped `_RENDER_OUTPUT_VERSION` to `6`.
+
 ## [0.1.31] — 2026-09-11
 
 ### Fixed

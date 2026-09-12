@@ -82,6 +82,9 @@ dev = [
     # The anywidget regression tests execute a notebook that defines an
     # inline widget class (tests/test_anywidget_esm.py).
     "anywidget>=0.9",
+    # Altair regression test (tests/test_mime_outputs.py) exports a real
+    # chart; skipped when altair is missing.
+    "altair>=5.0",
 ]
 # Opt-in external link checking during `marimo-book build`. Enable via
 # `check_external_links: true` in book.yml and install this extra.

@@ -75,6 +75,11 @@ from .transforms.precompute import (
     scan_widgets,
 )
 from .transforms.wasm import render_wasm_page
+from .transforms.widget_state import (
+    BufferStore,
+    referenced_buffer_hashes,
+    stage_referenced_buffers,
+)
 
 # Directories and glob patterns of assets we copy verbatim when present.
 _ASSET_DIRS: tuple[str, ...] = ("images", "Code", "data")
@@ -136,6 +141,7 @@ class BuildCache:
     def __init__(self, book_dir: Path, book: Book, *, force_rebuild: bool = False) -> None:
         self.path = book_dir / _CACHE_DIR_NAME / _CACHE_FILE_NAME
         self.bodies_dir = book_dir / _CACHE_DIR_NAME / "bodies"
+        self.buffer_store = _transient_buffer_store(book_dir)
         self.force_rebuild = force_rebuild
         self.tool_version = _resolve_tool_version()
         self.book_signature = _book_signature(book)
@@ -169,6 +175,12 @@ class BuildCache:
         except OSError:
             return False
         if hashlib.sha256(body_bytes).hexdigest() != entry.get("body_hash"):
+            return False
+        # A body that references anywidget buffers is only replayable while
+        # every blob is still in the store (``clean`` or a pruned cache
+        # would otherwise stage mounts that 404 on their volumes).
+        body_text = body_bytes.decode("utf-8", errors="replace")
+        if any(not self.buffer_store.has(d) for d in referenced_buffer_hashes(body_text)):
             return False
         try:
             mtime = src_abs.stat().st_mtime
@@ -279,14 +291,24 @@ class BuildCache:
         if not self.bodies_dir.exists():
             return
         keep = {(self.bodies_dir / e["body_file"]).resolve() for e in self.entries.values()}
+        keep_buffers: set[str] = set()
         try:
+            # Collect the buffer hashes the live bodies reference *before*
+            # touching anything: a partial scan must never feed the prune
+            # below, or blobs still in use would be deleted and every widget
+            # notebook forced to re-render.
+            for body_path in keep:
+                keep_buffers |= referenced_buffer_hashes(
+                    body_path.read_text(encoding="utf-8", errors="replace")
+                )
             for f in sorted(self.bodies_dir.rglob("*"), reverse=True):
                 if f.is_file() and f.resolve() not in keep:
                     f.unlink(missing_ok=True)
                 elif f.is_dir() and not any(f.iterdir()):
                     f.rmdir()
         except OSError:
-            pass  # best-effort hygiene; never fail a build over it
+            return  # best-effort hygiene; never fail a build (or prune) over it
+        self.buffer_store.prune(keep_buffers)
 
     # --- internals ----------------------------------------------------------
 
@@ -375,7 +397,10 @@ def _book_signature(book: Book) -> str:
 # "6": application/json (bare list/dict), Vega(-Lite) (Altair) and the
 # <marimo-json-output> / <marimo-mime-renderer> elements now render; bodies
 # rendered before show no output for those cells (#73).
-_RENDER_OUTPUT_VERSION = "6"
+# "7": anywidget mounts carry recorded model state (data-initial-value,
+# data-buffers, data-css); bodies rendered before start every widget from an
+# empty model and reference no buffers.
+_RENDER_OUTPUT_VERSION = "7"
 
 
 def _pyodide_version() -> str | None:
@@ -953,6 +978,7 @@ class Preprocessor:
                     body,
                     body_sig=self.body_signature,
                     cell_errors=_cell_errors_to_dicts(collected_errors),
+                    buffer_source=_transient_buffer_store(self.book_dir),
                 )
                 report.pages_rendered += 1
             except Exception as exc:  # noqa: BLE001
@@ -1145,6 +1171,7 @@ class Preprocessor:
             sandbox=self.sandbox,
             suppress_warnings=self.book.defaults.suppress_warnings,
             timeout=self.book.defaults.execution_timeout,
+            buffer_store=_transient_buffer_store(self.book_dir),
         )
         if result.skipped:
             # Runtime caps (time/bytes projections) depend on machine load —
@@ -1168,6 +1195,16 @@ class Preprocessor:
         original = staged_path.read_text(encoding="utf-8")
         page, spliced_body = _spliced_page_and_body(original, result)
         staged_path.write_text(page, encoding="utf-8")
+        # The splice bypasses _finalize_page, and the per-value deltas can
+        # reference anywidget buffers the base render never did (a viewer
+        # whose volume changes with the slider). Stage those too, or the
+        # shim 404s on them at runtime.
+        missing = stage_referenced_buffers(page, docs_dir, [_transient_buffer_store(self.book_dir)])
+        if missing:
+            raise RuntimeError(
+                f"{entry.file}: anywidget buffers missing from the build cache "
+                f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
+            )
         return spliced_body, {"widgets": len(kept), "skipped": skipped, "warnings": warnings}
 
     def _stage_changelog(self, docs_dir: Path) -> bool:
@@ -1199,7 +1236,11 @@ class Preprocessor:
         needs_pep723 = self.book.dependencies.auto_pep723
         with _maybe_stage_with_pep723(src, self.book.dependencies, enabled=needs_pep723) as staged:
             return _render_marimo(
-                staged or src, self.book, sandbox=False, on_cell_errors=on_cell_errors
+                staged or src,
+                self.book,
+                book_dir=self.book_dir,
+                sandbox=False,
+                on_cell_errors=on_cell_errors,
             )
 
     def _stage_blog(self, docs_dir: Path, report: BuildReport) -> None:
@@ -1394,7 +1435,11 @@ def stage_page(
                 apply_rewrites = False
             else:
                 body = _render_marimo(
-                    staged or src_abs, book, sandbox=sandbox, on_cell_errors=on_cell_errors
+                    staged or src_abs,
+                    book,
+                    book_dir=book_dir,
+                    sandbox=sandbox,
+                    on_cell_errors=on_cell_errors,
                 )
                 apply_rewrites = True
     elif src_abs.suffix == ".md":
@@ -1451,6 +1496,19 @@ def _finalize_page(
             # [@key] text, so .bib edits apply without invalidating renders.
             bib = load_bibliography(tuple(book_dir / f for f in book.bibliography.files))
             body = apply_citations(body, bib=bib, style=book.cite_style)
+    # Anywidget buffers the mounts reference live in a content-addressed
+    # store (transient cache for live renders, ``_rendered/`` for committed
+    # ones); copy them under docs/ so mkdocs ships them next to the page.
+    missing = stage_referenced_buffers(
+        body,
+        docs_dir,
+        [_transient_buffer_store(book_dir), RenderedStore(book_dir).buffer_store],
+    )
+    if missing:
+        raise RuntimeError(
+            f"{entry.file}: anywidget buffers missing from the build cache "
+            f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
+        )
     dst.write_text(_compose_page(buttons, body), encoding="utf-8")
     return dst
 
@@ -1479,14 +1537,24 @@ def render_py_body(
         enabled=book.dependencies.auto_pep723,
     ) as staged:
         return _render_marimo(
-            staged or src_abs, book, sandbox=sandbox, on_cell_errors=on_cell_errors
+            staged or src_abs,
+            book,
+            book_dir=book_dir,
+            sandbox=sandbox,
+            on_cell_errors=on_cell_errors,
         )
+
+
+def _transient_buffer_store(book_dir: Path) -> BufferStore:
+    """Where live renders park anywidget buffers (``.marimo_book_cache/anywidget/``)."""
+    return BufferStore(Path(book_dir) / _CACHE_DIR_NAME / "anywidget")
 
 
 def _render_marimo(
     src: Path,
     book: Book,
     *,
+    book_dir: Path,
     sandbox: bool = False,
     on_cell_errors: Callable[[list[CellError]], None] | None = None,
 ) -> str:
@@ -1504,6 +1572,7 @@ def _render_marimo(
         exp,
         hide_first_code_cell=book.defaults.hide_first_code_cell,
         widget_defaults=book.widget_defaults or None,
+        buffer_store=_transient_buffer_store(book_dir),
     )
 
 

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Anywidget state is baked into static pages.** Every anywidget on a
+  `mode: static` page now renders with the state the kernel actually gave
+  it — synced scalar traits, binary `Bytes` traits, and `_css` — instead of
+  starting from an empty model and whatever defaults its JS hard-codes.
+  Data-carrying widgets that previously rendered nothing (nltools'
+  `BrainData.iplot()` niivue viewer, plotly `FigureWidget`, image/array
+  viewers) now render and stay interactive on the kernel-less site.
+  Mechanics: `marimo export ipynb` never writes widget state, but the
+  exporter holds it in `session_view.model_states`; `_export_runner.py`
+  (`--states`) dumps those states to a sidecar keyed by the same `model_id`s
+  the exported HTML uses (`transforms/widget_state.py` reads it). The rewriter merges scalar state into `data-initial-value`
+  (precedence: `widget_defaults` < literal kwargs < recorded state), writes
+  buffers once each to a content-addressed store (`.marimo_book_cache/anywidget/`
+  for live renders, `_rendered/anywidget/` for `marimo-book render`) and
+  references them from the mount's `data-buffers`; `_finalize_page` copies
+  the referenced blobs to `docs/assets/anywidget/`. The shim fetches them
+  before `render()` and hands the widget a `DataView`, matching anywidget's
+  wire format. Cache hits and committed renders re-stage the blobs and are
+  invalidated when a blob is missing. Serialization is best-effort: if
+  marimo's `model_states` shape changes, pages fall back to the previous
+  behaviour. `_RENDER_OUTPUT_VERSION` bumped to `7`.
+
 ### Fixed
 
 - **List, dict and Altair outputs rendered as nothing on static pages** (#73).

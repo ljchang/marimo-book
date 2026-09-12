@@ -17,6 +17,7 @@ Layout under the book directory::
     _rendered/
       manifest.json                 # src_rel -> {src_hash, body_path, ...}
       content/01_basics.md          # rendered body, mirrors source path
+      anywidget/<sha256>.bin        # widget buffers the bodies reference
 
 Unlike ``.marimo_book_cache/`` (transient, gitignored), ``_rendered/`` is
 meant to be committed.
@@ -30,6 +31,8 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
+
+from .transforms.widget_state import BufferStore, referenced_buffer_hashes
 
 _DIR_NAME = "_rendered"
 _MANIFEST_NAME = "manifest.json"
@@ -61,6 +64,11 @@ class RenderedStore:
         self.dirty = False
         self._load()
 
+    @property
+    def buffer_store(self) -> BufferStore:
+        """Committed anywidget buffers (``_rendered/anywidget/``)."""
+        return BufferStore(self.root / "anywidget")
+
     # --- read side (build) ---------------------------------------------------
 
     def is_fresh(self, src_rel: str, src_abs: Path, *, body_sig: str | None = None) -> bool:
@@ -81,6 +89,8 @@ class RenderedStore:
             return False
         if body_sig is not None and entry.get("body_sig") != body_sig:
             return False
+        if self._missing_buffers(entry):
+            return False
         try:
             return _sha256(src_abs) == entry["src_hash"]
         except OSError:
@@ -95,6 +105,8 @@ class RenderedStore:
             return "committed body file is missing"
         if body_sig is not None and entry.get("body_sig") != body_sig:
             return "render configuration or marimo-book version changed since it was last rendered"
+        if self._missing_buffers(entry):
+            return "committed anywidget buffer file is missing"
         return "source has changed since it was last rendered"
 
     def read_body(self, src_rel: str) -> str:
@@ -112,6 +124,7 @@ class RenderedStore:
         *,
         body_sig: str | None = None,
         cell_errors: list[dict] | None = None,
+        buffer_source: BufferStore | None = None,
     ) -> None:
         """Persist a freshly rendered ``body`` and record its source hash.
 
@@ -122,11 +135,19 @@ class RenderedStore:
         stale artifact even when the source bytes are unchanged.
         ``cell_errors`` records any raising cells so a later ``build --strict``
         can fail on a committed traceback without executing anything.
+        ``buffer_source`` is the transient store the render wrote anywidget
+        buffers into; every blob the body references is copied under
+        ``_rendered/anywidget/`` so the committed artifact is self-contained.
         """
         body_rel = Path(src_rel).with_suffix(".md").as_posix()
         body_abs = self.root / body_rel
         body_abs.parent.mkdir(parents=True, exist_ok=True)
         body_abs.write_text(body, encoding="utf-8")
+        buffers = sorted(referenced_buffer_hashes(body))
+        if buffers and buffer_source is not None:
+            own = self.buffer_store
+            for digest in buffers:
+                own.copy_from(digest, buffer_source)
         self.entries[src_rel] = {
             "src_hash": _sha256(src_abs),
             "body_path": body_rel,
@@ -134,6 +155,7 @@ class RenderedStore:
             "rendered_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "marimo_book_version": _tool_version(),
             "cell_errors": cell_errors or [],
+            "buffers": buffers,
         }
         self.dirty = True
 
@@ -159,7 +181,13 @@ class RenderedStore:
         self.manifest_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        keep = {d for e in self.entries.values() for d in (e.get("buffers") or [])}
+        self.buffer_store.prune(keep)
         self.dirty = False
+
+    def _missing_buffers(self, entry: dict) -> list[str]:
+        store = self.buffer_store
+        return [d for d in (entry.get("buffers") or []) if not store.has(d)]
 
     # --- internals -----------------------------------------------------------
 

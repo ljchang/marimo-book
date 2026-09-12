@@ -15,6 +15,12 @@ from the session view's model notifications. ``/@file/`` virtual-file URLs
 are read out of marimo's shared-memory store while the session is still
 alive and inlined as ``data:`` URLs, so the map is self-contained.
 
+The same session view also holds every model's *state* (synced traits,
+binary buffers, ``_css``), which the ipynb likewise never carries. With
+``--states OUT.json`` the script writes that too — the sidecar
+:func:`marimo_book.transforms.widget_state.load_widget_states` reads so the
+static page can start each widget from the values the kernel rendered.
+
 Deliberately imports ONLY marimo (no marimo_book): under ``--sandbox`` it
 runs inside marimo's ``uv run --isolated`` environment, where marimo-book is
 not installed. Everything used here is marimo-private and covered by the
@@ -54,7 +60,26 @@ def _esm_data_url(url: str) -> str | None:
     return None
 
 
-async def _run(path: Path, sort_mode: str) -> tuple[str, dict[str, str], bool]:
+def _serialize_states(session_view) -> dict:
+    """``session_view.model_states`` → the widget_state.py sidecar payload (v1)."""
+    models: dict[str, dict] = {}
+    for model_id, ms in getattr(session_view, "model_states", {}).items():
+        state = dict(getattr(ms, "state", {}) or {})
+        css = state.pop("_css", None)
+        state.pop("_esm", None)
+        buffers = [
+            {"path": list(path), "b64": base64.b64encode(bytes(blob)).decode("ascii")}
+            for path, blob in (getattr(ms, "buffers", {}) or {}).items()
+        ]
+        models[str(model_id)] = {
+            "state": state,
+            "buffers": buffers,
+            "css": css if isinstance(css, str) and css else None,
+        }
+    return {"version": 1, "models": models}
+
+
+async def _run(path: Path, sort_mode: str) -> tuple[str, dict[str, str], dict, bool]:
     from marimo._export.exporter import Exporter
     from marimo._export.file import run_notebook
     from marimo._export.requests import (
@@ -93,7 +118,20 @@ async def _run(path: Path, sort_mode: str) -> tuple[str, dict[str, str], bool]:
             resolved = _esm_data_url(message.esm_spec.url)
             if resolved:
                 models[str(notification.model_id)] = resolved
-    return ipynb, models, did_error
+    try:
+        states = _serialize_states(session_view)
+    except Exception as exc:  # noqa: BLE001 — state is best-effort; never fail the export
+        states = {"version": 1, "error": repr(exc)}
+    return ipynb, models, states, did_error
+
+
+def _states_json(states: dict) -> str:
+    """Serialize the states sidecar; a non-JSON-safe trait value degrades to
+    an error record instead of crashing the export (best-effort contract)."""
+    try:
+        return json.dumps(states)
+    except (TypeError, ValueError) as exc:
+        return json.dumps({"version": 1, "error": f"states not JSON-serializable: {exc!r}"})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,12 +139,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("notebook")
     parser.add_argument("--output", required=True)
     parser.add_argument("--models", required=True)
+    parser.add_argument("--states", default=None)
     parser.add_argument("--sort", default="topological", choices=["topological", "top-down"])
     args = parser.parse_args(argv)
 
-    ipynb, models, did_error = asyncio.run(_run(Path(args.notebook), args.sort))
+    ipynb, models, states, did_error = asyncio.run(_run(Path(args.notebook), args.sort))
     Path(args.output).write_text(ipynb, encoding="utf-8")
     Path(args.models).write_text(json.dumps(models), encoding="utf-8")
+    if args.states:
+        Path(args.states).write_text(_states_json(states), encoding="utf-8")
     return 1 if did_error else 0
 
 

@@ -5,8 +5,10 @@
 // data: URL), and calls module.default.render({model, el}) with a minimal
 // anywidget-compatible model object.
 //
-// No marimo runtime required. No network fetches. Safe to run on every page
-// of a Material for MkDocs (or zensical) site.
+// No marimo runtime required. The only network fetches are the widget's own
+// binary buffers (``data-buffers``, baked at build time under
+// assets/anywidget/). Safe to run on every page of a Material for MkDocs (or
+// zensical) site.
 
 (function () {
   "use strict";
@@ -64,6 +66,74 @@
     } catch (_) {
       return unescaped;
     }
+  }
+
+  /** Resolve the site root from our own <script src> (mkdocs rewrites it
+   *  per page, so this works whatever use_directory_urls / site_url are). */
+  let _siteRoot = null;
+  function siteRoot() {
+    if (_siteRoot !== null) return _siteRoot;
+    const script = document.querySelector('script[src*="marimo_book.js"]');
+    try {
+      _siteRoot = script ? new URL("../", script.src).href : new URL("./", location.href).href;
+    } catch (_) {
+      _siteRoot = "./";
+    }
+    return _siteRoot;
+  }
+
+  /** Assign `value` into `obj` at a bufferPaths-style path (["a", 0, "b"]). */
+  function setAtPath(obj, path, value) {
+    if (!Array.isArray(path) || path.length === 0) return;
+    let cur = obj;
+    for (let i = 0; i < path.length - 1; i++) {
+      const key = path[i];
+      if (cur[key] === undefined || cur[key] === null || typeof cur[key] !== "object") {
+        cur[key] = typeof path[i + 1] === "number" ? [] : {};
+      }
+      cur = cur[key];
+    }
+    cur[path[path.length - 1]] = value;
+  }
+
+  /** Fetch the build-time buffers listed on `data-buffers` into `state`.
+   *
+   *  Each entry is {path, url, size} or {path, empty: true}. Buffers are
+   *  delivered as DataView, matching what anywidget's own wire format hands
+   *  a widget's `model.get(trait)` for a `traitlets.Bytes` trait.
+   */
+  async function loadBuffers(el, state) {
+    const refs = decodeAttr(el.getAttribute("data-buffers"));
+    if (!Array.isArray(refs) || refs.length === 0) return;
+    const root = siteRoot();
+    await Promise.all(
+      refs.map(async (ref) => {
+        if (!ref || !Array.isArray(ref.path)) return;
+        if (ref.empty || !ref.url) {
+          setAtPath(state, ref.path, new DataView(new ArrayBuffer(0)));
+          return;
+        }
+        const res = await fetch(new URL(ref.url, root).href);
+        if (!res.ok) {
+          throw new Error(`[marimo-book] buffer ${ref.url}: HTTP ${res.status}`);
+        }
+        setAtPath(state, ref.path, new DataView(await res.arrayBuffer()));
+      })
+    );
+  }
+
+  /** Inject a widget's `_css` once per module hash. */
+  const _cssInjected = new Set();
+  function injectCss(el) {
+    const css = el.getAttribute("data-css");
+    if (!css) return;
+    const key = el.getAttribute("data-js-hash") || css;
+    if (_cssInjected.has(key)) return;
+    _cssInjected.add(key);
+    const style = document.createElement("style");
+    style.setAttribute("data-marimo-book-anywidget-css", "");
+    style.textContent = css;
+    document.head.appendChild(style);
   }
 
   /** Parse an initial-value dict, handling model_id-only blobs gracefully. */
@@ -197,6 +267,17 @@
     // Clear placeholder text / stray children before rendering.
     el.innerHTML = "";
     const initial = parseInitial(el.getAttribute("data-initial-value"));
+    // Binary traits (volumes, images, arrays) were written to
+    // assets/anywidget/ at build time; pull them in before the widget's
+    // render() runs so model.get(trait) already returns the DataView.
+    try {
+      await loadBuffers(el, initial);
+    } catch (err) {
+      console.error("[marimo-book] failed to load widget buffers", err, el);
+      el.textContent = "Failed to load widget data.";
+      return;
+    }
+    injectCss(el);
     const model = makeModel(initial);
     // Pull initial slider values from the runtime registry (if WASM is up
     // by the time we hydrate), so the first paint matches the user's

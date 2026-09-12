@@ -493,7 +493,7 @@ def test_stage_page_auto_pep723_static_mode_skips_bootstrap(tmp_path: Path) -> N
     )
     captured: dict[str, str] = {}
 
-    def fake_render_marimo(src, book_arg, *, sandbox=False, on_cell_errors=None):
+    def fake_render_marimo(src, book_arg, *, book_dir=None, sandbox=False, on_cell_errors=None):
         # Read content while the staged tempdir is still alive (it gets
         # torn down on context exit, before the assertions below).
         captured["content"] = Path(src).read_text(encoding="utf-8")
@@ -523,7 +523,7 @@ def test_stage_page_static_mode_skips_staging_by_default(tmp_path: Path) -> None
     book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
     captured = {"args": None}
 
-    def fake_render(src, book_arg, *, sandbox=False, on_cell_errors=None):
+    def fake_render(src, book_arg, *, book_dir=None, sandbox=False, on_cell_errors=None):
         captured["args"] = src
         return "<!-- mocked -->"
 

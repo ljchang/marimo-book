@@ -172,3 +172,7 @@ running on every PR.
 ## License
 
 [MIT](LICENSE)
+
+## Related
+
+- [marimo-grader](https://marimograder.org) ([source](https://github.com/ljchang/marimo-grader)) — a grading service for marimo assignments: students sign in and submit from inside a notebook, instructors grade in a web app. A book publishes the student notebooks as pages and links them to the grader; see the [Assignments and grading](https://marimobook.org/assignments-and-grading/) docs page.

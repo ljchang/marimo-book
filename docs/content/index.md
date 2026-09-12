@@ -53,6 +53,8 @@ load.
 
 ## What it's not
 
+- A **grader** — for graded assignments, pair a book with
+  [marimo-grader](https://marimograder.org); see [Assignments and grading](assignments-and-grading.md).
 - A notebook **editor** — author notebooks in marimo itself, then build
   with `marimo-book`.
 - A **kernel runner** — the built site serves HTML + JS; no server-side

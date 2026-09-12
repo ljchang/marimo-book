@@ -1,6 +1,6 @@
 # Assignments and grading
 
-A book can carry graded assignments alongside its chapters. marimo-book does not grade anything itself; it publishes the *student* version of an assignment notebook as an ordinary page and links it to a grading server such as [marimo-grader](https://ljchang.github.io/marimo-grader/), where sign-in, submission, autograding, and feedback live.
+A book can carry graded assignments alongside its chapters. marimo-book does not grade anything itself; it publishes the *student* version of an assignment notebook as an ordinary page and links it to a grading server such as [marimo-grader](https://marimograder.org/), where sign-in, submission, autograding, and feedback live.
 
 ## The current flow
 

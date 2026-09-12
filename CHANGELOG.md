@@ -5,6 +5,29 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Build-time image compression and externalization** (`images:` in
+  `book.yml`, on by default). Every inline `data:image/*` URI — matplotlib
+  PNGs, `mo.image()` files, nilearn mosaics, and on WASM pages the same
+  outputs again inside marimo's islands payload — is decoded once per unique
+  payload, re-encoded to WebP (lossy or lossless, whichever is smaller; alpha
+  preserved), downscaled above `max_width` (1600 px), written once to
+  `assets/img/<sha256>.<ext>` and referenced with `loading="lazy"`,
+  `decoding="async"` and intrinsic `width`/`height`. SVG/GIF pass through but
+  are externalized and de-duplicated; data URIs inside fenced code blocks are
+  left verbatim. Files ride the same content-addressed cache as anywidget
+  buffers (`.marimo_book_cache/img/`, `_rendered/img/`), are staged into
+  `docs/assets/img/` at finalize time (cache hits and precompute splices
+  included), and cache/committed entries are invalidated when a file is
+  missing. Bodies keep site-root-relative URLs; `_finalize_page` localizes
+  them for the page's directory URL. Pillow becomes a core dependency.
+  `_RENDER_OUTPUT_VERSION` bumped to `8`. On dartbrains the heaviest page
+  (60 figures, 32 MB of inline PNG, half of it duplicated) is the motivating
+  case.
+
 ## [0.1.34] — 2026-09-11
 
 ### Fixed

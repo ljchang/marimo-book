@@ -53,6 +53,14 @@ from .launch_buttons import render_button_row
 from .rendered_store import RenderedStore
 from .shell import _nav_from_toc, emit_mkdocs_yml
 from .transforms.citations import _CITE_RE, apply_citations, load_bibliography
+from .transforms.images import (
+    ImageOptions,
+    ImageStore,
+    externalize_images,
+    localize_asset_urls,
+    referenced_image_names,
+    stage_referenced_images,
+)
 from .transforms.link_rewrites import apply_link_rewrites
 from .transforms.marimo_export import (
     CellError,
@@ -142,6 +150,7 @@ class BuildCache:
         self.path = book_dir / _CACHE_DIR_NAME / _CACHE_FILE_NAME
         self.bodies_dir = book_dir / _CACHE_DIR_NAME / "bodies"
         self.buffer_store = _transient_buffer_store(book_dir)
+        self.image_store = _transient_image_store(book_dir)
         self.force_rebuild = force_rebuild
         self.tool_version = _resolve_tool_version()
         self.book_signature = _book_signature(book)
@@ -181,6 +190,8 @@ class BuildCache:
         # would otherwise stage mounts that 404 on their volumes).
         body_text = body_bytes.decode("utf-8", errors="replace")
         if any(not self.buffer_store.has(d) for d in referenced_buffer_hashes(body_text)):
+            return False
+        if any(not self.image_store.has(n) for n in referenced_image_names(body_text)):
             return False
         try:
             mtime = src_abs.stat().st_mtime
@@ -292,15 +303,16 @@ class BuildCache:
             return
         keep = {(self.bodies_dir / e["body_file"]).resolve() for e in self.entries.values()}
         keep_buffers: set[str] = set()
+        keep_images: set[str] = set()
         try:
             # Collect the buffer hashes the live bodies reference *before*
             # touching anything: a partial scan must never feed the prune
             # below, or blobs still in use would be deleted and every widget
             # notebook forced to re-render.
             for body_path in keep:
-                keep_buffers |= referenced_buffer_hashes(
-                    body_path.read_text(encoding="utf-8", errors="replace")
-                )
+                text = body_path.read_text(encoding="utf-8", errors="replace")
+                keep_buffers |= referenced_buffer_hashes(text)
+                keep_images |= referenced_image_names(text)
             for f in sorted(self.bodies_dir.rglob("*"), reverse=True):
                 if f.is_file() and f.resolve() not in keep:
                     f.unlink(missing_ok=True)
@@ -309,6 +321,7 @@ class BuildCache:
         except OSError:
             return  # best-effort hygiene; never fail a build (or prune) over it
         self.buffer_store.prune(keep_buffers)
+        self.image_store.prune(keep_images)
 
     # --- internals ----------------------------------------------------------
 
@@ -397,10 +410,12 @@ def _book_signature(book: Book) -> str:
 # "6": application/json (bare list/dict), Vega(-Lite) (Altair) and the
 # <marimo-json-output> / <marimo-mime-renderer> elements now render; bodies
 # rendered before show no output for those cells (#73).
+# "8": inline images are externalized to assets/img/ (WebP, de-duplicated,
+# lazy); bodies rendered before carry base64 data: URIs.
 # "7": anywidget mounts carry recorded model state (data-initial-value,
 # data-buffers, data-css); bodies rendered before start every widget from an
 # empty model and reference no buffers.
-_RENDER_OUTPUT_VERSION = "7"
+_RENDER_OUTPUT_VERSION = "8"
 
 
 def _pyodide_version() -> str | None:
@@ -435,6 +450,8 @@ def _render_body_signature(book: Book) -> str:
         "defaults": defaults,
         "dependencies": book.dependencies.model_dump(mode="json"),
         "widget_defaults": book.widget_defaults,
+        # The image policy changes the bytes and file names a body references.
+        "images": book.images.model_dump(mode="json"),
         "render_output_version": _RENDER_OUTPUT_VERSION,
         # WASM bodies bake in the micropip install list, which is filtered
         # against the package set bundled with the Pyodide release marimo
@@ -979,6 +996,7 @@ class Preprocessor:
                     body_sig=self.body_signature,
                     cell_errors=_cell_errors_to_dicts(collected_errors),
                     buffer_source=_transient_buffer_store(self.book_dir),
+                    image_source=_transient_image_store(self.book_dir),
                 )
                 report.pages_rendered += 1
             except Exception as exc:  # noqa: BLE001
@@ -1172,6 +1190,8 @@ class Preprocessor:
             suppress_warnings=self.book.defaults.suppress_warnings,
             timeout=self.book.defaults.execution_timeout,
             buffer_store=_transient_buffer_store(self.book_dir),
+            image_store=_transient_image_store(self.book_dir),
+            image_options=_image_options(self.book),
         )
         if result.skipped:
             # Runtime caps (time/bytes projections) depend on machine load —
@@ -1194,6 +1214,7 @@ class Preprocessor:
             return None, {"widgets": 0, "skipped": skipped, "warnings": warnings}
         original = staged_path.read_text(encoding="utf-8")
         page, spliced_body = _spliced_page_and_body(original, result)
+        page = localize_asset_urls(page, out_rel)
         staged_path.write_text(page, encoding="utf-8")
         # The splice bypasses _finalize_page, and the per-value deltas can
         # reference anywidget buffers the base render never did (a viewer
@@ -1204,6 +1225,14 @@ class Preprocessor:
             raise RuntimeError(
                 f"{entry.file}: anywidget buffers missing from the build cache "
                 f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
+            )
+        missing_images = stage_referenced_images(
+            page, docs_dir, [_transient_image_store(self.book_dir)]
+        )
+        if missing_images:
+            raise RuntimeError(
+                f"{entry.file}: images missing from the build cache "
+                f"({', '.join(n[:12] for n in missing_images)}); re-run with --rebuild"
             )
         return spliced_body, {"widgets": len(kept), "skipped": skipped, "warnings": warnings}
 
@@ -1432,6 +1461,11 @@ def stage_page(
                     timeout=book.defaults.execution_timeout,
                     packages=_wasm_packages(src_abs, book.dependencies, book_dir),
                 )
+                # marimo's islands HTML carries every output's image inline —
+                # twice (pre-hydration DOM + payload). Same treatment as static.
+                body = externalize_images(
+                    body, _transient_image_store(book_dir), _image_options(book)
+                )
                 apply_rewrites = False
             else:
                 body = _render_marimo(
@@ -1509,7 +1543,20 @@ def _finalize_page(
             f"{entry.file}: anywidget buffers missing from the build cache "
             f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
         )
-    dst.write_text(_compose_page(buttons, body), encoding="utf-8")
+    missing_images = stage_referenced_images(
+        body,
+        docs_dir,
+        [_transient_image_store(book_dir), RenderedStore(book_dir).image_store],
+    )
+    if missing_images:
+        raise RuntimeError(
+            f"{entry.file}: images missing from the build cache "
+            f"({', '.join(n[:12] for n in missing_images)}); re-run with --rebuild"
+        )
+    # Bodies keep site-root-relative asset URLs (so cached bodies are
+    # page-location-independent); make them relative to this page's URL.
+    page = localize_asset_urls(_compose_page(buttons, body), rel_under_docs)
+    dst.write_text(page, encoding="utf-8")
     return dst
 
 
@@ -1550,6 +1597,15 @@ def _transient_buffer_store(book_dir: Path) -> BufferStore:
     return BufferStore(Path(book_dir) / _CACHE_DIR_NAME / "anywidget")
 
 
+def _transient_image_store(book_dir: Path) -> ImageStore:
+    """Where live renders park externalized images (``.marimo_book_cache/img/``)."""
+    return ImageStore(Path(book_dir) / _CACHE_DIR_NAME / "img")
+
+
+def _image_options(book: Book) -> ImageOptions:
+    return ImageOptions(**book.images.model_dump())
+
+
 def _render_marimo(
     src: Path,
     book: Book,
@@ -1573,6 +1629,8 @@ def _render_marimo(
         hide_first_code_cell=book.defaults.hide_first_code_cell,
         widget_defaults=book.widget_defaults or None,
         buffer_store=_transient_buffer_store(book_dir),
+        image_store=_transient_image_store(book_dir),
+        image_options=_image_options(book),
     )
 
 

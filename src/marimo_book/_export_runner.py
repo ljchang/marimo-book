@@ -125,6 +125,15 @@ async def _run(path: Path, sort_mode: str) -> tuple[str, dict[str, str], dict, b
     return ipynb, models, states, did_error
 
 
+def _states_json(states: dict) -> str:
+    """Serialize the states sidecar; a non-JSON-safe trait value degrades to
+    an error record instead of crashing the export (best-effort contract)."""
+    try:
+        return json.dumps(states)
+    except (TypeError, ValueError) as exc:
+        return json.dumps({"version": 1, "error": f"states not JSON-serializable: {exc!r}"})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("notebook")
@@ -138,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     Path(args.output).write_text(ipynb, encoding="utf-8")
     Path(args.models).write_text(json.dumps(models), encoding="utf-8")
     if args.states:
-        Path(args.states).write_text(json.dumps(states), encoding="utf-8")
+        Path(args.states).write_text(_states_json(states), encoding="utf-8")
     return 1 if did_error else 0
 
 

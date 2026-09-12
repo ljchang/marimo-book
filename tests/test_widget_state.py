@@ -379,3 +379,14 @@ def test_build_cache_does_not_prune_buffers_after_a_partial_scan(tmp_path: Path)
     cache.dirty = True
     cache.save()
     assert cache.buffer_store.has(digest) and not cache.buffer_store.has(orphan)
+
+
+def test_export_runner_states_sidecar_degrades_on_unserializable_traits() -> None:
+    """A trait value json can't encode must yield an error sidecar (which
+    load_widget_states treats as "no state"), never a crashed export."""
+    from marimo_book._export_runner import _states_json
+
+    ok = json.loads(_states_json({"version": 1, "models": {"m": {"state": {"a": 1}}}}))
+    assert ok["models"]["m"]["state"] == {"a": 1}
+    bad = json.loads(_states_json({"version": 1, "models": {"m": {"state": {"a": object()}}}}))
+    assert bad["version"] == 1 and "error" in bad and "models" not in bad

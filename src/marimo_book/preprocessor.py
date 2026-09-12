@@ -1191,6 +1191,16 @@ class Preprocessor:
         original = staged_path.read_text(encoding="utf-8")
         page, spliced_body = _spliced_page_and_body(original, result)
         staged_path.write_text(page, encoding="utf-8")
+        # The splice bypasses _finalize_page, and the per-value deltas can
+        # reference anywidget buffers the base render never did (a viewer
+        # whose volume changes with the slider). Stage those too, or the
+        # shim 404s on them at runtime.
+        missing = stage_referenced_buffers(page, docs_dir, [_transient_buffer_store(self.book_dir)])
+        if missing:
+            raise RuntimeError(
+                f"{entry.file}: anywidget buffers missing from the build cache "
+                f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
+            )
         return spliced_body, {"widgets": len(kept), "skipped": skipped, "warnings": warnings}
 
     def _stage_changelog(self, docs_dir: Path) -> bool:

@@ -313,3 +313,38 @@ def _attr(tag: str, name: str) -> str:
     m = re.search(rf"{name}=(\"[^\"]*\"|'[^']*')", tag)
     assert m, (name, tag)
     return _html.unescape(m.group(1)[1:-1])
+
+
+def test_precompute_splice_stages_buffers_referenced_only_by_deltas(tmp_path: Path) -> None:
+    """The precompute splice writes the page directly (bypassing
+    _finalize_page), so buffers that only the per-value deltas reference —
+    a viewer whose volume changes with the slider — must be staged there too.
+    """
+    from unittest.mock import patch
+
+    from marimo_book.transforms.precompute import PrecomputeResult
+    from tests.test_precompute import _book_with_widget_notebook, _enable_precompute
+
+    book = _enable_precompute(
+        _book_with_widget_notebook(tmp_path, source="slider = mo.ui.slider(steps=[0, 1, 5])")
+    )
+    transient = _transient_buffer_store(tmp_path)
+    digest = transient.put(b"per-value-volume")
+    delta_ref = buffer_rel_url(digest)
+    result = PrecomputeResult(
+        body="<p>base</p>",
+        widget_html=f'<script type="application/json">{{"1": "<div data-buffers=\'[{{\\"path\\": [\\"v\\"], \\"url\\": \\"{delta_ref}\\"}}]\'></div>"}}</script>',
+        reactive_cell_indices=[1],
+    )
+    with patch("marimo_book.preprocessor.precompute_page", return_value=result):
+        report = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
+    assert not report.errors, report.errors
+    assert report.widgets_precomputed == 1
+    staged = tmp_path / "_site_src" / "docs" / BUFFER_URL_PREFIX / f"{digest}.bin"
+    assert staged.read_bytes() == b"per-value-volume"
+
+    # A delta referencing a blob the store lacks is a build error, not a 404.
+    transient.path(digest).unlink()
+    with patch("marimo_book.preprocessor.precompute_page", return_value=result):
+        report2 = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src2")
+    assert any("anywidget buffers missing" in e for e in report2.errors), report2.errors

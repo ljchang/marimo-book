@@ -631,6 +631,97 @@
     }).catch((e) => console.warn("marimo-book: plotly hydration failed", e));
   }
 
+  // Vega / Vega-Lite hydration (Altair charts). marimo formats a chart as
+  // an `application/vnd.vegalite.v*+json` spec (or `<marimo-mime-renderer>`
+  // inside a container); the preprocessor emits `<div class="marimo-book-vega"
+  // data-spec='{json}' data-mime="…">`. This shim loads vega, vega-lite and
+  // vega-embed once from jsdelivr, then embeds each mount. Idempotent via
+  // [data-mb-vega]; re-embeds on Material's light/dark toggle so axes and
+  // labels stay legible.
+  const VEGA_SCRIPTS = [
+    "https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js",
+    "https://cdn.jsdelivr.net/npm/vega-lite@6.4.3/build/vega-lite.min.js",
+    "https://cdn.jsdelivr.net/npm/vega-embed@7.2.0/build/vega-embed.min.js",
+  ];
+  let _vegaLoading = null;
+  function loadScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.crossOrigin = "anonymous";
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("Failed to load " + src));
+      document.head.appendChild(s);
+    });
+  }
+  function loadVega() {
+    if (window.vegaEmbed) return Promise.resolve(window.vegaEmbed);
+    if (_vegaLoading) return _vegaLoading;
+    // Sequential: vega-lite needs vega, vega-embed needs both.
+    _vegaLoading = VEGA_SCRIPTS.reduce(
+      (chain, src) => chain.then(() => loadScriptOnce(src)),
+      Promise.resolve()
+    ).then(() => window.vegaEmbed);
+    return _vegaLoading;
+  }
+
+  function isDarkScheme() {
+    return document.body.getAttribute("data-md-color-scheme") === "slate";
+  }
+
+  function embedVega(mount, vegaEmbed) {
+    let spec;
+    try {
+      spec = JSON.parse(mount.getAttribute("data-spec") || "{}");
+    } catch (e) {
+      console.warn("marimo-book: bad vega data-spec", e);
+      return;
+    }
+    const mime = mount.getAttribute("data-mime") || "";
+    const opts = { actions: false };
+    if (!spec.$schema) opts.mode = mime.indexOf("vegalite") !== -1 ? "vega-lite" : "vega";
+    // marimo stores the user's `alt.renderers.set_embed_options(...)` under
+    // usermeta.embedOptions; honour it like marimo's own component does.
+    const userOpts = spec.usermeta && spec.usermeta.embedOptions;
+    if (userOpts && typeof userOpts === "object") Object.assign(opts, userOpts);
+    if (isDarkScheme()) {
+      opts.theme = opts.theme || "dark";
+      // The dark theme paints a solid dark background; let the page's own
+      // background show through instead (`config` wins over `theme`).
+      opts.config = Object.assign({ background: "transparent" }, opts.config || {});
+    }
+    while (mount.firstChild) mount.removeChild(mount.firstChild);
+    vegaEmbed(mount, spec, opts).catch((e) => console.warn("marimo-book: vega embed failed", e));
+  }
+
+  function hydrateVega(scope) {
+    const mounts = scope.querySelectorAll(".marimo-book-vega:not([data-mb-vega])");
+    if (!mounts.length) return;
+    loadVega().then((vegaEmbed) => {
+      mounts.forEach((mount) => {
+        if (mount.hasAttribute("data-mb-vega")) return;
+        mount.setAttribute("data-mb-vega", "");
+        embedVega(mount, vegaEmbed);
+      });
+    }).catch((e) => console.warn("marimo-book: vega hydration failed", e));
+  }
+
+  // Re-embed on palette toggle (Material flips data-md-color-scheme on <body>).
+  let _vegaSchemeObserver = null;
+  function watchSchemeForVega() {
+    if (_vegaSchemeObserver || !document.body || typeof MutationObserver === "undefined") return;
+    _vegaSchemeObserver = new MutationObserver(() => {
+      if (!window.vegaEmbed) return;
+      document.querySelectorAll(".marimo-book-vega[data-mb-vega]").forEach((mount) => {
+        embedVega(mount, window.vegaEmbed);
+      });
+    });
+    _vegaSchemeObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["data-md-color-scheme"],
+    });
+  }
+
   // --- Release-download component ------------------------------------------
   //
   // Placeholders `<div data-mb-release-download data-repo data-app-name
@@ -909,6 +1000,8 @@
     initPrecomputeOnce(scope);
     mountHeaderButtons(scope);
     hydratePlotly(scope);
+    hydrateVega(scope);
+    watchSchemeForVega();
     hydrateReleaseDownloads(scope);
   }
 
@@ -946,6 +1039,7 @@
       if (!(island instanceof Element)) return;
       hydrateAll(island);
       hydratePlotly(island);
+      hydrateVega(island);
     },
     true
   );

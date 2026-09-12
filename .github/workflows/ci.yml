@@ -93,6 +93,6 @@ jobs:
       - name: Install demo notebook deps (drawdata/anywidget used by widgets.py)
         # Without these the widgets page renders ModuleNotFoundError cells,
         # which `build --strict` now (correctly) fails on. Mirrors docs.yml.
-        run: pip install drawdata anywidget
+        run: pip install drawdata anywidget altair
       - name: Build docs --strict (also exercises social-card generation)
         run: marimo-book build -b docs/book.yml --strict

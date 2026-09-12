@@ -180,6 +180,57 @@ def _(mo):
     when Plotly mounts. If your chart needs more space, set
     `fig.update_layout(height=...)` — the Plotly height wins.
 
+    ## Altair charts
+
+    Altair charts render the same way. marimo formats a chart as a
+    Vega-Lite spec (`application/vnd.vegalite.v*+json`, or a
+    `<marimo-mime-renderer>` element when the chart sits inside `mo.vstack`
+    and friends); the preprocessor emits
+    `<div class="marimo-book-vega" data-spec='{json}'>` and `marimo_book.js`
+    lazy-loads vega, vega-lite and vega-embed from jsdelivr on the first
+    page that has one. Tooltips, selections and the rest of Vega-Lite's
+    interactivity work; the chart re-embeds when the reader toggles
+    light/dark mode. Embed options set via
+    `alt.renderers.set_embed_options(...)` are honoured.
+    """)
+    return
+
+
+@app.cell
+def _():
+    import altair as alt
+
+    _data = alt.Data(values=[{"x": i, "y": ((i * 7) % 11) / 10} for i in range(12)])
+    alt.Chart(_data).mark_line(point=True).encode(
+        x="x:Q", y="y:Q", tooltip=["x:Q", "y:Q"]
+    ).properties(width="container", height=240, title="Altair on a static page")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Lists and dicts
+
+    A bare `list`, `tuple` or `dict` as a cell's last expression is not HTML
+    either — marimo ships it as JSON (with markers for floats, sets, tuples
+    and non-string keys) and draws a tree in its frontend. The preprocessor
+    renders that tree statically: one row per item, bare keys, Python
+    literals for leaves, coloured with the theme's code-highlight tokens.
+    The same happens for a structure nested in `mo.vstack` & co.
+    """)
+    return
+
+
+@app.cell
+def _():
+    {"name": "Ada", "scores": [9.5, 8.0], "tags": {"math", "logic"}, 2: "int key"}
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## Elements we strip
 
     Marimo's `<marimo-ui-element>` wrappers around standalone controls —

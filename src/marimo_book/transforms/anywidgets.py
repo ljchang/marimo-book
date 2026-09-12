@@ -22,6 +22,8 @@ import re
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
+from .mime_outputs import render_json_output, render_mime_fragment
+
 # marimo UI elements that make no sense in a static site. When an
 # <marimo-ui-element> wraps *only* one of these, drop the whole thing.
 _STANDALONE_CONTROLS = {
@@ -87,11 +89,7 @@ def rewrite_anywidget_html(
     this, the static-shim model only ever shows the build-time defaults
     even when the user moves a slider.
     """
-    if (
-        "marimo-anywidget" not in raw_html
-        and "marimo-ui-element" not in raw_html
-        and "marimo-plotly" not in raw_html
-    ):
+    if not contains_anywidget(raw_html):
         return raw_html
 
     soup = BeautifulSoup(raw_html, "lxml")
@@ -103,6 +101,13 @@ def rewrite_anywidget_html(
                 defaults[k] = v
     seeded_state = {**defaults, **literal_state}
 
+    # Pass 0: <marimo-mime-renderer data-mime data-data> (a non-HTML value
+    # inside mo.vstack & co., e.g. an Altair chart) → its static rendering.
+    # First, because the fragment it inserts may itself hold elements the
+    # later passes handle.
+    for node in list(soup.find_all("marimo-mime-renderer")):
+        _rewrap_mime_renderer(node, soup)
+
     # Pass 1: rewrap <marimo-anywidget> → <div class="marimo-book-anywidget">.
     for node in list(soup.find_all("marimo-anywidget")):
         _rewrap_anywidget(node, soup, seeded_state, esm_by_model=esm_by_model)
@@ -111,6 +116,11 @@ def rewrite_anywidget_html(
     # The marimo_book.js shim loads Plotly.js on first hit and renders.
     for node in list(soup.find_all("marimo-plotly")):
         _rewrap_plotly(node, soup)
+
+    # Pass 2a: <marimo-json-output data-json-data='…'> (a list/dict inside a
+    # container) → static <ul> tree (#73).
+    for node in list(soup.find_all("marimo-json-output")):
+        _rewrap_json_output(node, soup)
 
     # Pass 2b: when full notebook source is provided (WASM mode), emit a
     # data-driven-by map on each anywidget mount so the JS shim can wire
@@ -200,6 +210,49 @@ def _rewrap_plotly(node: Tag, soup: BeautifulSoup) -> None:
         if val is not None:
             div[attr] = val
     node.replace_with(div)
+
+
+def _rewrap_json_output(node: Tag, soup: BeautifulSoup) -> None:
+    """``<marimo-json-output data-json-data='…'>`` → static tree.
+
+    marimo's structure formatter emits this element for a list/tuple/dict
+    nested inside a container (``mo.vstack([1, [1, 2], "x"])``); the JSON
+    payload sits directly on ``data-json-data``, ``data-value-types`` is a
+    JSON-encoded ``"python"`` / ``"json"``, ``data-name`` an optional label.
+    """
+    raw = node.get("data-json-data")
+    if raw is None:
+        node.decompose()
+        return
+    value_types = _decode_attr_string(node.get("data-value-types")) or "python"
+    name = _decode_attr_string(node.get("data-name"))
+    _replace_with_fragment(node, soup, render_json_output(raw, value_types=value_types, name=name))
+
+
+def _rewrap_mime_renderer(node: Tag, soup: BeautifulSoup) -> None:
+    """``<marimo-mime-renderer data-mime='…' data-data='…'>`` → static HTML.
+
+    marimo wraps any non-HTML MIME value in this element when it is placed
+    inside a container. Both attributes are JSON-encoded strings. Values we
+    cannot render statically are dropped so no empty custom element lingers.
+    """
+    mime = _decode_attr_string(node.get("data-mime"))
+    data = _decode_attr_string(node.get("data-data"))
+    rendered = render_mime_fragment(mime, data) if mime and data is not None else None
+    if not rendered:
+        node.decompose()
+        return
+    _replace_with_fragment(node, soup, rendered)
+
+
+def _replace_with_fragment(node: Tag, soup: BeautifulSoup, fragment_html: str) -> None:
+    """Swap ``node`` for the parsed nodes of ``fragment_html``."""
+    fragment = BeautifulSoup(fragment_html, "lxml")
+    body = fragment.find("body")
+    children = list(body.children) if body is not None else list(fragment.children)
+    for child in children:
+        node.insert_before(child.extract())
+    node.decompose()
 
 
 def _decode_attr_string(raw: str | None) -> str | None:
@@ -339,9 +392,13 @@ def _handle_ui_wrapper(wrapper: Tag) -> None:
 # Mount-class names emitted by `_rewrap_anywidget` and `_rewrap_plotly`;
 # `_handle_ui_wrapper` checks for these to decide whether to unwrap or
 # decompose a `<marimo-ui-element>` parent.
-_MOUNT_CLASSES = frozenset({"marimo-book-anywidget", "marimo-book-plotly"})
+_MOUNT_CLASSES = frozenset(
+    {"marimo-book-anywidget", "marimo-book-plotly", "marimo-book-vega", "marimo-book-json"}
+)
 
-_ANYWIDGET_SENTINEL = re.compile(r"<marimo-(anywidget|ui-element|plotly)\b", re.IGNORECASE)
+_ANYWIDGET_SENTINEL = re.compile(
+    r"<marimo-(anywidget|ui-element|plotly|json-output|mime-renderer)\b", re.IGNORECASE
+)
 
 
 def contains_anywidget(raw_html: str) -> bool:

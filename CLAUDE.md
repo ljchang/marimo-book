@@ -203,6 +203,22 @@ micropip bootstrap cell (see `build_bootstrap_payload` in
 `transforms/wasm.py`). Pages without such deps stay on the DOM-parsing
 path, which upstream keeps as the supported fallback.
 
+## Static rendering of non-HTML outputs
+
+`transforms/marimo_export.py::_render_mime_bundle` picks one entry of each
+cell's MIME bundle. Some marimo values have **no HTML form** and used to
+vanish (#73): a bare `list`/`dict` is `application/json` with
+`text/plain+<type>:` leaf/key markers, an Altair chart is
+`application/vnd.vega(lite).v*+json`, and inside `mo.vstack` & co. both
+become `<marimo-json-output>` / `<marimo-mime-renderer>` custom elements.
+`transforms/mime_outputs.py` renders them statically (JSON → `<ul>` tree;
+Vega → `<div class="marimo-book-vega" data-spec>` hydrated by
+`marimo_book.js` via vega-embed from jsdelivr, same lazy-CDN pattern as
+Plotly) and `rewrite_anywidget_html` rewraps the custom elements. When you
+add support for another MIME type, bump `_RENDER_OUTPUT_VERSION` in
+`preprocessor.py` so committed `_rendered/` bodies re-render. The docs
+Widgets page demos both; the docs CI job installs `altair` for it.
+
 ## Theme + CSS
 
 Default styling lives in `src/marimo_book/assets/extra.css` —

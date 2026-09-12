@@ -390,3 +390,20 @@ def test_export_runner_states_sidecar_degrades_on_unserializable_traits() -> Non
     assert ok["models"]["m"]["state"] == {"a": 1}
     bad = json.loads(_states_json({"version": 1, "models": {"m": {"state": {"a": object()}}}}))
     assert bad["version"] == 1 and "error" in bad and "models" not in bad
+
+
+def test_buffer_store_normalizes_gzip_mtime_so_identical_payloads_dedupe(tmp_path: Path) -> None:
+    import gzip
+
+    from marimo_book.transforms.widget_state import normalize_gzip_mtime
+
+    payload = b"same volume bytes" * 100
+    a = gzip.compress(payload, mtime=1_700_000_000)
+    b = gzip.compress(payload, mtime=1_700_000_999)
+    assert a != b  # only the header timestamp differs
+    store = BufferStore(tmp_path / "blobs")
+    assert store.put(a) == store.put(b)
+    (blob,) = list((tmp_path / "blobs").iterdir())
+    assert gzip.decompress(blob.read_bytes()) == payload  # still a valid stream
+    assert normalize_gzip_mtime(b"not gzip") == b"not gzip"
+    assert normalize_gzip_mtime(b"\x1f\x8b") == b"\x1f\x8b"  # too short to carry a header

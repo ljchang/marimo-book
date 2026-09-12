@@ -129,15 +129,29 @@ def _is_app_cell_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
     return False
 
 
+# marimo mints a fresh 32-hex model id for every anywidget (and the
+# ``<marimo-ui-element object-id/random-id>`` wrapper around it) on every
+# export. Two renders of an unchanged widget cell therefore never compare
+# equal, so every anywidget on the page was flagged "reactive" and copied
+# into the lookup table once per slider value. Mask the ids where marimo
+# writes them; the widget's real state (data-initial-value traits,
+# data-buffers content hashes, the ESM data: URL) still participates.
+_MODEL_ID_RE = re.compile(
+    r"((?:data-model-id|object-id|random-id)=['\"]*|(?:&quot;|\")?model_id(?:&quot;|\")?\s*:\s*[\"'&quot;]*)"
+    r"[0-9a-f]{32}"
+)
+
+
 def _diff_key(body: str) -> str:
     """Return a normalized cell body for downstream-detection comparison.
 
-    Strips stream-stderr blocks. Whitespace is left alone — Markdown
-    rendering is whitespace-sensitive in spots (fenced code blocks,
-    indented contexts), and we don't want to mask legitimate output
-    differences.
+    Strips stream-stderr blocks and masks per-run anywidget model ids.
+    Whitespace is left alone — Markdown rendering is whitespace-sensitive
+    in spots (fenced code blocks, indented contexts), and we don't want to
+    mask legitimate output differences.
     """
-    return _STDERR_BLOCK_RE.sub("", body)
+    body = _STDERR_BLOCK_RE.sub("", body)
+    return _MODEL_ID_RE.sub(r"\1MODEL_ID", body)
 
 
 def _split_extension_list(exts: list) -> tuple[list[str], dict[str, dict]]:

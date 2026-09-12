@@ -306,3 +306,28 @@ def test_blog_notebook_post_stages_and_localizes_images(tmp_path: Path) -> None:
     (name,) = names
     assert f'src="../../../{IMAGE_URL_PREFIX}{name}"' in page  # /blog/posts/<stem>/ → three up
     assert (out_dir / "docs" / IMAGE_URL_PREFIX / name).exists()
+
+
+def test_externalize_never_resizes_images_inside_iframe_srcdoc(tmp_path: Path) -> None:
+    """nilearn's brainsprite (view_img) slices its sprite mosaic by fixed
+    pixel geometry inside an <iframe srcdoc>; a resized sprite renders
+    garbled. Compress + externalize, but keep the dimensions."""
+    import html as _html
+
+    store = ImageStore(tmp_path / "img")
+    wide = _png(3000, 600)
+    inner = f'<html><body><img id="sprite" src="{_uri(wide)}"></body></html>'
+    page = f'<p>before</p><iframe srcdoc="{_html.escape(inner, quote=True)}"></iframe><img src="{_uri(wide)}">'
+    out = externalize_images(page, store, ImageOptions(max_width=1600))
+    names = referenced_image_names(out)
+    assert len(names) == 2  # same payload, two policies → two files
+    sizes = {}
+    for n in names:
+        with Image.open(store.path(n)) as im:
+            sizes[n] = im.size
+    assert sorted(sizes.values()) == [(1600, 320), (3000, 600)]
+    # The full-size one is the srcdoc's, the resized one the page's own <img>.
+    srcdoc = re.search(r'srcdoc="([^"]*)"', out).group(1)
+    (in_srcdoc,) = referenced_image_names(_html.unescape(srcdoc))
+    assert sizes[in_srcdoc] == (3000, 600)
+    assert "data:image" not in out

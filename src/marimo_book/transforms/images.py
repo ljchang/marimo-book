@@ -36,7 +36,7 @@ import io
 import os
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 IMAGE_URL_PREFIX = "assets/img/"
@@ -58,6 +58,9 @@ _IMG_TAG_RE = re.compile(
 _LOCALIZE_RE = re.compile(r"(?<![/.])" + re.escape(IMAGE_URL_PREFIX))
 
 _FENCE_RE = re.compile(r"(```[\s\S]*?```)")
+# An <iframe srcdoc="…"> attribute (its value is HTML-escaped, so no bare
+# double quote can occur inside it).
+_SRCDOC_RE = re.compile(r"(srcdoc=\"[^\"]*\")")
 
 _MIME_EXT = {"png": "png", "jpeg": "jpg", "jpg": "jpg", "gif": "gif", "svg+xml": "svg"}
 
@@ -224,6 +227,21 @@ def externalize_images(html: str, store: ImageStore, options: ImageOptions) -> s
             part if part.startswith("```") else externalize_images(part, store, options)
             for part in parts
         )
+    # Images inside an <iframe srcdoc="…"> belong to an embedded viewer
+    # (nilearn's brainsprite slices its sprite mosaic by fixed pixel
+    # geometry; the browser renders it with the parent's base URL, so a
+    # site-relative file works). Compress and de-duplicate them, but never
+    # change their pixel dimensions.
+    if options.max_width and "srcdoc=" in html:
+        parts = _SRCDOC_RE.split(html)
+        if len(parts) > 1:
+            no_resize = replace(options, max_width=0)
+            return "".join(
+                externalize_images(
+                    part, store, no_resize if part.startswith("srcdoc=") else options
+                )
+                for part in parts
+            )
     memo: dict[str, tuple[str, OptimizedImage | None]] = {}
 
     def resolve(mime: str, b64: str) -> tuple[str, OptimizedImage | None] | None:

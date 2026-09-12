@@ -18,6 +18,7 @@ Layout under the book directory::
       manifest.json                 # src_rel -> {src_hash, body_path, ...}
       content/01_basics.md          # rendered body, mirrors source path
       anywidget/<sha256>.bin        # widget buffers the bodies reference
+      img/<sha256>.<ext>            # externalized images the bodies reference
 
 Unlike ``.marimo_book_cache/`` (transient, gitignored), ``_rendered/`` is
 meant to be committed.
@@ -32,6 +33,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
+from .transforms.images import ImageStore, referenced_image_names
 from .transforms.widget_state import BufferStore, referenced_buffer_hashes
 
 _DIR_NAME = "_rendered"
@@ -69,6 +71,11 @@ class RenderedStore:
         """Committed anywidget buffers (``_rendered/anywidget/``)."""
         return BufferStore(self.root / "anywidget")
 
+    @property
+    def image_store(self) -> ImageStore:
+        """Committed externalized images (``_rendered/img/``)."""
+        return ImageStore(self.root / "img")
+
     # --- read side (build) ---------------------------------------------------
 
     def is_fresh(self, src_rel: str, src_abs: Path, *, body_sig: str | None = None) -> bool:
@@ -89,7 +96,7 @@ class RenderedStore:
             return False
         if body_sig is not None and entry.get("body_sig") != body_sig:
             return False
-        if self._missing_buffers(entry):
+        if self._missing_buffers(entry) or self._missing_images(entry):
             return False
         try:
             return _sha256(src_abs) == entry["src_hash"]
@@ -107,6 +114,8 @@ class RenderedStore:
             return "render configuration or marimo-book version changed since it was last rendered"
         if self._missing_buffers(entry):
             return "committed anywidget buffer file is missing"
+        if self._missing_images(entry):
+            return "committed image file is missing"
         return "source has changed since it was last rendered"
 
     def read_body(self, src_rel: str) -> str:
@@ -125,6 +134,7 @@ class RenderedStore:
         body_sig: str | None = None,
         cell_errors: list[dict] | None = None,
         buffer_source: BufferStore | None = None,
+        image_source: ImageStore | None = None,
     ) -> None:
         """Persist a freshly rendered ``body`` and record its source hash.
 
@@ -148,6 +158,11 @@ class RenderedStore:
             own = self.buffer_store
             for digest in buffers:
                 own.copy_from(digest, buffer_source)
+        images = sorted(referenced_image_names(body))
+        if images and image_source is not None:
+            own_images = self.image_store
+            for name in images:
+                own_images.copy_from(name, image_source)
         self.entries[src_rel] = {
             "src_hash": _sha256(src_abs),
             "body_path": body_rel,
@@ -156,6 +171,7 @@ class RenderedStore:
             "marimo_book_version": _tool_version(),
             "cell_errors": cell_errors or [],
             "buffers": buffers,
+            "images": images,
         }
         self.dirty = True
 
@@ -183,11 +199,17 @@ class RenderedStore:
         )
         keep = {d for e in self.entries.values() for d in (e.get("buffers") or [])}
         self.buffer_store.prune(keep)
+        keep_images = {n for e in self.entries.values() for n in (e.get("images") or [])}
+        self.image_store.prune(keep_images)
         self.dirty = False
 
     def _missing_buffers(self, entry: dict) -> list[str]:
         store = self.buffer_store
         return [d for d in (entry.get("buffers") or []) if not store.has(d)]
+
+    def _missing_images(self, entry: dict) -> list[str]:
+        store = self.image_store
+        return [n for n in (entry.get("images") or []) if not store.has(n)]
 
     # --- internals -----------------------------------------------------------
 

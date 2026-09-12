@@ -42,6 +42,9 @@ dependencies = [
     "pybtex>=0.24",
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
+    # Build-time image compression (transforms/images.py): WebP re-encode +
+    # downscale of every inline figure. Wheels bundle libwebp.
+    "pillow>=10.0",
     # 0.23.6 ships marimo-team/marimo#9409, which makes
     # `MarimoIslandGenerator.from_file()` propagate the notebook
     # filename so `__file__` / `mo.notebook_dir()` resolve correctly on

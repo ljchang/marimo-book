@@ -49,6 +49,15 @@ widget_defaults:
   CompassWidget:
     b0: 3.0
 
+# Build-time image compression (on by default; shown here with defaults)
+images:
+  enabled: true
+  format: webp        # webp | original (externalize + de-duplicate only)
+  quality: 85
+  lossless: false
+  max_width: 1600     # px; wider renders are downscaled
+  min_bytes: 4096     # smaller payloads stay inline
+
 # Analytics
 analytics:
   provider: plausible   # plausible | google | none
@@ -200,6 +209,34 @@ by default; opt in per book.
 
 See [Building → Static reactivity](building.md#static-reactivity)
 for the full pipeline + tuning guide.
+
+### Images (`images`)
+
+Every image a notebook produces reaches the rendered page as an inline
+`data:` URI — matplotlib PNGs, `mo.image()` files, nilearn mosaics, and on
+WASM pages the same outputs a second time inside marimo's islands payload.
+Base64 costs 33 % over the bytes, a figure shown twice is embedded twice, and
+a 20-inch figure at 200 dpi is 4000 px wide on an 800 px column. With
+`images.enabled` (the default) the preprocessor decodes each unique payload
+once, re-encodes raster images to WebP (lossy or lossless, whichever is
+smaller; alpha preserved), downscales anything wider than `max_width`,
+writes the result once to `assets/img/<sha256>.<ext>` and points the page at
+it with `loading="lazy"` and intrinsic `width`/`height`. SVG and GIF pass
+through unchanged but are still externalized and de-duplicated. Data URIs
+inside fenced code blocks (the notebook's displayed source) are left alone.
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `images.enabled` | bool | `true` | Set `false` to keep every image inline as before |
+| `images.format` | `webp` \| `original` | `webp` | `original` only externalizes and de-duplicates; bytes are unchanged |
+| `images.quality` | int 1–100 | `85` | Lossy WebP quality. Lossless is always tried too and wins when smaller (flat line art) |
+| `images.lossless` | bool | `false` | Force lossless WebP (pixel-exact; larger for photos and antialiased renders) |
+| `images.max_width` | int px | `1600` | Downscale wider images. `1600` keeps figures crisp at 2× device pixel ratio on an ~800 px column; `0` disables |
+| `images.min_bytes` | int | `4096` | Payloads below this stay inline (a request per icon costs more than it saves) |
+
+Files are cached with the anywidget buffers: `.marimo_book_cache/img/` for
+live renders and `_rendered/img/` for `mode: cached` pages (commit it with
+the bodies). Changing any `images` key re-renders affected pages.
 
 ### Bibliography
 

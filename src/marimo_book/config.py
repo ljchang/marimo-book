@@ -157,6 +157,38 @@ class Precompute(BaseModel):
     exclude_pages: list[str] = Field(default_factory=list)
 
 
+class Images(BaseModel):
+    """Build-time image policy for rendered pages.
+
+    Every image a notebook produces reaches the page as an inline ``data:``
+    URI (matplotlib PNGs, ``mo.image()`` files, nilearn mosaics, and on WASM
+    pages the same outputs again inside marimo's islands payload). When
+    ``enabled`` the preprocessor decodes each unique payload once, re-encodes
+    raster images to WebP (alpha preserved), downscales anything wider than
+    ``max_width``, writes the result once to ``assets/img/<sha256>.<ext>`` and
+    points the page at it with ``loading="lazy"`` and intrinsic dimensions.
+    SVG and GIF pass through unchanged (vector / animation) but are still
+    externalized and de-duplicated. Files are cached alongside the anywidget
+    buffers (``.marimo_book_cache/img/``, ``_rendered/img/`` for
+    ``mode: cached`` pages).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    # "webp" re-encodes raster images; "original" only externalizes and
+    # de-duplicates (bytes unchanged).
+    format: Literal["webp", "original"] = "webp"
+    quality: int = Field(default=85, ge=1, le=100)
+    lossless: bool = False
+    # Downscale wider images (px). 1600 keeps figures crisp at 2× device
+    # pixel ratio on an ~800 px content column while dropping the 3000–4000 px
+    # renders that high-dpi figsizes produce.
+    max_width: int = Field(default=1600, ge=0)
+    # Smaller payloads stay inline: a request per icon costs more than it saves.
+    min_bytes: int = Field(default=4096, ge=0)
+
+
 class Analytics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -534,6 +566,9 @@ class Book(BaseModel):
     # defaults; whatever the widget's JS needs but neither source supplies
     # stays undefined (and should be guarded client-side).
     widget_defaults: dict[str, dict[str, object]] = Field(default_factory=dict)
+
+    # Build-time image compression + externalization (see Images).
+    images: Images = Field(default_factory=Images)
 
     # TOC
     toc: list[TocEntry]

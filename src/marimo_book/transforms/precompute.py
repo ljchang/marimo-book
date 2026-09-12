@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .images import ImageOptions, ImageStore
 from .marimo_export import (
     DEFAULT_EXPORT_TIMEOUT,
     cells_to_markdown_segments,
@@ -589,6 +590,8 @@ def precompute_page(
     suppress_warnings: bool = False,
     timeout: float | None = DEFAULT_EXPORT_TIMEOUT,
     buffer_store: BufferStore | None = None,
+    image_store: ImageStore | None = None,
+    image_options: ImageOptions | None = None,
 ) -> PrecomputeResult:
     """Re-export a notebook once per (widget, value), return the staged body.
 
@@ -621,7 +624,12 @@ def precompute_page(
     base_export = export_notebook(
         py_path, sandbox=sandbox, suppress_warnings=suppress_warnings, timeout=timeout
     )
-    base_segments = cells_to_markdown_segments(base_export, buffer_store=buffer_store)
+    base_segments = cells_to_markdown_segments(
+        base_export,
+        buffer_store=buffer_store,
+        image_store=image_store,
+        image_options=image_options,
+    )
     base_seconds = time.monotonic() - t0
     base_diff_key_by_idx = {idx: _diff_key(html) for idx, html in base_segments}
 
@@ -680,7 +688,12 @@ def precompute_page(
                     suppress_warnings=suppress_warnings,
                     timeout=timeout,
                 )
-                segments = cells_to_markdown_segments(export, buffer_store=buffer_store)
+                segments = cells_to_markdown_segments(
+                    export,
+                    buffer_store=buffer_store,
+                    image_store=image_store,
+                    image_options=image_options,
+                )
             except Exception:  # noqa: BLE001 — keep the build alive on a single bad value
                 continue
             delta_md = {
@@ -796,7 +809,12 @@ def precompute_page(
                     suppress_warnings=suppress_warnings,
                     timeout=timeout,
                 )
-                segments = cells_to_markdown_segments(export, buffer_store=buffer_store)
+                segments = cells_to_markdown_segments(
+                    export,
+                    buffer_store=buffer_store,
+                    image_store=image_store,
+                    image_options=image_options,
+                )
             except Exception:  # noqa: BLE001
                 continue
             delta_md = {

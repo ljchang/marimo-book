@@ -37,6 +37,7 @@ from pathlib import Path
 
 from .anywidgets import contains_anywidget, rewrite_anywidget_html
 from .callouts import render_callout_html
+from .images import ImageOptions, ImageStore, externalize_images
 from .mime_outputs import (
     MIMEBUNDLE_MIME,
     VEGA_MIME_TYPES,
@@ -378,6 +379,8 @@ def cells_to_markdown(
     hide_first_code_cell: bool = True,
     widget_defaults: dict | None = None,
     buffer_store: BufferStore | None = None,
+    image_store: ImageStore | None = None,
+    image_options: ImageOptions | None = None,
 ) -> str:
     """Render the notebook's cells to a single Markdown string.
 
@@ -391,6 +394,8 @@ def cells_to_markdown(
         hide_first_code_cell=hide_first_code_cell,
         widget_defaults=widget_defaults,
         buffer_store=buffer_store,
+        image_store=image_store,
+        image_options=image_options,
     )
     return _join_segments(segments)
 
@@ -401,6 +406,8 @@ def cells_to_markdown_segments(
     hide_first_code_cell: bool = True,
     widget_defaults: dict | None = None,
     buffer_store: BufferStore | None = None,
+    image_store: ImageStore | None = None,
+    image_options: ImageOptions | None = None,
 ) -> list[tuple[int, str]]:
     """Render the notebook into ``(cell_index, body)`` tuples, in order.
 
@@ -433,6 +440,10 @@ def cells_to_markdown_segments(
             anywidget_ctx=anywidget_ctx,
         )
         if rendered:
+            # Inline data: URIs → content-addressed files (see images.py). Done
+            # per cell so precompute deltas carry file references too.
+            if image_store is not None and image_options is not None:
+                rendered = externalize_images(rendered, image_store, image_options)
             out.append((idx, rendered))
             if cell.get("cell_type") == "markdown":
                 first_md_done = True

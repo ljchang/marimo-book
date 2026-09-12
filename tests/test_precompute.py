@@ -1027,3 +1027,6 @@ def test_diff_key_masks_per_run_anywidget_model_ids() -> None:
     # The HTML-escaped form (text/markdown downgrade) is masked too.
     esc = "data-initial-value='{&quot;model_id&quot;:&quot;" + "d" * 32 + "&quot;}'"
     assert "d" * 32 not in _diff_key(esc)
+    # ipywidgets trait references to sibling models (layout/style) too.
+    layout = '{"height": 400, "layout": "IPY_MODEL_' + "e" * 32 + '"}'
+    assert "e" * 32 not in _diff_key(layout)

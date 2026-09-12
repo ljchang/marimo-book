@@ -134,10 +134,13 @@ def _is_app_cell_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
 # export. Two renders of an unchanged widget cell therefore never compare
 # equal, so every anywidget on the page was flagged "reactive" and copied
 # into the lookup table once per slider value. Mask the ids where marimo
-# writes them; the widget's real state (data-initial-value traits,
-# data-buffers content hashes, the ESM data: URL) still participates.
+# writes them — including ``IPY_MODEL_<id>`` references inside the state
+# (ipywidgets' ``layout``/``style`` traits point at sibling models); the
+# widget's real state (data-initial-value traits, data-buffers content
+# hashes, the ESM data: URL) still participates.
 _MODEL_ID_RE = re.compile(
-    r"((?:data-model-id|object-id|random-id)=['\"]*|(?:&quot;|\")?model_id(?:&quot;|\")?\s*:\s*[\"'&quot;]*)"
+    r"((?:data-model-id|object-id|random-id)=['\"]*|(?:&quot;|\")?model_id(?:&quot;|\")?\s*:\s*[\"'&quot;]*"
+    r"|IPY_MODEL_)"
     r"[0-9a-f]{32}"
 )
 

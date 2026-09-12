@@ -5,6 +5,17 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Images inside `<iframe srcdoc>` were downscaled**, which garbles viewers
+  that slice a sprite mosaic by fixed pixel geometry (nilearn's
+  `view_img`/brainsprite): the 0.1.35 image pipeline resized the embedded
+  sprite to `max_width` and every slice landed in the wrong place. Images
+  referenced from a `srcdoc` attribute are still compressed to WebP and
+  de-duplicated, but keep their pixel dimensions.
+
 ## [0.1.35] — 2026-09-12
 
 ### Added

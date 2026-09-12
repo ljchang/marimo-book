@@ -1001,3 +1001,29 @@ def test_transient_precompute_skip_not_frozen_into_cache(tmp_path: Path) -> None
     report2 = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src")
     assert report2.pages_cached == 0
     assert report2.widgets_precomputed == 1
+
+
+def test_diff_key_masks_per_run_anywidget_model_ids() -> None:
+    """Two exports of an unchanged widget cell differ only in the model ids
+    marimo mints per run; they must compare equal. Real state differences
+    (a different buffer hash) must still register."""
+    from marimo_book.transforms.precompute import _diff_key
+
+    def mount(mid: str, blob: str) -> str:
+        return (
+            f"<marimo-ui-element object-id='{mid}' random-id='{mid}'>"
+            f'<div class="marimo-book-anywidget" data-model-id=\'"{mid}"\' '
+            f'data-initial-value=\'{{"model_id": "{mid}", "height": 400}}\' '
+            f'data-buffers=\'[{{"path": ["v"], "url": "assets/anywidget/{blob}.bin"}}]\'>'
+            f"</div></marimo-ui-element>"
+        )
+
+    a = mount("a" * 32, "1" * 64)
+    b = mount("b" * 32, "1" * 64)
+    c = mount("c" * 32, "2" * 64)
+    assert _diff_key(a) == _diff_key(b)
+    assert _diff_key(a) != _diff_key(c)
+    assert "a" * 32 not in _diff_key(a)
+    # The HTML-escaped form (text/markdown downgrade) is masked too.
+    esc = "data-initial-value='{&quot;model_id&quot;:&quot;" + "d" * 32 + "&quot;}'"
+    assert "d" * 32 not in _diff_key(esc)

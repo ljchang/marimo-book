@@ -5,6 +5,18 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Precompute flagged every anywidget cell as reactive.** marimo mints a
+  fresh model id per export for each anywidget (and the
+  `<marimo-ui-element object-id/random-id>` wrapper), so two renders of an
+  unchanged widget cell never compared equal in `_diff_key` and the whole
+  cell — now including its baked buffers — was copied into the lookup table
+  once per slider value. The diff key masks those ids; real state
+  differences (traits, buffer content hashes, ESM) still register.
+
 ## [0.1.32] — 2026-09-11
 
 ### Added

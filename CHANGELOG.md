@@ -5,6 +5,19 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **anywidgets inside `mo.vstack`/`mo.hstack` rendered as escaped text.**
+  marimo emits a widget placed in a container as a `<marimo-mime-renderer>`
+  whose `text/markdown` payload is the *escaped* `<marimo-anywidget>` markup.
+  The mime-renderer pass added in 0.1.31 (#91) turned that into a `<pre>` of
+  angle brackets instead of a mount — the same text/markdown downgrade the
+  top-level path already handled. Escaped marimo custom elements are now
+  unescaped so the anywidget pass rewraps them (dartbrains' Connectivity and
+  ICA component viewers).
+
 ## [0.1.36] — 2026-09-12
 
 ### Fixed

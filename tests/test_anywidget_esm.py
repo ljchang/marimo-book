@@ -157,3 +157,29 @@ def test_wasm_page_ships_loadable_module(tmp_path: Path) -> None:
     staged = (out_dir / "docs" / "index.md").read_text(encoding="utf-8")
     assert 'class="marimo-book-anywidget"' in staged
     assert "data-js-url" in staged and "data:text/javascript" in staged
+
+
+def test_anywidget_inside_vstack_is_rewrapped_not_escaped() -> None:
+    """Inside mo.vstack marimo emits the widget as a <marimo-mime-renderer>
+    carrying *escaped* <marimo-anywidget> markup under text/markdown. That
+    must become a mount, not a <pre> of angle brackets (regression from the
+    #73 mime-renderer pass)."""
+    import html as _html
+
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    inner = (
+        '<marimo-anywidget data-initial-value=\'{"model_id":"m1"}\' '
+        "data-model-id='\"m1\"' data-label='null'></marimo-anywidget>"
+    )
+    data_attr = _html.escape(json.dumps(inner), quote=True)
+    vstack = (
+        "<div style='display: flex'>"
+        '<span class="markdown"><strong>Component 1 of 10</strong></span>'
+        f"<marimo-mime-renderer data-mime='&quot;text/markdown&quot;' data-data='{data_attr}'>"
+        "</marimo-mime-renderer></div>"
+    )
+    out = rewrite_anywidget_html(vstack, esm_by_model={"m1": "data:text/javascript;base64,AAAA"})
+    assert out.count('class="marimo-book-anywidget"') == 1
+    assert "&lt;marimo-anywidget" not in out and "<pre" not in out
+    assert "data-js-url='\"data:text/javascript;base64,AAAA\"'" in out or "data-js-url" in out

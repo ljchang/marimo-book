@@ -16,6 +16,7 @@ require marimo's kernel and have no static meaning.
 from __future__ import annotations
 
 import ast
+import html
 import json
 import re
 
@@ -267,7 +268,18 @@ def _rewrap_mime_renderer(node: Tag, soup: BeautifulSoup) -> None:
     """
     mime = _decode_attr_string(node.get("data-mime"))
     data = _decode_attr_string(node.get("data-data"))
-    rendered = render_mime_fragment(mime, data) if mime and data is not None else None
+    rendered = None
+    if mime in ("text/markdown", "text/html") and data is not None:
+        # An anywidget (or any marimo custom element) placed inside
+        # mo.vstack & co. arrives here as *escaped* markup under a text mime —
+        # the same downgrade `_render_mime_bundle` handles for top-level
+        # outputs. Unescape it so the later passes see a real
+        # <marimo-anywidget> to rewrap instead of a <pre> of angle brackets.
+        unescaped = html.unescape(data).strip()
+        if unescaped.startswith("<marimo-"):
+            rendered = unescaped
+    if rendered is None:
+        rendered = render_mime_fragment(mime, data) if mime and data is not None else None
     if not rendered:
         node.decompose()
         return

@@ -5,6 +5,17 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Precompute still flagged anywidget cells as reactive via `IPY_MODEL_`
+  references.** ipywidgets' `layout`/`style` traits point at sibling models
+  as `IPY_MODEL_<id>` inside `data-initial-value`, and those ids are minted
+  per export like the mount's own. `_diff_key` masks them too; on
+  dartbrains' Connectivity chapter the lookup table shrinks from nine
+  "reactive" cells to the one the slider actually drives.
+
 ## [0.1.33] — 2026-09-11
 
 ### Fixed

@@ -348,3 +348,34 @@ def test_precompute_splice_stages_buffers_referenced_only_by_deltas(tmp_path: Pa
     with patch("marimo_book.preprocessor.precompute_page", return_value=result):
         report2 = Preprocessor(book, book_dir=tmp_path).build(out_dir=tmp_path / "_site_src2")
     assert any("anywidget buffers missing" in e for e in report2.errors), report2.errors
+
+
+def test_build_cache_does_not_prune_buffers_after_a_partial_scan(tmp_path: Path) -> None:
+    """An OSError while scanning cached bodies must skip the blob prune —
+    otherwise blobs still referenced by untouched bodies would be deleted."""
+    from unittest.mock import patch
+
+    from marimo_book.preprocessor import BuildCache
+
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
+    (tmp_path / "content").mkdir()
+    src = tmp_path / "content" / "nb.py"
+    src.write_text("x = 1\n", encoding="utf-8")
+    cache = BuildCache(tmp_path, book)
+    digest = cache.buffer_store.put(b"still-referenced")
+    cache.record(
+        "content/nb.py",
+        src,
+        "nb.md",
+        body=buffer_rel_url(digest),
+        apply_rewrites=True,
+        mode="static",
+    )
+    with patch.object(Path, "read_text", side_effect=OSError("disk went away")):
+        cache.save()
+    assert cache.buffer_store.has(digest)
+    # A clean save still prunes what nothing references.
+    orphan = cache.buffer_store.put(b"orphan")
+    cache.dirty = True
+    cache.save()
+    assert cache.buffer_store.has(digest) and not cache.buffer_store.has(orphan)

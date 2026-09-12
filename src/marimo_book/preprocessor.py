@@ -293,17 +293,21 @@ class BuildCache:
         keep = {(self.bodies_dir / e["body_file"]).resolve() for e in self.entries.values()}
         keep_buffers: set[str] = set()
         try:
+            # Collect the buffer hashes the live bodies reference *before*
+            # touching anything: a partial scan must never feed the prune
+            # below, or blobs still in use would be deleted and every widget
+            # notebook forced to re-render.
+            for body_path in keep:
+                keep_buffers |= referenced_buffer_hashes(
+                    body_path.read_text(encoding="utf-8", errors="replace")
+                )
             for f in sorted(self.bodies_dir.rglob("*"), reverse=True):
                 if f.is_file() and f.resolve() not in keep:
                     f.unlink(missing_ok=True)
                 elif f.is_dir() and not any(f.iterdir()):
                     f.rmdir()
-            for body_path in keep:
-                keep_buffers |= referenced_buffer_hashes(
-                    body_path.read_text(encoding="utf-8", errors="replace")
-                )
         except OSError:
-            pass  # best-effort hygiene; never fail a build over it
+            return  # best-effort hygiene; never fail a build (or prune) over it
         self.buffer_store.prune(keep_buffers)
 
     # --- internals ----------------------------------------------------------

@@ -277,3 +277,32 @@ def test_rendered_store_commits_images_and_tracks_them(tmp_path: Path) -> None:
     store.image_store.path(name).unlink()
     assert not store.is_fresh("nb.py", src, body_sig="sig")
     assert "image" in store.reason_stale("nb.py", src, body_sig="sig")
+
+
+def test_blog_notebook_post_stages_and_localizes_images(tmp_path: Path) -> None:
+    """Blog posts are written by _stage_blog, not _finalize_page — they need
+    the same asset staging, and URLs relative to blog/posts/<stem>/."""
+    png = _png(600, 300)
+    book = _book_with_image_notebook(tmp_path, png)
+    payload = book.model_dump(mode="json")
+    payload["blog"] = {"enabled": True}
+    book = Book.model_validate(payload)
+    posts = tmp_path / "blog" / "posts"
+    posts.mkdir(parents=True)
+    src = tmp_path / "content" / "figs.py"
+    post = posts / "2026-09-12-figs.py"
+    post.write_text(
+        '# /// blog\n# title = "Figures"\n# date = "2026-09-12"\n# ///\n'
+        + src.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "_site_src"
+    report = Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+    assert not report.errors, report.errors
+    staged_post = out_dir / "docs" / "blog" / "posts" / "2026-09-12-figs.md"
+    page = staged_post.read_text(encoding="utf-8")
+    names = referenced_image_names(page)
+    assert len(names) == 1
+    (name,) = names
+    assert f'src="../../../{IMAGE_URL_PREFIX}{name}"' in page  # /blog/posts/<stem>/ → three up
+    assert (out_dir / "docs" / IMAGE_URL_PREFIX / name).exists()

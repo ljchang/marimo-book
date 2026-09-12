@@ -1220,20 +1220,7 @@ class Preprocessor:
         # reference anywidget buffers the base render never did (a viewer
         # whose volume changes with the slider). Stage those too, or the
         # shim 404s on them at runtime.
-        missing = stage_referenced_buffers(page, docs_dir, [_transient_buffer_store(self.book_dir)])
-        if missing:
-            raise RuntimeError(
-                f"{entry.file}: anywidget buffers missing from the build cache "
-                f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
-            )
-        missing_images = stage_referenced_images(
-            page, docs_dir, [_transient_image_store(self.book_dir)]
-        )
-        if missing_images:
-            raise RuntimeError(
-                f"{entry.file}: images missing from the build cache "
-                f"({', '.join(n[:12] for n in missing_images)}); re-run with --rebuild"
-            )
+        _stage_page_assets(page, docs_dir, self.book_dir, str(entry.file))
         return spliced_body, {"widgets": len(kept), "skipped": skipped, "warnings": warnings}
 
     def _stage_changelog(self, docs_dir: Path) -> bool:
@@ -1313,7 +1300,19 @@ class Preprocessor:
                 body = meta.body
             body = insert_teaser(body)
             staged = out_posts / (src.stem + ".md")
-            staged.write_text(render_front_matter(meta) + "\n" + body, encoding="utf-8")
+            # Same asset contract as TOC pages: a notebook post's figures and
+            # widget buffers were externalized at render time and must be
+            # staged + localized for the post's directory URL.
+            try:
+                _stage_page_assets(body, docs_dir, self.book_dir, src.name)
+            except RuntimeError as exc:
+                report.errors.append(f"{src.name}: {exc}")
+                continue
+            page = localize_asset_urls(
+                render_front_matter(meta) + "\n" + body,
+                staged.relative_to(docs_dir),
+            )
+            staged.write_text(page, encoding="utf-8")
             report.pages += 1
 
         index = out_blog / "index.md"
@@ -1530,29 +1529,10 @@ def _finalize_page(
             # [@key] text, so .bib edits apply without invalidating renders.
             bib = load_bibliography(tuple(book_dir / f for f in book.bibliography.files))
             body = apply_citations(body, bib=bib, style=book.cite_style)
-    # Anywidget buffers the mounts reference live in a content-addressed
-    # store (transient cache for live renders, ``_rendered/`` for committed
+    # Anywidget buffers and externalized images live in content-addressed
+    # stores (transient cache for live renders, ``_rendered/`` for committed
     # ones); copy them under docs/ so mkdocs ships them next to the page.
-    missing = stage_referenced_buffers(
-        body,
-        docs_dir,
-        [_transient_buffer_store(book_dir), RenderedStore(book_dir).buffer_store],
-    )
-    if missing:
-        raise RuntimeError(
-            f"{entry.file}: anywidget buffers missing from the build cache "
-            f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
-        )
-    missing_images = stage_referenced_images(
-        body,
-        docs_dir,
-        [_transient_image_store(book_dir), RenderedStore(book_dir).image_store],
-    )
-    if missing_images:
-        raise RuntimeError(
-            f"{entry.file}: images missing from the build cache "
-            f"({', '.join(n[:12] for n in missing_images)}); re-run with --rebuild"
-        )
+    _stage_page_assets(body, docs_dir, book_dir, str(entry.file))
     # Bodies keep site-root-relative asset URLs (so cached bodies are
     # page-location-independent); make them relative to this page's URL.
     page = localize_asset_urls(_compose_page(buttons, body), rel_under_docs)
@@ -1604,6 +1584,31 @@ def _transient_image_store(book_dir: Path) -> ImageStore:
 
 def _image_options(book: Book) -> ImageOptions:
     return ImageOptions(**book.images.model_dump())
+
+
+def _stage_page_assets(body: str, docs_dir: Path, book_dir: Path, label: str) -> None:
+    """Copy every anywidget buffer and externalized image ``body`` references
+    into ``docs/`` (from the transient cache or the committed ``_rendered/``
+    tree). Every writer of a page body must call this — TOC pages, cached
+    replays, precompute splices and blog posts alike — or the page 404s on
+    its own assets at runtime."""
+    rendered = RenderedStore(book_dir)
+    missing = stage_referenced_buffers(
+        body, docs_dir, [_transient_buffer_store(book_dir), rendered.buffer_store]
+    )
+    if missing:
+        raise RuntimeError(
+            f"{label}: anywidget buffers missing from the build cache "
+            f"({', '.join(d[:12] for d in missing)}); re-run with --rebuild"
+        )
+    missing_images = stage_referenced_images(
+        body, docs_dir, [_transient_image_store(book_dir), rendered.image_store]
+    )
+    if missing_images:
+        raise RuntimeError(
+            f"{label}: images missing from the build cache "
+            f"({', '.join(n[:12] for n in missing_images)}); re-run with --rebuild"
+        )
 
 
 def _render_marimo(

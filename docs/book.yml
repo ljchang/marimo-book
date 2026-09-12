@@ -101,6 +101,7 @@ toc:
   - section: Publishing
     children:
       - file: content/deploying.md
+      - file: content/assignments-and-grading.md
       - file: content/link_checks.md
 
   - section: Project

@@ -333,3 +333,80 @@ def test_link_to_promoted_index_page_validates_by_staged_name(tmp_path: Path) ->
     (tmp_path / "content" / "b.md").write_text("# B\n[home](index.md)\n", encoding="utf-8")
     report = run_checks(book, tmp_path)
     assert not any("index.md" in w for w in report.warnings)
+
+
+# --- shell: zensical -----------------------------------------------------------
+
+
+def test_zensical_shell_rejects_features_it_would_silently_drop(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """zensical ignores unsupported mkdocs plugins with 'No issues found',
+    so `check` has to be the thing that refuses the combination."""
+    from marimo_book import checks
+
+    monkeypatch.setattr(checks, "_module_available", lambda name: True)
+    (tmp_path / "blog").mkdir()
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "toc": [{"file": "content/a.md"}],
+            "shell": "zensical",
+            "social_cards": True,
+            "blog": {"enabled": True},
+            "check_external_links": True,
+            "pdf_export": True,
+        },
+        files=["content/a.md"],
+    )
+    report = checks.run_checks(book, tmp_path)
+    flagged = [e for e in report.errors if "shell: zensical" in e]
+    assert len(flagged) == 4
+    for label in ("social_cards", "blog.enabled", "check_external_links", "pdf_export"):
+        assert any(e.startswith(f"{label}:") for e in flagged), label
+
+
+def test_zensical_shell_with_supported_features_passes(tmp_path: Path, monkeypatch) -> None:
+    from marimo_book import checks
+
+    monkeypatch.setattr(checks, "_module_available", lambda name: True)
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "toc": [{"file": "content/a.md"}],
+            "shell": "zensical",
+            "cross_references": True,
+            "include_changelog": True,
+        },
+        files=["content/a.md"],
+    )
+    report = checks.run_checks(book, tmp_path)
+    assert report.ok, report.errors
+
+
+def test_mkdocs_shell_never_triggers_zensical_errors(tmp_path: Path, monkeypatch) -> None:
+    from marimo_book import checks
+
+    monkeypatch.setattr(checks, "_module_available", lambda name: True)
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/a.md"}], "social_cards": True},
+        files=["content/a.md"],
+    )
+    report = checks.run_checks(book, tmp_path)
+    assert not any("zensical" in e for e in report.errors)
+
+
+def test_zensical_shell_needs_extra(tmp_path: Path, monkeypatch) -> None:
+    from marimo_book import checks
+
+    monkeypatch.setattr(checks, "_module_available", lambda name: name != "zensical")
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/a.md"}], "shell": "zensical"},
+        files=["content/a.md"],
+    )
+    report = checks.run_checks(book, tmp_path)
+    assert any("[zensical]" in e for e in report.errors)

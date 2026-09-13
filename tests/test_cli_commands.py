@@ -316,3 +316,149 @@ def test_check_strict_promotes_warnings(runner: CliRunner, tmp_path: Path) -> No
     result = runner.invoke(app, ["check", "-b", str(book_yml), "--strict"])
     assert result.exit_code == 1
     assert "broken relative link" in result.output
+
+
+# --- shell dispatch (mkdocs / zensical) --------------------------------------
+
+
+def test_shell_command_shapes(tmp_path: Path, monkeypatch) -> None:
+    import importlib.util
+
+    from marimo_book import cli
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    cfg = str(tmp_path / "mkdocs.yml")
+
+    mk = cli._shell_command("mkdocs", "build", tmp_path, strict=True)
+    assert mk[1:] == ["-m", "mkdocs", "build", "--strict", "--config-file", cfg]
+    zb = cli._shell_command("zensical", "build", tmp_path, strict=True)
+    assert zb[1:] == ["-m", "zensical", "build", "-f", cfg, "--strict"]
+    # zensical serve --strict is unsupported upstream: never forwarded.
+    zs = cli._shell_command("zensical", "serve", tmp_path, strict=True, dev_addr="127.0.0.1:1")
+    assert zs[1:] == ["-m", "zensical", "serve", "-f", cfg, "-a", "127.0.0.1:1"]
+    ms = cli._shell_command("mkdocs", "serve", tmp_path, dev_addr="127.0.0.1:1")
+    assert ms[1:] == ["-m", "mkdocs", "serve", "--config-file", cfg, "--dev-addr", "127.0.0.1:1"]
+
+
+def test_shell_command_zensical_missing_extra_exits(tmp_path: Path, monkeypatch) -> None:
+    import importlib.util
+
+    import typer
+
+    from marimo_book import cli
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    with pytest.raises(typer.Exit) as exc:
+        cli._shell_command("zensical", "build", tmp_path)
+    assert exc.value.exit_code == 1
+
+
+def _write_md_book(tmp_path: Path, extra_yaml: str = "") -> Path:
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Hello zensical\n\nBody.\n")
+    (tmp_path / "book.yml").write_text(
+        f"title: ZBook\ntoc:\n  - file: content/intro.md\n{extra_yaml}"
+    )
+    return tmp_path / "book.yml"
+
+
+def test_build_shell_override_rejects_unknown(runner: CliRunner, tmp_path: Path) -> None:
+    book_file = _write_md_book(tmp_path)
+    result = runner.invoke(app, ["build", "-b", str(book_file), "--shell", "hugo"])
+    assert result.exit_code == 2
+    assert "Unknown --shell" in result.output
+
+
+def test_build_zensical_syncs_output_to_site_dir(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    """Zensical must build inside _site_src; the CLI mirrors it to --output."""
+    import importlib.util
+    import subprocess
+
+    from marimo_book import cli
+    from marimo_book.shell import ZENSICAL_SITE_SUBDIR
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd=None, **kw):
+        calls.append(list(cmd))
+        built = Path(cwd) / ZENSICAL_SITE_SUBDIR
+        built.mkdir()
+        (built / "index.html").write_text("<html>zensical</html>")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    book_file = _write_md_book(tmp_path)
+    # Pre-existing stale output must be replaced, like mkdocs does.
+    (tmp_path / "_site").mkdir()
+    (tmp_path / "_site" / "stale.html").write_text("old")
+
+    result = runner.invoke(app, ["build", "-b", str(book_file), "--shell", "zensical"])
+    assert result.exit_code == 0, result.output
+    assert calls and calls[0][1:4] == ["-m", "zensical", "build"]
+    assert (tmp_path / "_site" / "index.html").read_text() == "<html>zensical</html>"
+    assert not (tmp_path / "_site" / "stale.html").exists()
+    assert "Running zensical build" in result.output
+
+
+def test_build_shell_from_book_yml(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    import importlib.util
+    import subprocess
+
+    import yaml
+
+    from marimo_book import cli
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd=None, **kw):
+        calls.append(list(cmd))
+        (Path(cwd) / "site").mkdir(exist_ok=True)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    book_file = _write_md_book(tmp_path, "shell: zensical\n")
+    result = runner.invoke(app, ["build", "-b", str(book_file)])
+    assert result.exit_code == 0, result.output
+    assert calls[0][2] == "zensical"
+    emitted = yaml.safe_load((tmp_path / "_site_src" / "mkdocs.yml").read_text())
+    assert emitted["site_dir"] == "site"
+    assert emitted["theme"]["variant"] == "classic"
+
+
+@pytest.mark.skipif(
+    __import__("importlib.util").util.find_spec("zensical") is None,
+    reason="zensical not installed (pip install 'marimo-book[zensical]')",
+)
+def test_build_with_real_zensical(runner: CliRunner, tmp_path: Path) -> None:
+    """End-to-end: the generated mkdocs.yml must be accepted by the real
+    zensical CLI (relative paths, theme.variant, our extension list)."""
+    book_file = _write_md_book(tmp_path, "shell: zensical\n")
+    result = runner.invoke(app, ["build", "-b", str(book_file), "--strict"])
+    assert result.exit_code == 0, result.output
+    index = tmp_path / "_site" / "index.html"
+    assert index.is_file()
+    html = index.read_text()
+    assert "Hello zensical" in html
+    assert "stylesheets/extra.css" in html
+    assert 'class="md-header' in html  # Material DOM preserved → extra.css applies
+
+
+def test_build_zensical_refuses_silently_dropped_features(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    """The guard runs before preprocessing: no notebook execution, no subprocess."""
+    from marimo_book import cli
+
+    def boom(*a, **kw):  # pragma: no cover - must not be reached
+        raise AssertionError("shell subprocess must not run")
+
+    monkeypatch.setattr(cli.subprocess, "run", boom)
+    book_file = _write_md_book(tmp_path, "social_cards: true\n")
+    result = runner.invoke(app, ["build", "-b", str(book_file), "--shell", "zensical"])
+    assert result.exit_code == 1
+    assert "social_cards: not supported by shell: zensical" in result.output
+    assert not (tmp_path / "_site_src").exists()

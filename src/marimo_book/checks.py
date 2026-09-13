@@ -34,6 +34,19 @@ _FEATURE_EXTRAS: tuple[tuple[str, str, str, Callable[[Book], bool]], ...] = (
     ("check_external_links: true", "htmlproofer", "linkcheck", lambda b: b.check_external_links),
     ("api_docs: enabled", "mkdocstrings", "api", lambda b: b.api_docs.enabled),
     ("blog.rss", "mkdocs_rss_plugin", "blog", lambda b: b.blog.enabled and b.blog.rss),
+    ("shell: zensical", "zensical", "zensical", lambda b: b.shell == "zensical"),
+)
+
+# Features whose mkdocs plugin zensical (0.0.x) silently ignores — the build
+# prints "No issues found" and the feature just doesn't happen, even under
+# --strict. Surfaced as errors so nobody ships a book missing its blog.
+# Revisit against https://zensical.org/docs/compatibility/mkdocs/plugins/
+# (tracked in ljchang/marimo-book#105).
+_ZENSICAL_UNSUPPORTED: tuple[tuple[str, Callable[[Book], bool]], ...] = (
+    ("social_cards", lambda b: b.social_cards),
+    ("blog.enabled", lambda b: b.blog.enabled),
+    ("check_external_links", lambda b: b.check_external_links),
+    ("pdf_export", lambda b: b.pdf_export),
 )
 
 # Relative markdown link targets: `[text](target)` — captures the target up
@@ -69,6 +82,7 @@ def run_checks(book: Book, book_dir: Path) -> CheckReport:
     _check_toc_files(book, book_dir, entries, report)
     _check_asset_paths(book, book_dir, report)
     _check_extras(book, report)
+    _check_shell_support(book, report)
     _check_cached_freshness(book, book_dir, entries, report)
     _check_duplicate_outputs(entries, report)
     _check_inert_knobs(book, report)
@@ -111,6 +125,18 @@ def _check_extras(book: Book, report: CheckReport) -> None:
         if is_enabled(book) and not _module_available(module):
             report.errors.append(
                 f"{label} needs the [{extra}] extra (pip install 'marimo-book[{extra}]')"
+            )
+
+
+def _check_shell_support(book: Book, report: CheckReport) -> None:
+    if book.shell != "zensical":
+        return
+    for label, is_enabled in _ZENSICAL_UNSUPPORTED:
+        if is_enabled(book):
+            report.errors.append(
+                f"{label}: not supported by shell: zensical — zensical ignores the "
+                f"plugin without warning, so the feature would silently vanish "
+                f"(use shell: mkdocs, or disable it)"
             )
 
 

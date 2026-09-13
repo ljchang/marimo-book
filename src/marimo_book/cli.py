@@ -7,6 +7,7 @@ generator land.
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -247,9 +248,18 @@ def build(
             "ignoring book.yml's dependencies.mode. Default: follow book.yml."
         ),
     ),
+    shell: str | None = typer.Option(
+        None,
+        "--shell",
+        help=(
+            "Static-site generator to run on the staged tree: 'mkdocs' "
+            "(default) or 'zensical' (opt-in, needs marimo-book[zensical]). "
+            "Overrides book.yml's shell:."
+        ),
+    ),
 ) -> None:
     """Build the static site from ``book.yml``."""
-    book = _load_or_exit(book_file)
+    book = _apply_shell_override(_load_or_exit(book_file), shell)
     book_dir = book_file.resolve().parent
     site_src = book_dir / "_site_src"
     site_dir = Path(output).resolve() if output.is_absolute() else (book_dir / output).resolve()
@@ -283,16 +293,106 @@ def build(
         raise typer.Exit(code=1)
     typer.echo(f"Preprocessing OK ({_summarise_report(report)} at {site_src}).")
 
-    typer.echo(f"Running mkdocs build → {site_dir}")
-    build_cmd = [sys.executable, "-m", "mkdocs", "build"]
-    if strict:
-        build_cmd.append("--strict")
-    build_cmd.extend(["--config-file", str(site_src / "mkdocs.yml")])
+    typer.echo(f"Running {book.shell} build → {site_dir}")
+    build_cmd = _shell_command(book.shell, "build", site_src, strict=strict)
     result = subprocess.run(build_cmd, cwd=site_src)
     if result.returncode != 0:
-        typer.echo("mkdocs build failed.", err=True)
+        typer.echo(f"{book.shell} build failed.", err=True)
         raise typer.Exit(code=result.returncode)
+    if book.shell == "zensical":
+        _sync_zensical_output(site_src, site_dir)
     typer.echo(f"Done. Site at {site_dir}")
+
+
+# --- shell dispatch -----------------------------------------------------------
+
+_SHELLS = ("mkdocs", "zensical")
+
+
+def _apply_shell_override(book, shell: str | None):
+    """Return ``book`` with ``shell`` swapped in when ``--shell`` was given.
+
+    Also refuses feature combinations the chosen shell would drop without
+    a word (zensical ignores unknown plugins and still reports "No issues
+    found"), so the failure happens here — before any notebook executes —
+    rather than as a mysteriously empty blog on the deployed site.
+    """
+    from .checks import CheckReport, _check_shell_support
+
+    if shell is not None:
+        if shell not in _SHELLS:
+            typer.echo(
+                f"Unknown --shell '{shell}' (expected one of: {', '.join(_SHELLS)}).", err=True
+            )
+            raise typer.Exit(code=2)
+        book = book.model_copy(update={"shell": shell})
+    report = CheckReport()
+    _check_shell_support(book, report)
+    if report.errors:
+        for err in report.errors:
+            typer.echo(f"  error: {err}", err=True)
+        raise typer.Exit(code=1)
+    return book
+
+
+def _shell_command(
+    shell: str,
+    action: str,
+    site_src: Path,
+    *,
+    strict: bool = False,
+    dev_addr: str | None = None,
+) -> list[str]:
+    """Build the ``mkdocs``/``zensical`` ``build``/``serve`` argv.
+
+    Both are run as ``python -m <shell>`` so the one that ends up on the
+    command line is the one installed next to marimo-book, not whatever
+    happens to be first on ``$PATH``. The two CLIs share the same shape;
+    only the config-file / dev-addr flag spellings differ.
+    """
+    config_file = str(site_src / "mkdocs.yml")
+    if shell == "zensical":
+        if importlib.util.find_spec("zensical") is None:
+            typer.echo(
+                "shell: zensical needs the [zensical] extra (pip install 'marimo-book[zensical]').",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        cmd = [sys.executable, "-m", "zensical", action, "-f", config_file]
+        # ``zensical serve --strict`` is "currently unsupported" upstream.
+        if strict and action == "build":
+            cmd.append("--strict")
+        if dev_addr:
+            cmd.extend(["-a", dev_addr])
+        return cmd
+    cmd = [sys.executable, "-m", "mkdocs", action]
+    if strict:
+        cmd.append("--strict")
+    cmd.extend(["--config-file", config_file])
+    if dev_addr:
+        cmd.extend(["--dev-addr", dev_addr])
+    return cmd
+
+
+def _sync_zensical_output(site_src: Path, site_dir: Path) -> None:
+    """Copy ``_site_src/site/`` (where zensical must build) to ``site_dir``.
+
+    Zensical refuses a ``site_dir`` outside its project root, so the
+    generated config points it at a subdirectory of ``_site_src`` and the
+    finished site is mirrored to the ``--output`` the user asked for — the
+    same location ``mkdocs build`` writes to, so deploy workflows stay
+    identical across shells. Mirrors mkdocs's own behaviour of replacing
+    ``site_dir`` wholesale.
+    """
+    from .shell import ZENSICAL_SITE_SUBDIR
+
+    built = (site_src / ZENSICAL_SITE_SUBDIR).resolve()
+    site_dir = site_dir.resolve()
+    if site_dir == built:
+        return
+    if site_dir.exists():
+        shutil.rmtree(site_dir)
+    shutil.copytree(built, site_dir)
 
 
 @app.command("render")
@@ -386,17 +486,23 @@ def serve(
             "~5-10s to every rebuild; leave off for fast iteration."
         ),
     ),
+    shell: str | None = typer.Option(
+        None,
+        "--shell",
+        help="Dev server to run: 'mkdocs' (default) or 'zensical'. Overrides book.yml's shell:.",
+    ),
 ) -> None:
     """Serve the book locally with live reload.
 
-    Runs an initial build, then starts mkdocs's dev server with livereload.
-    A watchdog observer re-runs the preprocessor on changes to book.yml or
-    content/*, and mkdocs picks up the resulting _site_src/docs/ updates to
-    refresh the browser. Ctrl-C stops both the observer and mkdocs cleanly.
+    Runs an initial build, then starts the shell's dev server (mkdocs or
+    zensical) with livereload. A watchdog observer re-runs the preprocessor
+    on changes to book.yml or content/*, and the dev server picks up the
+    resulting _site_src/docs/ updates to refresh the browser. Ctrl-C stops
+    both the observer and the server cleanly.
     """
     from .watcher import start_watcher
 
-    book = _load_or_exit(book_file)
+    book = _apply_shell_override(_load_or_exit(book_file), shell)
     book_dir = book_file.resolve().parent
     site_src = book_dir / "_site_src"
 
@@ -417,18 +523,9 @@ def serve(
         raise typer.Exit(code=1)
     typer.echo(f"Preprocessing OK ({_summarise_report(report)} at {site_src}).")
 
-    typer.echo(f"Starting mkdocs serve on http://{host}:{port}/")
-    mkdocs_cmd = [
-        sys.executable,
-        "-m",
-        "mkdocs",
-        "serve",
-        "--config-file",
-        str(site_src / "mkdocs.yml"),
-        "--dev-addr",
-        f"{host}:{port}",
-    ]
-    # Start mkdocs serve in its own process group so Ctrl-C in our terminal
+    typer.echo(f"Starting {book.shell} serve on http://{host}:{port}/")
+    mkdocs_cmd = _shell_command(book.shell, "serve", site_src, dev_addr=f"{host}:{port}")
+    # Start the dev server in its own process group so Ctrl-C in our terminal
     # doesn't propagate twice and produce duplicate tracebacks. We wait on it
     # in a try/finally to guarantee cleanup.
     mkdocs_proc = subprocess.Popen(mkdocs_cmd, cwd=site_src)

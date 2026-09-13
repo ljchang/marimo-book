@@ -231,3 +231,11 @@ def test_file_entry_allow_errors_flag(tmp_path: Path) -> None:
 
     book_yml.write_text(yaml.safe_dump({"title": "T", "toc": [{"file": "a.py"}]}))
     assert load_book(book_yml).toc[0].allow_errors is False
+
+
+def test_shell_defaults_to_mkdocs_and_accepts_zensical() -> None:
+    base = {"title": "T", "toc": [{"file": "a.md"}]}
+    assert Book.model_validate(base).shell == "mkdocs"
+    assert Book.model_validate({**base, "shell": "zensical"}).shell == "zensical"
+    with pytest.raises(ValidationError):
+        Book.model_validate({**base, "shell": "hugo"})

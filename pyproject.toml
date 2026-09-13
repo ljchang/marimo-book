@@ -126,6 +126,15 @@ blog = [
 api = [
     "mkdocstrings[python]>=1.0",
 ]
+# Opt-in alternative build shell: zensical, the Rust/Python successor to
+# Material for MkDocs by the same team. Enable via `shell: zensical` in
+# book.yml (or `--shell zensical`). Pre-1.0 upstream; the floor is the
+# first release verified against marimo-book's generated mkdocs.yml.
+# Not compatible with social_cards / blog / check_external_links /
+# pdf_export yet — `marimo-book check` enforces that.
+zensical = [
+    "zensical>=0.0.62",
+]
 
 [project.urls]
 Homepage = "https://ljchang.github.io/marimo-book/"

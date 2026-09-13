@@ -499,3 +499,21 @@ def test_sync_zensical_output_guards_ancestor(tmp_path: Path) -> None:
     # Sibling output is the supported case.
     cli._sync_zensical_output(site_src, tmp_path / "_site")
     assert (tmp_path / "_site").is_dir()
+
+
+def test_build_zensical_missing_extra_fails_before_preprocessing(
+    runner: CliRunner, tmp_path: Path, monkeypatch
+) -> None:
+    import importlib.util
+
+    from marimo_book import cli
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("ran"))
+    )
+    book_file = _write_md_book(tmp_path, "shell: zensical\n")
+    result = runner.invoke(app, ["build", "-b", str(book_file)])
+    assert result.exit_code == 1, result.output
+    assert "[zensical] extra" in result.output
+    assert not (tmp_path / "_site_src").exists()

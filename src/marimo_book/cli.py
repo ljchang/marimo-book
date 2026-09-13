@@ -330,11 +330,20 @@ def _apply_shell_override(book, shell: str | None):
         book = book.model_copy(update={"shell": shell})
     report = CheckReport()
     _check_shell_support(book, report)
+    if book.shell == "zensical" and importlib.util.find_spec("zensical") is None:
+        # Same probe `_shell_command` makes, but here it fires before
+        # preprocessing so a missing extra doesn't cost a full notebook run.
+        report.errors.append(_MISSING_ZENSICAL)
     if report.errors:
         for err in report.errors:
             typer.echo(f"  error: {err}", err=True)
         raise typer.Exit(code=1)
     return book
+
+
+_MISSING_ZENSICAL = (
+    "shell: zensical needs the [zensical] extra (pip install 'marimo-book[zensical]')."
+)
 
 
 def _shell_command(
@@ -355,10 +364,7 @@ def _shell_command(
     config_file = str(site_src / "mkdocs.yml")
     if shell == "zensical":
         if importlib.util.find_spec("zensical") is None:
-            typer.echo(
-                "shell: zensical needs the [zensical] extra (pip install 'marimo-book[zensical]').",
-                err=True,
-            )
+            typer.echo(_MISSING_ZENSICAL, err=True)
             raise typer.Exit(code=1)
         cmd = [sys.executable, "-m", "zensical", action, "-f", config_file]
         # ``zensical serve --strict`` is "currently unsupported" upstream.

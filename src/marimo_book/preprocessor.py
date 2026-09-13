@@ -450,7 +450,10 @@ def _book_signature(book: Book, *, book_dir: Path | None = None) -> str:
 # "7": anywidget mounts carry recorded model state (data-initial-value,
 # data-buffers, data-css); bodies rendered before start every widget from an
 # empty model and reference no buffers.
-_RENDER_OUTPUT_VERSION = "8"
+# 9 — text/markdown mime payloads render as HTML (or converted markdown)
+# instead of an escaped <pre>; bodies rendered before carry the escaped
+# markup for any mo.md placed inside a container.
+_RENDER_OUTPUT_VERSION = "9"
 
 
 def _pyodide_version() -> str | None:

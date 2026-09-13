@@ -50,7 +50,7 @@ same custom CSS/JS, with minor MiniJinja template tweaks.
 
 `marimo-book`'s architecture is deliberately shell-agnostic — the
 preprocessor emits plain Markdown + inline HTML, not mkdocs-plugin
-artifacts. **Since 0.1.38 you can opt in today** with `shell: zensical`
+artifacts. **Since 0.1.39 you can opt in today** with `shell: zensical`
 in `book.yml` or:
 
 ```diff

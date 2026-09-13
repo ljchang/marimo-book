@@ -84,9 +84,52 @@ def render_mime_fragment(mime: str, data: str) -> str | None:
         return render_mimebundle(data)
     if mime.startswith(("image/", "video/")):
         return _render_media(mime, data)
-    if mime in {"text/plain", "text/markdown", "text/latex", "text/csv"}:
+    if mime == "text/markdown":
+        return render_markdown(data) if data.strip() else ""
+    if mime in {"text/plain", "text/latex", "text/csv"}:
         return _pre(data) if data.strip() else ""
     return None
+
+
+_md_renderer = None
+
+
+def render_markdown(data: str) -> str:
+    """Static HTML for a ``text/markdown`` payload.
+
+    marimo ships ``mo.md`` under ``text/markdown`` but the payload is the
+    *already rendered* HTML (``<span class="markdown …">``) — it picks that
+    mime so its frontend sanitises the markup rather than because the text
+    is markdown source. Treat a payload that starts with a tag as HTML and
+    pass it through verbatim (an HTML-escaped tag is unescaped first);
+    render anything else as markdown source with the same Python-Markdown
+    extension stack mkdocs uses for the page body, so genuine markdown
+    (``_repr_markdown_`` objects, ``mo.md`` exported non-interactively)
+    lands as prose instead of a ``<pre>`` of raw markup.
+    """
+    global _md_renderer
+    text = data.strip()
+    if text.startswith("&lt;"):
+        text = html.unescape(text)
+    if text.startswith("<"):
+        return text
+    if _md_renderer is None:
+        import markdown as _md
+
+        from marimo_book.shell import markdown_extensions
+
+        names: list[str] = []
+        configs: dict[str, dict] = {}
+        for ext in markdown_extensions():
+            if isinstance(ext, dict):
+                ((name, cfg),) = ext.items()
+                names.append(name)
+                configs[name] = cfg
+            else:
+                names.append(ext)
+        _md_renderer = _md.Markdown(extensions=names, extension_configs=configs)
+    _md_renderer.reset()
+    return _md_renderer.convert(text)
 
 
 def render_mimebundle(data: str) -> str | None:

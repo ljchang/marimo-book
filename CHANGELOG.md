@@ -5,6 +5,39 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`mo.md` prose on WASM pages rendered as escaped HTML.** marimo ships
+  `mo.md` output under the `text/markdown` mime with the *rendered* HTML as
+  the payload (it picks that mime so its frontend sanitises the markup).
+  The mime-renderer pass added in 0.1.31 (#91) treated every
+  `text/markdown` payload as plain text and wrapped it in a `<pre>`, so
+  each prose cell of a `mode: wasm` chapter showed `<span class="markdown
+  …">` soup until the Pyodide kernel repainted it — and 0.1.37 (#102) only
+  rescued anywidgets inside that wrapper. A payload that is markup now
+  passes through as HTML (an escaped tag is unescaped first); genuine
+  markdown source renders through the same Python-Markdown stack as the
+  page body. Seen on dartbrains' MR Physics, Signal Processing and
+  Preprocessing chapters.
+- **A dependency bump left the build cache stale.** The build cache keyed
+  cached bodies on the notebook source, `book.yml` and the marimo-book
+  version only, so pages whose source was untouched kept the anywidget
+  JS and state baked by the *previous* package versions (dartbrains' ICA
+  viewer after an nltools upgrade). The signature now also hashes the
+  book's dependency lock file (`uv.lock`, `poetry.lock`, `pdm.lock`,
+  `Pipfile.lock`, `pixi.lock` or `requirements.txt`, first found in the
+  book root). Committed `_rendered/` bodies are deliberately unaffected —
+  refresh those with `marimo-book render`.
+
+### Added
+
+- **Precompute controls show the widget's `label=`.** A literal `label`
+  kwarg on a precomputed `mo.ui.slider`/`dropdown`/`radio`/`switch` is
+  carried into the widget metadata and replaces the generic "Adjust:"
+  prefix on the static control (`data-label` on the mount).
+
 ## [0.1.37] — 2026-09-12
 
 ### Fixed

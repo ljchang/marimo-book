@@ -469,6 +469,7 @@
 
     const built = buildControl(widget);
     if (!built) return;
+    if (widget.label) controlEl.setAttribute("data-label", String(widget.label));
 
     // Snapshot the initial (default-value) HTML of cells controlled by THIS
     // widget. Cells controlled by other widgets are left alone — that's
@@ -578,6 +579,7 @@
         `.marimo-book-precompute-control${sel}[data-precompute-widget="${CSS.escape(widgetMeta.var_name)}"]`
       );
       if (!controlEl || controlEl.getAttribute("data-mb-precompute-init")) return;
+      if (widgetMeta.label) controlEl.setAttribute("data-label", String(widgetMeta.label));
       built.input.addEventListener("input", applyValue);
       built.input.addEventListener("change", applyValue);
       controlEl.appendChild(built.wrap);

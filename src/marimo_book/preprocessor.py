@@ -153,7 +153,7 @@ class BuildCache:
         self.image_store = _transient_image_store(book_dir)
         self.force_rebuild = force_rebuild
         self.tool_version = _resolve_tool_version()
-        self.book_signature = _book_signature(book)
+        self.book_signature = _book_signature(book, book_dir=book_dir)
         self.entries: dict[str, dict] = {}
         self.dirty = False
         if not force_rebuild:
@@ -365,7 +365,40 @@ def _resolve_tool_version() -> str:
         return "0.0.0+unknown"
 
 
-def _book_signature(book: Book) -> str:
+_LOCK_FILE_NAMES: tuple[str, ...] = (
+    "uv.lock",
+    "poetry.lock",
+    "pdm.lock",
+    "Pipfile.lock",
+    "pixi.lock",
+    "requirements.txt",
+)
+
+
+def _environment_signature(book_dir: Path | None) -> str | None:
+    """Hash of the book's dependency lock file, or ``None`` when there is none.
+
+    A cached body was rendered by the *packages* installed at the time, not
+    only by the notebook source: a widget's baked JS/state, a plotting
+    library's markup, a data loader's output all move with a dependency bump
+    while the notebook bytes stay identical. Keying the build cache on the
+    first lock file found in the book root (``uv.lock``, ``poetry.lock``,
+    ``pdm.lock``, ``Pipfile.lock``, ``pixi.lock``, ``requirements.txt``)
+    makes such a bump re-render every page. It deliberately stays out of
+    :func:`_render_body_signature`: a committed ``_rendered/`` body is
+    refreshed by hand (``marimo-book render``) precisely so a lock change
+    never re-executes a chapter that downloads gigabytes at build time.
+    """
+    if book_dir is None:
+        return None
+    for name in _LOCK_FILE_NAMES:
+        candidate = Path(book_dir) / name
+        if candidate.is_file():
+            return f"{name}:{_file_sha256(candidate)}"
+    return None
+
+
+def _book_signature(book: Book, *, book_dir: Path | None = None) -> str:
     """Hash ``book.yml`` fields whose changes invalidate cached *bodies*.
 
     Composed from :func:`_render_body_signature` (the shared definition of
@@ -383,6 +416,8 @@ def _book_signature(book: Book) -> str:
     relevant: dict = {
         "body": _render_body_signature(book),
         "precompute": book.precompute.model_dump(mode="json"),
+        # Which packages rendered the cached bodies (see _environment_signature).
+        "environment": _environment_signature(book_dir),
     }
     payload = json.dumps(relevant, sort_keys=True, default=str)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -415,7 +450,10 @@ def _book_signature(book: Book) -> str:
 # "7": anywidget mounts carry recorded model state (data-initial-value,
 # data-buffers, data-css); bodies rendered before start every widget from an
 # empty model and reference no buffers.
-_RENDER_OUTPUT_VERSION = "8"
+# "9": text/markdown mime payloads render as HTML (or converted markdown)
+# instead of an escaped <pre>; bodies rendered before carry the escaped
+# markup for any mo.md placed inside a container.
+_RENDER_OUTPUT_VERSION = "9"
 
 
 def _pyodide_version() -> str | None:

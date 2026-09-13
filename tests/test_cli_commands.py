@@ -462,3 +462,40 @@ def test_build_zensical_refuses_silently_dropped_features(
     assert result.exit_code == 1
     assert "social_cards: not supported by shell: zensical" in result.output
     assert not (tmp_path / "_site_src").exists()
+
+
+@pytest.mark.parametrize("output", [".", "_site_src", "_site_src/site/.."])
+def test_build_zensical_refuses_output_that_contains_staging(
+    runner: CliRunner, tmp_path: Path, monkeypatch, output: str
+) -> None:
+    """Mirroring _site_src/site/ into an ancestor would rmtree the staged
+    tree (or the book root) before copying — refuse before anything runs."""
+    from marimo_book import cli
+
+    def boom(*a, **kw):  # pragma: no cover - must not be reached
+        raise AssertionError("shell subprocess must not run")
+
+    monkeypatch.setattr(cli.subprocess, "run", boom)
+    book_file = _write_md_book(tmp_path, "shell: zensical\n")
+    sentinel = tmp_path / "content" / "intro.md"
+    result = runner.invoke(app, ["build", "-b", str(book_file), "-o", str(tmp_path / output)])
+    assert result.exit_code == 2, result.output
+    assert "contains the staged tree" in result.output
+    assert sentinel.is_file()
+
+
+def test_sync_zensical_output_guards_ancestor(tmp_path: Path) -> None:
+    import typer
+
+    from marimo_book import cli
+    from marimo_book.shell import ZENSICAL_SITE_SUBDIR
+
+    site_src = tmp_path / "_site_src"
+    (site_src / ZENSICAL_SITE_SUBDIR).mkdir(parents=True)
+    (site_src / "docs").mkdir()
+    with pytest.raises(typer.Exit):
+        cli._sync_zensical_output(site_src, site_src)
+    assert (site_src / "docs").is_dir()
+    # Sibling output is the supported case.
+    cli._sync_zensical_output(site_src, tmp_path / "_site")
+    assert (tmp_path / "_site").is_dir()

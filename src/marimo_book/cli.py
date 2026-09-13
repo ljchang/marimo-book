@@ -263,6 +263,8 @@ def build(
     book_dir = book_file.resolve().parent
     site_src = book_dir / "_site_src"
     site_dir = Path(output).resolve() if output.is_absolute() else (book_dir / output).resolve()
+    if book.shell == "zensical":
+        _reject_output_containing_staging(site_src, site_dir)
 
     if clean:
         for target in (site_src, site_dir, book_dir / ".marimo_book_cache"):
@@ -390,9 +392,28 @@ def _sync_zensical_output(site_src: Path, site_dir: Path) -> None:
     site_dir = site_dir.resolve()
     if site_dir == built:
         return
+    _reject_output_containing_staging(site_src, site_dir)
     if site_dir.exists():
         shutil.rmtree(site_dir)
     shutil.copytree(built, site_dir)
+
+
+def _reject_output_containing_staging(site_src: Path, site_dir: Path) -> None:
+    """Exit if ``site_dir`` is ``_site_src`` or one of its ancestors.
+
+    The zensical output lives *inside* ``_site_src``, so mirroring it into
+    an ancestor would ``rmtree`` the staged tree (or the book root) before
+    the copy — checked up front in ``build`` so no notebook runs first,
+    and again right before the sync.
+    """
+    if site_src.resolve().is_relative_to(site_dir.resolve()):
+        typer.echo(
+            f"--output {site_dir} contains the staged tree {site_src}; "
+            f"shell: zensical needs an output directory outside _site_src/ "
+            f"(the default _site/ works).",
+            err=True,
+        )
+        raise typer.Exit(code=2)
 
 
 @app.command("render")

@@ -627,6 +627,15 @@ marimo-island[data-cell-id]:first-of-type marimo-cell-output svg.animate-spin {
   letter-spacing: 0.08em;
   font-size: 0.62rem;
 }
+/* A widget declared with a literal ``label=`` shows that label instead of
+   the generic prefix (the JS shim copies it onto ``data-label``). */
+.marimo-book-precompute-control[data-label]::before {
+  content: attr(data-label);
+  color: var(--md-default-fg-color--light);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.78rem;
+}
 
 .marimo-book-precompute-input {
   display: inline-flex;

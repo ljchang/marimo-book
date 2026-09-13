@@ -234,6 +234,7 @@ class WidgetCandidate:
     values: list[Any]
     default: Any
     line: int  # 1-indexed source line for error messages
+    label: str | None = None  # literal ``label=`` kwarg, shown on the static control
 
 
 def scan_widgets(source: str) -> list[WidgetCandidate]:
@@ -316,7 +317,12 @@ def _build_candidate(
     if values is None:
         return None
     default = _literal_or_none(kwargs.get("value")) if "value" in kwargs else _safe_first(values)
-    return WidgetCandidate(var_name=var_name, kind=kind, values=values, default=default, line=line)
+    label = _literal_or_none(kwargs["label"]) if "label" in kwargs else None
+    if not isinstance(label, str) or not label.strip():
+        label = None
+    return WidgetCandidate(
+        var_name=var_name, kind=kind, values=values, default=default, line=line, label=label
+    )
 
 
 def _slider_values(args: list[ast.expr], kwargs: dict[str, ast.expr]) -> list[Any] | None:
@@ -1027,6 +1033,7 @@ def _embed_metadata(candidate: WidgetCandidate, by_value: dict[str, dict[int, st
         "kind": candidate.kind,
         "values": [_jsonable(v) for v in candidate.values],
         "default": _jsonable(candidate.default),
+        "label": candidate.label,
     }
     # Wrap each <template> inside its own raw <div markdown="0"> so
     # md_in_html / pymdown extensions don't recurse into the JSON
@@ -1102,6 +1109,7 @@ def _embed_group_metadata(
                 "kind": c.kind,
                 "values": [_jsonable(v) for v in c.values],
                 "default": _jsonable(c.default),
+                "label": c.label,
             }
             for c in members
         ],

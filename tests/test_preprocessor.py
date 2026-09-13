@@ -780,6 +780,26 @@ def test_book_signature_ignores_toc_buttons_repo(tmp_path: Path) -> None:
     assert _book_signature(b1) != _book_signature(b3)  # render-affecting still keys
 
 
+def test_book_signature_tracks_dependency_lock_file(tmp_path: Path) -> None:
+    """A dependency bump re-renders cached bodies (baked widget JS/state
+    follow the installed packages), but only via the *build* cache: the
+    committed ``_rendered/`` signature stays lock-independent."""
+    from marimo_book.preprocessor import _book_signature, _render_body_signature
+
+    book = Book.model_validate({"title": "T", "toc": [{"file": "a.md"}]})
+    no_lock = _book_signature(book, book_dir=tmp_path)
+    assert no_lock == _book_signature(book)  # no lock file → unchanged
+
+    (tmp_path / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    with_lock = _book_signature(book, book_dir=tmp_path)
+    assert with_lock != no_lock
+
+    (tmp_path / "uv.lock").write_text("version = 2\n", encoding="utf-8")
+    assert _book_signature(book, book_dir=tmp_path) != with_lock
+
+    assert _render_body_signature(book) == _render_body_signature(book)
+
+
 def test_toc_edit_does_not_invalidate_notebook_render(tmp_path: Path) -> None:
     """Adding a TOC entry / retitling must reuse the cached notebook body;
     the finalize step re-runs so the staged page still updates."""

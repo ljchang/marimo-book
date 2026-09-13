@@ -1030,3 +1030,24 @@ def test_diff_key_masks_per_run_anywidget_model_ids() -> None:
     # ipywidgets trait references to sibling models (layout/style) too.
     layout = '{"height": 400, "layout": "IPY_MODEL_' + "e" * 32 + '"}'
     assert "e" * 32 not in _diff_key(layout)
+
+
+# --- widget labels (#104) --------------------------------------------------
+
+
+def test_scan_widgets_captures_literal_label() -> None:
+    cands = scan_widgets('s = mo.ui.slider(start=0, stop=9, step=1, value=0, label="Component")')
+    assert len(cands) == 1 and cands[0].label == "Component"
+
+
+def test_scan_widgets_label_defaults_to_none_when_absent_or_dynamic() -> None:
+    assert scan_widgets("s = mo.ui.slider(start=0, stop=9, step=1)")[0].label is None
+    assert scan_widgets("s = mo.ui.slider(start=0, stop=9, step=1, label=name)")[0].label is None
+
+
+def test_embedded_metadata_carries_label() -> None:
+    from marimo_book.transforms.precompute import _embed_metadata
+
+    cand = scan_widgets('s = mo.ui.slider(start=0, stop=2, step=1, label="Component")')[0]
+    block = _embed_metadata(cand, {"0": {}})
+    assert '"label":"Component"' in block

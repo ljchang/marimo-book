@@ -199,3 +199,51 @@ def test_altair_notebook_renders_vega_mounts() -> None:
     assert "marimo-mime-renderer" not in md
     assert "caption under the chart" in md
     assert "vega-lite" in md  # $schema survives into data-spec
+
+
+# --- text/markdown (#104) --------------------------------------------------
+
+
+def test_text_markdown_html_payload_passes_through_as_html() -> None:
+    """marimo ships ``mo.md`` under text/markdown with the *rendered* HTML as
+    the payload; it must land as markup, not a <pre> of angle brackets."""
+    from marimo_book.transforms.mime_outputs import render_mime_fragment
+
+    payload = '<span class="markdown prose"><span class="paragraph"><em>Written by</em> Luke</span></span>'
+    out = render_mime_fragment("text/markdown", payload)
+    assert out == payload
+    assert "<pre" not in out
+
+
+def test_text_markdown_escaped_html_payload_is_unescaped() -> None:
+    from marimo_book.transforms.mime_outputs import render_mime_fragment
+
+    out = render_mime_fragment(
+        "text/markdown", "&lt;span class=&quot;markdown&quot;&gt;hi&lt;/span&gt;"
+    )
+    assert out == '<span class="markdown">hi</span>'
+
+
+def test_text_markdown_source_renders_to_html() -> None:
+    from marimo_book.transforms.mime_outputs import render_mime_fragment
+
+    out = render_mime_fragment("text/markdown", "*hi* **there**\n\n- one\n- two")
+    assert "<em>hi</em>" in out and "<strong>there</strong>" in out
+    assert "<li>one</li>" in out
+    assert "<pre" not in out
+
+
+def test_mime_renderer_element_with_markdown_html_renders_prose() -> None:
+    """A top-level ``mo.md`` island output (WASM pages) arrives as a
+    <marimo-mime-renderer> whose text/markdown data is rendered HTML."""
+    from marimo_book.transforms.anywidgets import rewrite_anywidget_html
+
+    inner = '<span class="markdown prose"><span class="paragraph"><em>Written by</em> Luke</span></span>'
+    data_attr = json.dumps(inner).replace('"', "&quot;")
+    html_in = (
+        "<div><marimo-mime-renderer data-mime='&quot;text/markdown&quot;' "
+        f"data-data='{data_attr}'></marimo-mime-renderer></div>"
+    )
+    out = rewrite_anywidget_html(html_in)
+    assert "<em>Written by</em> Luke" in out
+    assert "marimo-mime-renderer" not in out and "<pre" not in out and "&lt;span" not in out

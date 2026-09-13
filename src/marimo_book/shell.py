@@ -4,9 +4,12 @@ The preprocessor writes content to ``_site_src/docs/`` and this module emits
 ``_site_src/mkdocs.yml`` alongside it. ``mkdocs build`` then produces
 ``_site/``.
 
-Because zensical reuses ``mkdocs.yml`` verbatim (per
-https://zensical.org/compatibility/), the same file drives both shells —
-only the build command changes when we port in v0.3.
+Zensical (Material's Rust successor) reads the same ``mkdocs.yml`` (per
+https://zensical.org/compatibility/), so ``shell: zensical`` only changes
+two keys here — ``site_dir`` (zensical requires a *relative* path inside
+the config's directory; absolute paths panic its Rust core) and
+``theme.variant`` — plus the build command in the CLI. Everything else
+in this file is shell-neutral. Status + blockers: ljchang/marimo-book#105.
 """
 
 from __future__ import annotations
@@ -19,6 +22,13 @@ import yaml
 
 from . import __version__
 from .config import Book, FileEntry, SectionEntry, UrlEntry
+
+# Where ``zensical build`` writes HTML, relative to the generated
+# ``mkdocs.yml``. Zensical insists ``site_dir`` stays inside its project
+# root (the config file's directory) and panics on absolute paths, so the
+# build lands in ``_site_src/site/`` and the CLI syncs it to the requested
+# ``_site/`` afterwards.
+ZENSICAL_SITE_SUBDIR = "site"
 
 
 def _versioned(path: str) -> str:
@@ -72,7 +82,7 @@ def _build_config(
     cfg: dict[str, Any] = {
         "site_name": book.title,
         "docs_dir": str(docs_dir),
-        "site_dir": str(site_dir),
+        "site_dir": ZENSICAL_SITE_SUBDIR if book.shell == "zensical" else str(site_dir),
     }
     if book.url:
         cfg["site_url"] = book.url
@@ -259,6 +269,11 @@ def _theme_block(book: Book) -> dict[str, Any]:
 
     theme: dict[str, Any] = {
         "name": "material",
+        # Zensical ships two variants with identical DOM; ``classic`` keeps
+        # Material's icons and spacing so extra.css / marimo_book.js need no
+        # changes. Its default ``modern`` swaps Material icons for Lucide.
+        # mkdocs would reject an unknown theme key, so only emit it there.
+        **({"variant": "classic"} if book.shell == "zensical" else {}),
         "palette": [palette_default, palette_slate],
         "features": [
             "navigation.sections",

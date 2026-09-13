@@ -573,8 +573,12 @@ class Book(BaseModel):
     # TOC
     toc: list[TocEntry]
 
-    # shell
-    shell: Literal["mkdocs"] = "mkdocs"  # v0.3 adds "zensical", "jinja"
+    # shell — the static-site generator that consumes the staged tree.
+    # ``zensical`` (Material's Rust successor) is opt-in and pre-1.0: it
+    # reads the same generated ``mkdocs.yml`` but silently drops the
+    # plugins behind ``social_cards``, ``blog``, ``check_external_links``
+    # and ``pdf_export`` — ``marimo-book check`` errors on those combos.
+    shell: Literal["mkdocs", "zensical"] = "mkdocs"
 
     @field_validator("bibliography", mode="before")
     @classmethod

@@ -37,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kwarg on a precomputed `mo.ui.slider`/`dropdown`/`radio`/`switch` is
   carried into the widget metadata and replaces the generic "Adjust:"
   prefix on the static control (`data-label` on the mount).
+- **Opt-in zensical build shell.** `shell: zensical` in `book.yml` (or
+  `marimo-book build/serve --shell zensical`) runs
+  [zensical](https://zensical.org), Material for MkDocs' Rust successor, on
+  the same generated `mkdocs.yml` instead of `mkdocs`. Builds this repo's
+  docs in ~0.6 s with byte-identical page bodies, working WASM islands,
+  anywidgets, and the full `extra.css` theme (verified against 0.0.62).
+  Needs `marimo-book[zensical]`. The generated config points zensical at
+  `_site_src/site/` (it rejects any `site_dir` outside its project root and
+  panics on absolute paths) and the CLI mirrors the result to `_site/`, so
+  deploy workflows are unchanged. `mkdocs` stays the default: zensical is
+  pre-1.0 and **silently drops** the plugins behind `social_cards`, `blog`,
+  `check_external_links` and `pdf_export` — `marimo-book check` now errors
+  on those combinations. Status and blockers tracked in #105.
 
 ## [0.1.37] — 2026-09-12
 

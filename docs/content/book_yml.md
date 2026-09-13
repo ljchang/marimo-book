@@ -99,7 +99,7 @@ toc:
       - url: https://example.org/external-reading
         title: External Reading
 
-shell: mkdocs   # v0.3+: zensical, jinja
+shell: mkdocs   # or zensical (opt-in; needs marimo-book[zensical])
 ```
 
 ## Minimal valid config
@@ -287,5 +287,21 @@ and you don't need to know about the mkdocs `index.md` convention.
 
 ### Shell
 
-The underlying static-site generator. In v0.1 only `mkdocs` is
-supported. v0.3 adds `zensical`; `jinja` is a planned fallback.
+The underlying static-site generator that turns the staged tree into
+HTML. `mkdocs` (Material for MkDocs) is the default. `zensical` — the
+Rust/Python successor to Material by the same team — is opt-in:
+
+```yaml
+shell: zensical
+```
+
+or per invocation with `marimo-book build --shell zensical`. It needs
+the `marimo-book[zensical]` extra and reads the same generated
+`mkdocs.yml`, so page bodies, the theme CSS, WASM islands and
+anywidgets all render identically; builds are ~5× faster.
+
+Zensical is pre-1.0 and has no equivalent yet for the mkdocs plugins
+behind `social_cards`, `blog`, `check_external_links` and
+`pdf_export` — it ignores them *without warning*, so `marimo-book
+check` refuses those combinations. See [Building](building.md#shell-build-with-zensical)
+and the [tracking issue](https://github.com/ljchang/marimo-book/issues/105).

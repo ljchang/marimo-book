@@ -50,13 +50,32 @@ same custom CSS/JS, with minor MiniJinja template tweaks.
 
 `marimo-book`'s architecture is deliberately shell-agnostic — the
 preprocessor emits plain Markdown + inline HTML, not mkdocs-plugin
-artifacts. When zensical stabilizes, flipping to it will be one
-command change in CI:
+artifacts. **Since 0.1.38 you can opt in today** with `shell: zensical`
+in `book.yml` or:
 
 ```diff
 - marimo-book build   # runs `mkdocs build` under the hood
 + marimo-book build --shell zensical  # runs `zensical build`
 ```
+
+See [Building → shell](building.md#shell-build-with-zensical) for what
+works and what doesn't; the default stays `mkdocs` until zensical ships
+its `blog` and `social` modules. Status and blockers are tracked in
+[#105](https://github.com/ljchang/marimo-book/issues/105).
+
+**Status — 2026-09-13 (zensical 0.0.62):** rebuilt this site's
+`_site_src/mkdocs.yml` and compared against the mkdocs output in a
+browser. Page bodies byte-identical; `extra.css`, palette, fonts and
+the `document$`/header hooks in `marimo_book.js` all work (both theme
+variants keep Material's DOM); `/wasm_demo/` hydrates 4 islands and
+reaches `completed-run` with zero console errors; `/widgets/` renders
+drawdata, Plotly and Altair; explicit nav titles preserved (fixed
+upstream in 0.0.59); `autorefs` + `mkdocstrings` supported natively;
+build 0.6 s. Remaining blockers: `social`/`blog` (in development
+upstream), `rss` (planned), `htmlproofer`/`with-pdf` (not planned) are
+**silently ignored even under `--strict`**; `site_dir` must be relative
+and inside the project root; `serve --strict` unsupported; still 0.0.x
+with roughly weekly releases and no 1.0 date.
 
 Expected differentiators: 4–5× faster builds via zensical's
 differential-build engine, a faster client search (Disco), and a
@@ -86,11 +105,14 @@ and `theme.palette` hex. Observations from the first build:
 - Our icon uses (`material/weather-sunny`) render as Lucide
   substitutes.
 
-Net: zensical is further along than the 2026 v0.3 expectation, but
-still 0.0.x. A real port remains a v0.3 item, not a near-term swap.
+Net (April): further along than expected, but still 0.0.x. Of the
+five items above, the `site_dir` panic is worked around (relative
+path + post-build sync), nav titles and icons are fixed upstream,
+and the plugin gap is the one that still blocks a default flip.
 
-Timeline: tracking zensical's own trajectory, not ours. Likely
-6–12 months out.
+Timeline for making it the default: tracking zensical's own
+trajectory, not ours — re-evaluate when `blog`/`social` ship or at
+zensical 0.1.0.
 
 ### Per-notebook dependency override
 

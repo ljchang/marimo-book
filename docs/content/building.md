@@ -123,6 +123,7 @@ marimo-book build --clean --sandbox        # clean rebuild + force sandbox
 | `--clean` | off | Remove `_site/`, `_site_src/`, and `.marimo_book_cache/` before building (implies `--rebuild`) |
 | `--rebuild` | off | Re-render every notebook regardless of cache state — use when data files or env-mode deps changed |
 | `--sandbox` / `--no-sandbox` | follow `book.yml` | Override the dependency mode |
+| `--shell mkdocs\|zensical` | follow `book.yml` | Which static-site generator consumes the staged tree (see [below](#shell-build-with-zensical)) |
 
 **Use `--strict` in CI.** It surfaces issues that would otherwise be
 silent on a successful build.
@@ -261,6 +262,55 @@ copying the whole `_site/` directory as usual.
 
     …and tweak `book.yml` to read the env var. Or maintain a
     `book.ci.yml` variant just for the deploy job.
+
+### `shell` — build with zensical
+
+[Zensical](https://zensical.org) is the Rust/Python successor to
+Material for MkDocs, by the same team. Because the preprocessor emits
+plain Markdown + a `mkdocs.yml` that zensical reads natively, swapping
+the shell is one line:
+
+```yaml
+# book.yml
+shell: zensical        # default: mkdocs
+```
+
+```bash
+pip install 'marimo-book[zensical]'
+marimo-book build            # or: marimo-book build --shell zensical
+marimo-book serve            # zensical's dev server + the usual watcher
+```
+
+Verified against zensical 0.0.62 with this site: page bodies are
+byte-identical to the mkdocs build, `extra.css` and the palette apply
+unchanged (both zensical theme variants keep Material's DOM; marimo-book
+pins `classic`), WASM islands hydrate and run, anywidgets / Plotly /
+Altair render, `autorefs` and `mkdocstrings` work, and `--strict` is
+honoured. The whole site builds in ~0.6 s.
+
+**What doesn't work yet.** Zensical has no plugin-compatibility layer —
+it only ships native rewrites of specific mkdocs plugins, and it
+*silently ignores* the rest (the build still says "No issues found").
+As of September 2026 that means these `book.yml` features have no effect
+under `shell: zensical`:
+
+| Feature | Upstream status |
+|---|---|
+| `social_cards` | in development |
+| `blog.enabled` (+ `rss`) | in development (rss: planned) |
+| `check_external_links` | not planned |
+| `pdf_export` | not planned |
+
+`marimo-book check` errors when any of them is combined with
+`shell: zensical`, so a book can't quietly lose its blog. `mkdocs`
+remains the default until those land; progress is tracked in
+[#105](https://github.com/ljchang/marimo-book/issues/105) and on
+zensical's [plugin compatibility page](https://zensical.org/docs/compatibility/mkdocs/plugins/).
+
+**Where the output goes.** Zensical refuses a `site_dir` outside its
+project root (the directory holding `mkdocs.yml`), so the generated
+config points it at `_site_src/site/` and `marimo-book build` mirrors
+the result to `_site/` (or `--output`). Deploy workflows need no change.
 
 ## Output layout
 

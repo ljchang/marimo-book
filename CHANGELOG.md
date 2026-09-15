@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`check` no longer claims polars can't run in the browser.** It ships a
+  wheel micropip installs, and computes fine in Pyodide — verified in a
+  browser, which is now the standard the list documents, since "has native
+  code" plainly isn't it.
+
 ### Changed
 
 - **Docs: the workbench and the assignment drawer each have a live demo.**

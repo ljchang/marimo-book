@@ -481,16 +481,17 @@ def test_native_dependency_on_workbench_page_warns(tmp_path: Path) -> None:
 
 
 def test_pyodide_wheel_list_excludes_installable_packages(tmp_path: Path) -> None:
-    """nibabel/nilearn are pure Python (micropip installs them) and Pyodide
-    bundles lxml and opencv-python, so none of them may warn — dartbrains'
-    WASM chapters import them today."""
+    """nibabel/nilearn are pure Python (micropip installs them), Pyodide bundles
+    lxml and opencv-python, and polars — Rust to the core — ships a wheel
+    micropip installs and runs. None of them may warn; dartbrains has chapters
+    importing all of them."""
     from marimo_book.checks import run_checks
 
     book = _book(
         tmp_path,
         {
             "title": "T",
-            "dependencies": {"extras": ["nibabel", "nilearn", "lxml", "opencv-python"]},
+            "dependencies": {"extras": ["nibabel", "nilearn", "lxml", "opencv-python", "polars"]},
             "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
         },
         files=["content/nb.py"],
@@ -519,14 +520,14 @@ def test_native_dependency_with_any_specifier_warns(tmp_path: Path) -> None:
         tmp_path,
         {
             "title": "T",
-            "dependencies": {"extras": ["torch!=1.9", "polars~=1.0"]},
+            "dependencies": {"extras": ["torch!=1.9", "pyarrow~=17.0"]},
             "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
         },
         files=["content/nb.py"],
     )
     report = run_checks(book, tmp_path)
     warned = [w for w in report.warnings if "Pyodide" in w]
-    assert len(warned) == 1 and "polars" in warned[0] and "torch" in warned[0]
+    assert len(warned) == 1 and "pyarrow" in warned[0] and "torch" in warned[0]
 
 
 def test_missing_assignment_file_is_error(tmp_path: Path) -> None:

@@ -48,7 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what a student submits stays byte-for-byte what the grader published plus
   their answers. `check` errors on a missing or non-notebook assignment
   file and warns when it has no PEP 723 block. The docs' WASM demo page
-  carries a sample.
+  carries a sample. A grader widget's `marimo-grader:submitted` DOM event
+  (marimo-grader-client ≥ 0.1.1) is relayed to the page, which records the
+  submission as a version in the assignment's History.
 
 ## [0.1.39] — 2026-09-13
 

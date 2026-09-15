@@ -411,6 +411,18 @@ def test_assignment_tail_carries_card_and_drawer() -> None:
     assert "<li>Q1. Load the data</li>" in html
     assert "Assignment: Introduction to Pandas" in html
     assert "pandas · v3" in html
+    assert "\n\n" not in html, "one raw HTML block for Python-Markdown"
+
+
+def test_assignment_tail_without_questions_stays_one_html_block() -> None:
+    from marimo_book.workbench import read_assignment_info, render_assignment_tail
+
+    info = read_assignment_info(
+        "import marimo\napp = marimo.App()\n", file=Path("hw.py"), nb_url="u", published_hash="h"
+    )
+    html = render_assignment_tail(info, rel_under_docs=Path("nb.md"))
+    assert "wb-questions" not in html
+    assert "\n\n" not in html, "one raw HTML block for Python-Markdown"
 
 
 def test_assignment_only_page_ships_the_shell_without_a_chapter_copy(tmp_path: Path) -> None:

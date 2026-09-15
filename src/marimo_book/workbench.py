@@ -359,13 +359,13 @@ def render_assignment_tail(info: AssignmentInfo, *, rel_under_docs: Path) -> str
     ]
     meta = " · ".join(meta_bits)
     questions = "".join(f"<li>{escape(q)}</li>" for q in info.questions)
-    qlist = f'<ol class="wb-questions">{questions}</ol>' if questions else ""
+    # Own line only when present: an empty line would split the raw HTML block.
+    qlist = f'\n<ol class="wb-questions">{questions}</ol>' if questions else ""
     title = escape(info.title)
     return f"""<section id="wb-assignment" class="wb-assignment" {attr_html}>
 <h2>Assignment: {title}</h2>
 <p class="wb-meta">{escape(meta)}</p>
-<p id="wb-asg-card-status" class="wb-asg-status"></p>
-{qlist}
+<p id="wb-asg-card-status" class="wb-asg-status"></p>{qlist}
 <div class="wb-asg-actions">
 <button id="wb-asg-start" class="wb-btn primary">Open assignment</button>
 <span>Opens in a drawer at the bottom of the page, so you can keep reading while you work. Autosaves in this browser.</span>

@@ -152,7 +152,9 @@ no network. When adding a feature flag with a new extra, add its probe to
 
 | `shell: zensical` (or `build/serve --shell zensical`) | Runs [zensical](https://zensical.org) (Material's Rust successor) instead of `mkdocs` on the same generated `mkdocs.yml`. Verified against 0.0.62 (2026-09-13): page bodies byte-identical, `extra.css`/`marimo_book.js` hooks work (both variants keep Material's DOM; we emit `theme.variant: classic`), WASM islands + anywidgets run, ~0.6 s builds. **Zensical panics on absolute `docs_dir`/`site_dir` and rejects a `site_dir` outside the config's directory**, so `shell.py` emits `site_dir: site` (→ `_site_src/site/`) and `cli.py::_sync_zensical_output` mirrors it to `_site/`. It **silently ignores unsupported plugins even under `--strict`** — `social`, `blog`, `rss`, `htmlproofer`, `with-pdf` — so `checks.py::_ZENSICAL_UNSUPPORTED` errors on those combos; when upstream ships one, delete its row there and re-verify. `zensical serve --strict` is unsupported (never forwarded). Both shells run as `python -m <shell>`. Status/blockers: #105. The docs book keeps `shell: mkdocs` because it enables blog + social. | `marimo-book[zensical]` (also installed in the CI test job so `test_build_with_real_zensical` runs) |
 
-All twelve are off by default in `marimo-book new` scaffolds.
+| `views: [read, run, edit]` (per entry or `defaults.views`; `open_in`; book-level `workbench.{checkpoint_minutes, max_checkpoints}`) | The **in-browser workbench**: marimo's own editor mounted in the page (`run` = present view, nothing saved; `edit` = full editor whose edits persist in the reader's browser as a local copy with a version history). `workbench.py` stages marimo's frontend bundle under `docs/_workbench/` (~27 MB, once per marimo version, **only when some page lists run/edit**; underscore-prefixed so a `workbench.md` page can't collide), a mount page built from marimo's `_static/index.html`, and the published notebook (+PEP 723 block, sha256-stamped) under `_workbench/nb/`. The editor runs in a **same-origin iframe** — marimo's CSS restyles `html/body/h1-6`, and the kernel's web workers are created from `import.meta.url` so the assets can't come from a CDN. The page block is composed at **finalize time** (like buttons/citations) and `views`/`open_in` are **excluded from `_render_body_signature`**, so toggling them never invalidates cached renders. `workbench.js` mounts Read/Run/Edit + status + History in Material's header, keeps `?view=` in the URL across Material's `navigation.tracking` rewrites, and tears its window listeners down on instant navigation. Two marimo behaviours are worked around in `wb-mount.js`: the save flow needs `filename: "notebook.py"` (else Save is a silent no-op) and the save worker drops the PEP 723 header + `App(...)` kwargs (re-attached from the published base). `check` errors on an entry `open_in` outside its `views` or `views` on a Markdown page, warns on deps with no Pyodide wheel. `?wblog=1` relays the workers' console to the page. | None (marimo's `_static/` ships with the marimo wheel) |
+
+All thirteen are off by default in `marimo-book new` scaffolds.
 
 ### Custom domain (CNAME)
 
@@ -175,7 +177,7 @@ deliberate: marimo-book imports private marimo modules
 `_schemas.islands`, `_templates`) and the build shells out to
 `marimo export ipynb`. When a new marimo
 minor ships, widen the bound only after this checklist passes against
-it (all four ran clean for 0.24.1 on 2026-09-11):
+it (the first four ran clean for 0.24.1 on 2026-09-11; the fifth was added with the workbench, verified on 0.24.2):
 
 1. `uv pip install --python .venv/bin/python 'marimo==X.Y.Z'` then
    `pytest -q` and `ruff check`.
@@ -195,9 +197,26 @@ it (all four ran clean for 0.24.1 on 2026-09-11):
    config", comes from marimo's own islands bundle before any of our
    markup is read; hydration completes regardless, so ignore it.)
 
+5. **Workbench** (`views: [read, run, edit]`): open `/wasm_demo/?view=edit`
+   on the served docs. Expect the editor to boot inside the page, a
+   typed edit to survive a reload (IndexedDB), and no
+   `__MARIMO_MOUNT_CONFIG__` errors in the console. The workbench leans on
+   marimo surface the strict build cannot check: `_config.config.DEFAULT_CONFIG`
+   (frontend config the mount page embeds), the `_static/index.html` +
+   `_static/assets/` layout (copied per build; `mount_page_html` raises if
+   the frozen `__MARIMO_MOUNT_CONFIG__` block is gone), the mount contract
+   `window.__MARIMO_MOUNT_CONFIG__` + `fileStores` (marimo-team/marimo#5161)
+   read by `frontend/src/mount.tsx`, the `<marimo-wasm>` detection element,
+   and the save worker's behaviour of regenerating the file without its PEP
+   723 header (worked around in `wb-mount.js`; if upstream starts preserving
+   it, `restoreHeader` becomes a no-op — leave it).
+
 Read the upstream release notes for anything touching `_islands`,
 `export ipynb`, `_utils/scripts`, `module_name_to_pypi_name`,
-`_pyodide/pyodide_constraints`, `_schemas/islands`, or `_templates`.
+`_pyodide/pyodide_constraints`, `_schemas/islands`, `_templates`,
+`_config/config.py` (`DEFAULT_CONFIG`), `_static/index.html`, or
+`frontend/src/mount.tsx` / `core/wasm/` (the mount config, file stores and
+save worker the workbench depends on).
 Since 0.24 islands can also hydrate from a JSON payload
 (`render_body(include_payload=True)`); marimo-book builds its own copy
 of that payload — only for pages with PyPI-only deps — to carry the

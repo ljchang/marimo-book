@@ -33,6 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drops the PEP 723 header on save (re-attached from the published base so
   a reboot still installs the notebook's packages). See the new
   *Workbench* guide; the docs' WASM demo page dogfoods it.
+- **Assignments in a drawer: `assignment:` on a TOC entry.** Point a page
+  at the *student* notebook a grader published (a committed file for now;
+  a synced grader listing later) and the page ends with an assignment card
+  — title, grader identity and question headings read from the notebook
+  itself — whose *Open assignment* (or the header's **Assignment** toggle)
+  slides a bottom drawer up: the assignment in its own editor, with its own
+  local copy and history, under a bar with status, a grader sign-in chip
+  (the grader's device flow, sharing the widget's token), History,
+  Minimize and Hide. The drawer is drag-resizable, keeps its kernel alive
+  across minimize/hide, remembers its state per page, and the chapter
+  keeps scrolling above it — so a student reads the chapter and works the
+  assignment on one page. The assignment is never merged into the chapter:
+  what a student submits stays byte-for-byte what the grader published plus
+  their answers. `check` errors on a missing or non-notebook assignment
+  file and warns when it has no PEP 723 block. The docs' WASM demo page
+  carries a sample.
 
 ## [0.1.39] — 2026-09-13
 

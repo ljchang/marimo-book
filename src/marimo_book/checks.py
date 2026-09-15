@@ -243,6 +243,21 @@ def _check_workbench(
             report.errors.append(
                 f"{entry.file}: views other than [read] only apply to marimo notebooks"
             )
+        if entry.assignment is not None:
+            asg = book_dir / entry.assignment
+            if not asg.exists():
+                report.errors.append(
+                    f"{entry.file}: assignment references a missing file ({entry.assignment})"
+                )
+            elif asg.suffix != ".py":
+                report.errors.append(
+                    f"{entry.file}: assignment must be a marimo notebook ({entry.assignment})"
+                )
+            elif "# /// script" not in asg.read_text(encoding="utf-8"):
+                report.warnings.append(
+                    f"{entry.file}: assignment {entry.assignment} has no PEP 723 block — "
+                    "a grader-published student notebook carries its identity there"
+                )
         if not entry.uses_workbench(book.defaults):
             continue
         src = book_dir / entry.file

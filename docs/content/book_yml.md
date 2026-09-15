@@ -275,7 +275,10 @@ Three shapes, inferred from which key is present:
   Optional `title:` overrides the first `#` heading in the file. Optional
   `mode: wasm` opts that page into [WASM render mode][wasm]. Optional
   `views:` / `open_in:` override the [workbench][workbench] defaults for
-  that notebook (`views: [read, edit]`, `open_in: edit`, …).
+  that notebook (`views: [read, edit]`, `open_in: edit`, …). Optional
+  `assignment: path/to/student_notebook.py` attaches a graded assignment
+  that opens in the workbench's bottom drawer — see
+  [Assignments and grading](assignments-and-grading.md).
 - `url: URL` (+ `title:`) — external link in the sidebar.
 - `section: name` + `children: [...]` — a nested group. Recursive. An
   empty section (`children:` blank or omitted) is silently dropped from

@@ -508,3 +508,34 @@ def test_native_dependency_with_any_specifier_warns(tmp_path: Path) -> None:
     report = run_checks(book, tmp_path)
     warned = [w for w in report.warnings if "Pyodide" in w]
     assert len(warned) == 1 and "opencv-python" in warned[0] and "torch" in warned[0]
+
+
+def test_missing_assignment_file_is_error(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py", "assignment": "content/assignments/x.py"}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("assignment references a missing file" in e for e in report.errors)
+
+
+def test_assignment_without_pep723_block_warns(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py", "assignment": "content/assignments/x.py"}],
+        },
+        files=["content/nb.py", "content/assignments/x.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert not report.errors
+    assert any("no PEP 723 block" in w for w in report.warnings)

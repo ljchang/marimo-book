@@ -93,6 +93,9 @@ toc:
         # Also offers the in-browser workbench (Run / Edit in the header):
         # marimo's editor in the page, edits kept in the reader's browser.
         views: [read, run, edit]
+        # …and carries a (grader-less) sample assignment that opens in the
+        # workbench's bottom drawer as its own notebook with its own copy.
+        assignment: content/assignments/wasm_demo_exercises.py
       - file: content/workbench.md
       - file: content/widgets.py
       - file: content/dependencies.md

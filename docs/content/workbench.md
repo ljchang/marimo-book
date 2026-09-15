@@ -102,6 +102,13 @@ The editor lives in an iframe on purpose: marimo's stylesheet restyles
 they need separate documents. Being same-origin, the frame shares the
 site's storage and needs no sandbox attributes.
 
+## Assignments
+
+A page can also carry a graded assignment — a separate notebook, opened in
+a drawer at the bottom of the page with its own local copy, history and
+grader sign-in — via `assignment:` on the TOC entry. See
+[Assignments and grading](assignments-and-grading.md).
+
 ## Diagnostics
 
 Append `?wblog=1` to a page URL before opening Edit and the Pyodide

@@ -91,6 +91,8 @@ from .transforms.widget_state import (
 from .workbench import (
     WORKBENCH_BLOCK_END,
     WORKBENCH_TAIL_START,
+    read_assignment_info,
+    render_assignment_tail,
     render_workbench_block,
     shell_extra_css,
     shell_extra_javascript,
@@ -1608,19 +1610,21 @@ def _finalize_page(
     # stores (transient cache for live renders, ``_rendered/`` for committed
     # ones); copy them under docs/ so mkdocs ships them next to the page.
     _stage_page_assets(body, docs_dir, book_dir, str(entry.file))
-    if entry.uses_workbench(book.defaults):
+    if entry.uses_shell(book.defaults):
         # Finalize-time like the buttons: the workbench block is page chrome,
-        # not part of the rendered body, so ``views`` edits never invalidate a
-        # cached render. The notebook the editor boots is staged alongside.
-        src_abs = (book_dir / entry.file).resolve()
-        nb_url, published_hash = stage_workbench_notebook(
-            src_abs,
-            Path(entry.file),
-            docs_dir,
-            book.dependencies,
-            requires_python=book.dependencies.requires_python
-            or _running_python_version_constraint(),
-        )
+        # not part of the rendered body, so ``views`` / ``assignment`` edits
+        # never invalidate a cached render. The notebooks the editor boots
+        # are staged alongside.
+        requires_python = book.dependencies.requires_python or _running_python_version_constraint()
+        nb_url, published_hash = "", ""
+        if entry.uses_workbench(book.defaults):
+            nb_url, published_hash = stage_workbench_notebook(
+                (book_dir / entry.file).resolve(),
+                Path(entry.file),
+                docs_dir,
+                book.dependencies,
+                requires_python=requires_python,
+            )
         block = render_workbench_block(
             entry=entry,
             book=book,
@@ -1628,7 +1632,29 @@ def _finalize_page(
             published_hash=published_hash,
             rel_under_docs=rel_under_docs,
         )
-        body = f"{block}\n\n{body.lstrip()}"
+        tail = ""
+        if entry.assignment is not None:
+            asg_abs = (book_dir / entry.assignment).resolve()
+            asg_url, asg_hash = stage_workbench_notebook(
+                asg_abs,
+                Path(entry.assignment),
+                docs_dir,
+                book.dependencies,
+                requires_python=requires_python,
+            )
+            info = read_assignment_info(
+                asg_abs.read_text(encoding="utf-8"),
+                file=Path(entry.assignment),
+                nb_url=asg_url,
+                published_hash=asg_hash,
+            )
+            tail = (
+                "\n\n"
+                + WORKBENCH_TAIL_START
+                + "\n"
+                + render_assignment_tail(info, rel_under_docs=rel_under_docs)
+            )
+        body = f"{block}\n\n{body.lstrip().rstrip()}{tail}\n"
     # Bodies keep site-root-relative asset URLs (so cached bodies are
     # page-location-independent); make them relative to this page's URL.
     page = localize_asset_urls(_compose_page(buttons, body), rel_under_docs)

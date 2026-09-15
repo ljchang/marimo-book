@@ -143,6 +143,14 @@
     runtimeConfig: [],
   };
 
+  // A grader widget inside the notebook announces a successful submission as
+  // a `marimo-grader:submitted` DOM event (marimo-grader-client >= 0.1.1);
+  // relay it so the page shell records the submission as a version.
+  window.addEventListener("marimo-grader:submitted", (e) => {
+    const d = (e && e.detail) || {};
+    post("submitted", { note: d.attempt ? `attempt ${d.attempt}` : "" });
+  });
+
   // Boot instrumentation for the page's status line.
   let sawEditor = false;
   let sawOutput = false;

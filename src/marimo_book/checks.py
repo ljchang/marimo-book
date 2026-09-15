@@ -188,9 +188,15 @@ def _check_duplicate_outputs(entries: list[FileEntry], report: CheckReport) -> N
 # --- warnings -------------------------------------------------------------------
 
 
-# Packages with native extensions that have no Pyodide wheel. A notebook that
+# Packages that cannot load in Pyodide: native extensions with neither a
+# bundled Pyodide build nor a wheel micropip can install. A notebook that
 # imports one can't boot in the browser, so a run/edit view on it would only
 # ever show an install error. Warned, not errored: the list is a heuristic.
+#
+# Checked against the Pyodide lockfile marimo pins (2026-09-15) — do not add a
+# package here without doing the same. Pure-Python packages never belong here
+# whatever they wrap (nibabel, nilearn install fine via micropip), and neither
+# do ones Pyodide bundles (lxml, opencv-python, scikit-learn).
 _NO_PYODIDE_WHEEL = frozenset(
     {
         "torch",
@@ -202,12 +208,8 @@ _NO_PYODIDE_WHEEL = frozenset(
         "numba",
         "cupy",
         "psutil",
-        "opencv-python",
-        "opencv-python-headless",
-        "lxml",
         "pyarrow",
         "polars",
-        "nibabel",
     }
 )
 

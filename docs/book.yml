@@ -90,6 +90,10 @@ toc:
       - file: content/precompute_demo.py
       - file: content/wasm_demo.py
         mode: wasm
+        # Also offers the in-browser workbench (Run / Edit in the header):
+        # marimo's editor in the page, edits kept in the reader's browser.
+        views: [read, run, edit]
+      - file: content/workbench.md
       - file: content/widgets.py
       - file: content/dependencies.md
       - file: content/api-reference-guide.md

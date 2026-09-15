@@ -410,3 +410,64 @@ def test_zensical_shell_needs_extra(tmp_path: Path, monkeypatch) -> None:
     )
     report = checks.run_checks(book, tmp_path)
     assert any("[zensical]" in e for e in report.errors)
+
+
+# --- workbench ------------------------------------------------------------------
+
+
+def test_open_in_outside_views_is_error(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "defaults": {"open_in": "edit", "views": ["read", "edit"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "run"]}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("open_in" in e and "content/nb.py" in e for e in report.errors)
+
+
+def test_views_on_markdown_page_is_error(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/intro.md", "views": ["read", "edit"]}]},
+        files=["content/intro.md"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("only apply to marimo notebooks" in e for e in report.errors)
+
+
+def test_native_dependency_on_workbench_page_warns(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
+        files=["content/nb.py"],
+    )
+    (tmp_path / "content" / "nb.py").write_text(
+        "import marimo\napp = marimo.App()\n\n@app.cell\ndef _():\n    import torch\n    return\n",
+        encoding="utf-8",
+    )
+    report = run_checks(book, tmp_path)
+    assert any("torch" in w and "Pyodide" in w for w in report.warnings)
+    assert not report.errors
+
+
+def test_workbench_page_with_pure_deps_passes(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "run", "edit"]}]},
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert not report.errors
+    assert not any("Pyodide" in w for w in report.warnings)

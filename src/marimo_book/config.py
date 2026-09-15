@@ -325,6 +325,37 @@ class Dependencies(BaseModel):
     requires_python: str | None = None
 
 
+# Content-area states a notebook page can offer (see ``Defaults.views``).
+View = Literal["read", "run", "edit"]
+
+
+class Workbench(BaseModel):
+    """Book-wide settings for the in-browser workbench.
+
+    The workbench is marimo's own editor, self-hosted with the site and mounted
+    in a same-origin iframe on pages whose ``views`` include ``run`` or
+    ``edit``. A reader's edits live in their browser (IndexedDB) as a local
+    copy of the published notebook, with a version history. See the
+    ``views`` / ``open_in`` fields on :class:`Defaults` and :class:`FileEntry`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Minutes of editing between automatic checkpoints in a copy's history.
+    checkpoint_minutes: int = Field(default=10, ge=1)
+    # Rolling checkpoints kept per notebook. Named versions and the
+    # snapshots taken around updates/restores are never pruned.
+    max_checkpoints: int = Field(default=20, ge=1)
+
+
+def _validate_views(views: list[str]) -> list[str]:
+    if not views:
+        raise ValueError("views must list at least one of read, run, edit")
+    if len(set(views)) != len(views):
+        raise ValueError(f"views repeats an entry: {views}")
+    return views
+
+
 class Defaults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -359,6 +390,27 @@ class Defaults(BaseModel):
     # the cap (e.g. books whose ``mode: cached`` renders legitimately run
     # for hours on a GPU box).
     execution_timeout: float | None = 600.0
+    # Which content-area states every notebook page offers. ``read`` is the
+    # rendered page (per ``mode``); ``run`` and ``edit`` open the notebook in
+    # the workbench — marimo's editor in an iframe, ``run`` in its app-like
+    # present view (no local copy is created), ``edit`` as a full editor
+    # whose edits persist in the reader's browser. Any subset; with a single
+    # view no Read/Run/Edit control is rendered. Per-entry ``views`` override.
+    views: list[View] = Field(default_factory=lambda: ["read"])
+    # Which of ``views`` a page opens in. ``None`` = the first listed view
+    # (``read`` when present).
+    open_in: View | None = None
+
+    @field_validator("views")
+    @classmethod
+    def _views_nonempty(cls, v: list[str]) -> list[str]:
+        return _validate_views(v)
+
+    @model_validator(mode="after")
+    def _open_in_listed(self) -> Defaults:
+        if self.open_in is not None and self.open_in not in self.views:
+            raise ValueError(f"open_in: {self.open_in} is not one of views {self.views}")
+        return self
 
 
 # --- TOC entries (discriminated union) ---------------------------------------
@@ -382,10 +434,37 @@ class FileEntry(BaseModel):
     # demonstrates exceptions). Suppresses the cell-error warning and the
     # ``build --strict`` failure for this entry only.
     allow_errors: bool = False
+    # Workbench views for this page (see ``Defaults.views``). ``None`` =
+    # follow the book default. Only meaningful for ``.py`` entries.
+    views: list[View] | None = None
+    open_in: View | None = None
+
+    @field_validator("views")
+    @classmethod
+    def _views_nonempty(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _validate_views(v)
 
     def effective_mode(self, default_mode: str) -> str:
         """Resolve this entry's render mode against the book-wide default."""
         return self.mode or default_mode
+
+    def effective_views(self, defaults: Defaults) -> list[str]:
+        """Resolve this entry's workbench views against the book-wide default."""
+        return list(self.views if self.views is not None else defaults.views)
+
+    def effective_open_in(self, defaults: Defaults) -> str:
+        """The view this page opens in: entry ``open_in``, then the book's,
+        then the first listed view (``read`` when present)."""
+        views = self.effective_views(defaults)
+        for candidate in (self.open_in, defaults.open_in):
+            if candidate is not None and candidate in views:
+                return candidate
+        return "read" if "read" in views else views[0]
+
+    def uses_workbench(self, defaults: Defaults) -> bool:
+        """Whether this page needs the workbench runtime (``run`` or ``edit``)."""
+        views = self.effective_views(defaults)
+        return self.file.suffix == ".py" and ("run" in views or "edit" in views)
 
 
 class UrlEntry(BaseModel):
@@ -569,6 +648,10 @@ class Book(BaseModel):
 
     # Build-time image compression + externalization (see Images).
     images: Images = Field(default_factory=Images)
+
+    # In-browser workbench (marimo's editor + local copies); see ``Workbench``
+    # and the ``views`` field on ``defaults`` / TOC entries.
+    workbench: Workbench = Field(default_factory=Workbench)
 
     # TOC
     toc: list[TocEntry]

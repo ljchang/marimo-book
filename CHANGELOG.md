@@ -5,6 +5,35 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **In-browser workbench: `views: [read, run, edit]`.** A notebook page can
+  now offer, next to its rendered `read` view, marimo's own editor mounted
+  in the page (`run` opens the app-like present view, `edit` the full
+  editor). The editor is self-hosted with the site — marimo's frontend
+  bundle is copied under `_workbench/` once per marimo version, ~27 MB, only
+  when some page lists `run` or `edit` — and loads in a same-origin
+  `<iframe>`, so the page's own CSS and the editor's never meet. Edits
+  autosave into the reader's browser (IndexedDB) as a local copy of the
+  published notebook with a version history: a History drawer with named
+  versions, rolling checkpoints (`workbench.checkpoint_minutes` /
+  `max_checkpoints`), diff preview, restore, reset-to-published and delete;
+  a republish is detected by a build-time content hash and offered as an
+  update (undoable, both sides snapshotted) rather than applied over the
+  reader's work. Read / Run / Edit, a copy-status chip and History sit in
+  the Material header next to the launch buttons; the state rides in
+  `?view=` so it survives reloads. `open_in` picks the initial view; with
+  a single view no control is rendered. `marimo-book check` errors on an
+  `open_in` outside `views` or on `views` set on a Markdown page, and warns
+  when a workbench notebook imports a package with no Pyodide wheel. Two
+  marimo behaviours are worked around in the runtime and documented in
+  `workbench.py`: the save flow needs a filename, and marimo's save worker
+  drops the PEP 723 header on save (re-attached from the published base so
+  a reboot still installs the notebook's packages). See the new
+  *Workbench* guide; the docs' WASM demo page dogfoods it.
+
 ## [0.1.39] — 2026-09-13
 
 ### Added

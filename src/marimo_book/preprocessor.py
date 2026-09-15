@@ -88,6 +88,15 @@ from .transforms.widget_state import (
     referenced_buffer_hashes,
     stage_referenced_buffers,
 )
+from .workbench import (
+    render_workbench_block,
+    shell_extra_css,
+    shell_extra_javascript,
+    stage_shell_assets,
+    stage_workbench_notebook,
+    stage_workbench_runtime,
+    workbench_enabled,
+)
 
 # Directories and glob patterns of assets we copy verbatim when present.
 _ASSET_DIRS: tuple[str, ...] = ("images", "Code", "data")
@@ -765,6 +774,13 @@ class Preprocessor:
 
         self._stage_assets(docs_dir, report)
         self._write_defaults(docs_dir)
+        # The in-browser workbench (marimo's editor + local copies) ships only
+        # when some page offers a run/edit view: its assets are ~27 MB.
+        use_workbench = workbench_enabled(self.book)
+        if use_workbench:
+            self._progress("Staging workbench runtime (marimo editor assets)")
+            stage_workbench_runtime(docs_dir)
+            stage_shell_assets(docs_dir)
 
         file_entries = _iter_file_entries(self.book.toc)
 
@@ -961,12 +977,16 @@ class Preprocessor:
             nav.extend(api_nav)
             report.pages += count_pages(api_nav)
 
+        from .shell import _versioned
+
         emit_mkdocs_yml(
             self.book,
             docs_dir=docs_dir.relative_to(out_dir),
             site_dir=site_dir,
             out_path=out_dir / "mkdocs.yml",
             nav=nav,
+            extra_css=shell_extra_css() if use_workbench else None,
+            extra_javascript=shell_extra_javascript(_versioned) if use_workbench else None,
             api_paths=api_paths or None,
         )
 
@@ -1571,6 +1591,27 @@ def _finalize_page(
     # stores (transient cache for live renders, ``_rendered/`` for committed
     # ones); copy them under docs/ so mkdocs ships them next to the page.
     _stage_page_assets(body, docs_dir, book_dir, str(entry.file))
+    if entry.uses_workbench(book.defaults):
+        # Finalize-time like the buttons: the workbench block is page chrome,
+        # not part of the rendered body, so ``views`` edits never invalidate a
+        # cached render. The notebook the editor boots is staged alongside.
+        src_abs = (book_dir / entry.file).resolve()
+        nb_url, published_hash = stage_workbench_notebook(
+            src_abs,
+            Path(entry.file),
+            docs_dir,
+            book.dependencies,
+            requires_python=book.dependencies.requires_python
+            or _running_python_version_constraint(),
+        )
+        block = render_workbench_block(
+            entry=entry,
+            book=book,
+            nb_url=nb_url,
+            published_hash=published_hash,
+            rel_under_docs=rel_under_docs,
+        )
+        body = f"{block}\n\n{body.lstrip()}"
     # Bodies keep site-root-relative asset URLs (so cached bodies are
     # page-location-independent); make them relative to this page's URL.
     page = localize_asset_urls(_compose_page(buttons, body), rel_under_docs)

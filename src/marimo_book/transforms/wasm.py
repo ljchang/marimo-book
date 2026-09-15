@@ -107,6 +107,7 @@ from marimo._schemas.islands import ISLANDS_JSON_SCRIPT_TYPE
 from marimo._templates import json_script
 
 from .anywidgets import rewrite_anywidget_html
+from .author_line import strip_markdown_author_line
 from .marimo_export import staged_sibling_file
 from .pep723 import BOOTSTRAP_CELL_ID, micropip_bootstrap_code, thread_bootstrap_sentinel
 
@@ -173,6 +174,29 @@ def extract_and_strip_title(source: str) -> tuple[str | None, str]:
     return title, ast.unparse(tree)
 
 
+def strip_author_line_from_source(source: str) -> str:
+    """Drop the byline from the first ``mo.md`` cell of a notebook's source.
+
+    The WASM counterpart of ``hide_author_line``. A body-level strip would not
+    hold on these pages: the islands runtime re-renders every cell from the
+    payload once Pyodide boots, so the byline has to be gone from the code the
+    browser executes. Same AST-level edit as :func:`extract_and_strip_title`,
+    and likewise a no-op when the notebook has no byline.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    const = _first_mo_md_constant(tree)
+    if const is None:
+        return source
+    stripped = strip_markdown_author_line(const.value)
+    if stripped == const.value:
+        return source
+    const.value = stripped
+    return ast.unparse(tree)
+
+
 def render_wasm_page(
     py_path: Path,
     *,
@@ -180,6 +204,7 @@ def render_wasm_page(
     staged_source_path: Path | None = None,
     timeout: float | None = None,
     packages: Sequence[str] = (),
+    hide_author_line: bool = False,
 ) -> str:
     """Render a marimo notebook as a WASM-interactive page body.
 
@@ -210,14 +235,26 @@ def render_wasm_page(
     before.
     """
     target = staged_source_path or py_path
+    source = target.read_text(encoding="utf-8")
+    # ``hide_author_line`` has to happen in the source here, not in the body:
+    # the islands runtime re-renders every cell from the payload once Pyodide
+    # boots, so a body-level strip would reappear (see author_line.py).
+    if hide_author_line:
+        source = strip_author_line_from_source(source)
     # Hoist the notebook's first ``# H1`` to a real ``<h1>`` at the top of the
     # page (see extract_and_strip_title): otherwise MkDocs Material can't see
     # the islands-encoded heading and injects the nav title, duplicating it.
-    title, stripped = extract_and_strip_title(target.read_text(encoding="utf-8"))
+    title, stripped = extract_and_strip_title(source)
     if not title:
-        return _render_wasm_body(
-            target, display_code=display_code, timeout=timeout, py_path=py_path, packages=packages
-        )
+        if source == target.read_text(encoding="utf-8"):
+            return _render_wasm_body(
+                target,
+                display_code=display_code,
+                timeout=timeout,
+                py_path=py_path,
+                packages=packages,
+            )
+        stripped = source
     with staged_sibling_file(
         target, prefix="marimo_book_title_", content=stripped
     ) as stripped_target:
@@ -228,6 +265,8 @@ def render_wasm_page(
             py_path=py_path,
             packages=packages,
         )
+    if not title:
+        return body
     return f"<h1>{_html.escape(title)}</h1>\n\n" + body
 
 

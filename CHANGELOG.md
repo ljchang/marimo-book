@@ -52,6 +52,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (marimo-grader-client ≥ 0.1.1) is relayed to the page, which records the
   submission as a version in the assignment's History.
 
+### Changed
+
+- **`defaults.hide_author_line` now does what it says.** The knob has been
+  declared and documented since the first release (*"Lines of the form
+  `*Written by ...*` in the first Markdown cell are stripped"*) but nothing
+  read it, so bylines rendered regardless. It is implemented now, default
+  `true` as documented, across every render mode: Markdown prose, marimo's own
+  HTML (a composite `mo.vstack` cell), and WASM pages — where the strip has to
+  happen in the source the islands runtime executes, since those pages
+  re-render their prose in the browser. Only the first fully-italic
+  `Written by …` paragraph of a notebook page is removed; prose that merely
+  mentions an author, later bylines, and hand-written `.md` pages are left
+  alone. **If your book shows bylines and you want to keep them, set
+  `hide_author_line: false`** — otherwise the next build will drop them.
+
 ### Fixed
 
 - **Prose from a composite cell ran together on static pages.** marimo renders

@@ -52,6 +52,7 @@ from .config import Book, Dependencies, FileEntry, SectionEntry, UrlEntry
 from .launch_buttons import render_button_row
 from .rendered_store import RenderedStore
 from .shell import _nav_from_toc, emit_mkdocs_yml
+from .transforms.author_line import strip_author_line
 from .transforms.citations import _CITE_RE, apply_citations, load_bibliography
 from .transforms.images import (
     ImageOptions,
@@ -1536,6 +1537,7 @@ def stage_page(
                     staged_source_path=staged,
                     timeout=book.defaults.execution_timeout,
                     packages=_wasm_packages(src_abs, book.dependencies, book_dir),
+                    hide_author_line=book.defaults.hide_author_line,
                 )
                 # marimo's islands HTML carries every output's image inline —
                 # twice (pre-hydration DOM + payload). Same treatment as static.
@@ -1599,6 +1601,11 @@ def _finalize_page(
     buttons = render_button_row(
         book, Path(entry.file), repo_subpath=_book_subpath_in_repo(book_dir)
     )
+    if book.defaults.hide_author_line and Path(entry.file).suffix == ".py":
+        # Finalize-time like the buttons and citations, so toggling the flag
+        # never invalidates a cached render. WASM bodies are already stripped
+        # at the source (their prose is re-rendered in the browser).
+        body = strip_author_line(body)
     if apply_rewrites:
         body = apply_link_rewrites(body, md_basenames=md_basenames)
         if book.bibliography.files:

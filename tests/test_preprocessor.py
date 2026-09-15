@@ -444,7 +444,13 @@ def test_stage_page_routes_wasm_through_staged_path(tmp_path: Path) -> None:
     captured: dict = {}
 
     def fake_render(
-        py_path, *, display_code=False, staged_source_path=None, timeout=None, packages=()
+        py_path,
+        *,
+        display_code=False,
+        staged_source_path=None,
+        timeout=None,
+        packages=(),
+        hide_author_line=False,
     ):
         # Capture the staged source content while the tempdir still exists.
         assert staged_source_path is not None, "WASM path must receive a staged source"

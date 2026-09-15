@@ -251,9 +251,16 @@ defaults:
 
 ### Author lines
 
-Lines of the form `*Written by ...*` in the first Markdown cell are
-stripped — `book.yml`'s `authors:` already renders author info on the
-page header, and having it twice looks redundant.
+A notebook page's first fully-italic `*Written by ...*` (or `_..._`)
+paragraph is stripped — `book.yml`'s `authors:` already renders author
+info on the page header, and having it twice looks redundant. Set
+`defaults.hide_author_line: false` to keep the in-page byline.
+
+Only that first paragraph goes: prose that mentions an author in
+passing, a second byline further down, and hand-written `.md` pages are
+untouched. It works the same on static, cached and WASM pages (on WASM
+the line is removed from the source the browser runs, since those pages
+re-render their own prose).
 
 ### Interactive escape hatch
 

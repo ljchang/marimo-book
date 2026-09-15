@@ -473,6 +473,26 @@
   margin: 0.75rem 0;
   overflow-x: auto;
 }
+
+/* Prose that arrives as marimo's own HTML rather than Markdown.
+ *
+ * A plain `mo.md(...)` cell is converted to Markdown and rendered by the
+ * shell, so its paragraphs are ordinary <p>. But a *composite* output —
+ * `mo.vstack([mo.md(...), mo.image(...), mo.md(...)])`, the documented way to
+ * mix prose and figures — is rendered by marimo itself, and marimo emits each
+ * paragraph as an inline `<span class="paragraph">`, styling it as a block in
+ * its own stylesheet. Static pages never load that stylesheet (only WASM pages
+ * do, via the islands bundle), so without these rules every paragraph of such
+ * a cell runs into the next one on the same line. */
+.md-typeset .marimo-book-output .markdown.contents {
+  display: contents;
+}
+.md-typeset .marimo-book-output .markdown .paragraph {
+  display: block;
+}
+.md-typeset .marimo-book-output .markdown .paragraph:not(:last-child) {
+  margin-bottom: 1em;
+}
 .marimo-book-output img {
   max-width: 100%;
   height: auto;

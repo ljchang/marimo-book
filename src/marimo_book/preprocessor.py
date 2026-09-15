@@ -89,6 +89,8 @@ from .transforms.widget_state import (
     stage_referenced_buffers,
 )
 from .workbench import (
+    WORKBENCH_BLOCK_END,
+    WORKBENCH_TAIL_START,
     render_workbench_block,
     shell_extra_css,
     shell_extra_javascript,
@@ -550,12 +552,23 @@ def _spliced_page_and_body(original_page: str, result) -> tuple[str, str]:
     body = _splice_controls_inline(
         result.body, result.widget_html, anchor_cell_idx=result.splice_anchor_cell_idx
     )
+    head = ""
     if marker_open in original_page:
         head_end = original_page.index(marker_open)
         close_at = original_page.index(marker_close, head_end) + len(marker_close)
         head = original_page[:close_at]
-        return head + "\n\n" + body, body
-    return body, body
+    # The workbench block (render_workbench_block) sits between the buttons
+    # and the body and ends with an explicit marker, since it nests <div>s;
+    # its tail (an assignment card + drawer) follows the body. Both are page
+    # chrome the splice must carry over, like the button row.
+    if WORKBENCH_BLOCK_END in original_page:
+        head = original_page[: original_page.index(WORKBENCH_BLOCK_END) + len(WORKBENCH_BLOCK_END)]
+    tail = ""
+    if WORKBENCH_TAIL_START in original_page:
+        tail = "\n\n" + original_page[original_page.index(WORKBENCH_TAIL_START) :].rstrip() + "\n"
+    if head:
+        return head + "\n\n" + body + tail, body
+    return body + tail, body
 
 
 def _splice_controls_inline(

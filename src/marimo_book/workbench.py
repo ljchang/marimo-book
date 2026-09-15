@@ -71,6 +71,11 @@ RUNTIME_FILES = ("wb-store.js", "wb-mount.js")
 SHELL_JS = "workbench.js"
 SHELL_CSS = "workbench.css"
 
+WORKBENCH_BLOCK_END = "<!-- /wb-block -->"
+"""Closes the page block; the precompute splice keeps everything up to it."""
+WORKBENCH_TAIL_START = "<!-- wb-tail -->"
+"""Opens page chrome that follows the body (an assignment card); the splice keeps it."""
+
 _VERSION_MARKER = ".marimo-version"
 
 _MOUNT_CONFIG_RE = re.compile(
@@ -327,4 +332,5 @@ def render_workbench_block(
 </div>
 </aside>
 <div id="wb-toast" class="wb-toast" hidden><span id="wb-toast-text"></span><button id="wb-toast-action" hidden>Undo</button></div>
-</div>"""
+</div>
+{WORKBENCH_BLOCK_END}"""

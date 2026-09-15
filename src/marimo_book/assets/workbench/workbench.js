@@ -15,15 +15,19 @@
 (function () {
   // One page instance at a time: Material's instant navigation swaps the
   // article without a page load, so the previous instance's window-level
-  // listeners and history patch are torn down before the next one boots.
-  let teardown = null;
+  // listeners and history patch are torn down whenever the page changes —
+  // including a move to a page with no workbench at all.
+  let current = null; // { bar, teardown }
 
   function wbInit() {
     const $ = (sel, root) => (root || document).querySelector(sel);
     const bar = $("#wb-toolbar");
-    if (!bar || bar.dataset.wbInit) return;
-    if (teardown) teardown();
-    bar.dataset.wbInit = "1";
+    if (current && current.bar === bar) return; // same page, already booted
+    if (current) {
+      current.teardown();
+      current = null;
+    }
+    if (!bar) return;
     const scope = new AbortController();
     const signal = scope.signal;
 
@@ -179,10 +183,12 @@
     // reader scrolls, dropping ?view=; put it back so a reload lands in the
     // same state, while a nav click (a plain URL) still opens the page view.
     const origReplace = history.replaceState.bind(history);
-    teardown = () => {
-      scope.abort();
-      history.replaceState = origReplace;
-      teardown = null;
+    current = {
+      bar,
+      teardown: () => {
+        scope.abort();
+        history.replaceState = origReplace;
+      },
     };
     history.replaceState = (st, title, url) => {
       if (url && state !== "read") {

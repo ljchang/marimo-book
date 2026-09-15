@@ -288,3 +288,32 @@ def test_views_never_invalidate_cached_renders() -> None:
         }
     )
     assert _render_body_signature(plain) == _render_body_signature(edited)
+
+
+# --- precompute splice ------------------------------------------------------------
+
+
+def test_precompute_splice_keeps_the_workbench_block_and_tail() -> None:
+    """The splice rebuilds ``buttons + body``; the workbench block (which nests
+    divs, so the buttons' first-close trick can't find its end) and any tail
+    after the body must survive, or a precomputed page loses Read/Run/Edit."""
+    from types import SimpleNamespace
+
+    from marimo_book.preprocessor import _spliced_page_and_body
+    from marimo_book.workbench import WORKBENCH_BLOCK_END, WORKBENCH_TAIL_START
+
+    block = _block({"views": ["read", "edit"]}, "nb.md")
+    assert block.endswith(WORKBENCH_BLOCK_END)
+    original = (
+        '<div class="marimo-book-buttons" data-placement="header"><a>x</a></div>\n\n'
+        + block
+        + "\n\n<p>old body</p>\n\n"
+        + WORKBENCH_TAIL_START
+        + '\n<section id="wb-assignment">card</section>\n'
+    )
+    result = SimpleNamespace(body="<p>new body</p>", widget_html="", splice_anchor_cell_idx=None)
+    page, body = _spliced_page_and_body(original, result)
+    assert body == "<p>new body</p>"
+    assert page.index("marimo-book-buttons") < page.index("wb-toolbar") < page.index("new body")
+    assert "old body" not in page
+    assert page.rstrip().endswith('<section id="wb-assignment">card</section>')

@@ -252,9 +252,11 @@
       }
       if (assignment) {
         const aws = await WB.getWorkspace(assignment.nb);
+        const behind = Boolean(aws && aws.baseHash !== assignment.hash);
         const label = aws
-          ? `In progress · ${WB.timeAgo(aws.updatedAt)}${aws.lastSubmittedAt ? ` · submitted ${WB.fmt(aws.lastSubmittedAt)}` : ""}`
+          ? `In progress · ${WB.timeAgo(aws.updatedAt)}${aws.lastSubmittedAt ? ` · submitted ${WB.fmt(aws.lastSubmittedAt)}` : ""}${behind ? " · update available" : ""}`
           : "Not started";
+        $("#wb-asg-update").hidden = !behind;
         els.asgStatus.textContent = label;
         els.asgCardStatus.textContent = label;
         els.asgStart.textContent = aws ? "Continue assignment" : "Open assignment";
@@ -307,34 +309,45 @@
       if (a) a.fn();
     });
 
-    // ---- update transaction (chapter copy) ---------------------------------
+    // ---- update transaction (chapter or assignment copy) -------------------
     // Whole-notebook replace with a snapshot on each side, so it is always
     // undoable. Cell-level merging is a later step.
-    $("#wb-update").addEventListener("click", async () => {
-      const ws = await WB.getWorkspace(chapter.nb);
+    let undoTarget = null;
+    async function updateTarget(target) {
+      const ws = await WB.getWorkspace(target.nb);
       if (!ws) return;
-      const published = await fetchPublished(chapter);
+      const published = await fetchPublished(target);
       const now = Date.now();
-      undoSnap = { notebookId: chapter.nb, ts: now, reason: "before-update", hash: ws.baseHash, source: ws.workingSource, baseSource: ws.baseSource };
+      undoSnap = { notebookId: target.nb, ts: now, reason: "before-update", hash: ws.baseHash, source: ws.workingSource, baseSource: ws.baseSource };
+      undoTarget = target;
       await WB.addSnapshot(undoSnap);
-      Object.assign(ws, { workingSource: published, baseSource: published, baseHash: chapter.hash, updatedAt: now + 1 });
+      Object.assign(ws, { workingSource: published, baseSource: published, baseHash: target.hash, updatedAt: now + 1 });
       await WB.putWorkspace(ws);
-      await WB.addSnapshot({ notebookId: chapter.nb, ts: now + 1, reason: "after-update", hash: chapter.hash, source: published });
-      els.banner.hidden = true;
-      reloadFrame(chapter);
+      await WB.addSnapshot({ notebookId: target.nb, ts: now + 1, reason: "after-update", hash: target.hash, source: published });
+      if (target === chapter) els.banner.hidden = true;
+      reloadFrame(target);
       refreshStatus();
-      showToast("Updated to the published version. Your previous copy is in History.", { label: "Undo", fn: undoUpdate });
-    });
+      showToast(
+        target === chapter
+          ? "Updated to the published version. Your previous copy is in History."
+          : "Assignment updated to the published version. Your previous copy is in its History.",
+        { label: "Undo", fn: undoUpdate }
+      );
+    }
+    $("#wb-update").addEventListener("click", () => updateTarget(chapter));
+    if (assignment) $("#wb-asg-update").addEventListener("click", () => updateTarget(assignment));
 
     async function undoUpdate() {
-      if (!undoSnap) return;
-      const ws = await WB.getWorkspace(chapter.nb);
+      if (!undoSnap || !undoTarget) return;
+      const target = undoTarget;
+      const ws = await WB.getWorkspace(target.nb);
       const now = Date.now();
-      await WB.addSnapshot({ notebookId: chapter.nb, ts: now, reason: "before-restore", hash: ws.baseHash, source: ws.workingSource });
+      await WB.addSnapshot({ notebookId: target.nb, ts: now, reason: "before-restore", hash: ws.baseHash, source: ws.workingSource });
       Object.assign(ws, { workingSource: undoSnap.source, baseSource: undoSnap.baseSource, baseHash: undoSnap.hash, updatedAt: now + 1 });
       await WB.putWorkspace(ws);
       undoSnap = null;
-      reloadFrame(chapter);
+      undoTarget = null;
+      reloadFrame(target);
       refreshStatus();
       checkUpdate();
     }

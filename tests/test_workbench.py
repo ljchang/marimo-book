@@ -442,6 +442,14 @@ def test_assignment_only_page_ships_the_shell_without_a_chapter_copy(tmp_path: P
         < page.index(WORKBENCH_TAIL_START)
         < page.index("wb-assignment")
     )
+    assert 'id="wb-asg-update"' in page
+    from marimo_book.workbench import WORKBENCH_TAIL_START
+
+    assert (
+        page.index("Simple Notebook")
+        < page.index(WORKBENCH_TAIL_START)
+        < page.index("wb-assignment")
+    )
 
 
 def test_assignment_key_validates() -> None:

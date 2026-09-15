@@ -378,6 +378,7 @@ def render_assignment_tail(info: AssignmentInfo, *, rel_under_docs: Path) -> str
 <span class="wb-meta">{escape(meta)}</span>
 <span id="wb-asg-status" class="wb-chip"></span>
 <span class="wb-grow"></span>
+<button id="wb-asg-update" class="wb-hbtn" hidden title="A newer version of this assignment was published">Update…</button>
 <button id="wb-grader" class="wb-hbtn" hidden></button>
 <button id="wb-asg-history" class="wb-hbtn" title="Version history of your assignment copy">History</button>
 <button id="wb-drawer-min" class="wb-hbtn" title="Minimize to a bar">Minimize</button>

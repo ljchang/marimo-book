@@ -15,7 +15,7 @@ toc:
 
 The page then ends with an **assignment card** — title, grader identity and the question headings, all read from the notebook itself — and gains an **Assignment** toggle in the header. *Open assignment* slides a **drawer** up from the bottom of the page with the assignment in its own editor, under a bar of its own: status, a grader sign-in chip, **History**, **Minimize** and **Hide**. The drawer is drag-resizable and can stay open while the student scrolls the chapter above it. [Try it on the WASM demo page.](wasm_demo.md)
 
-The assignment is its own notebook with its own local copy, never merged into the chapter — what a student submits is byte-for-byte what the grader published plus their answers, which is what integrity checks on the grader side rely on. Everything the [workbench](workbench.md) does for a chapter copy applies to the assignment copy too: autosave in the browser, a version history with restore, and an update offered (never forced) when a new version is published.
+The assignment is its own notebook with its own local copy, never merged into the chapter — what a student submits is byte-for-byte what the grader published plus their answers, which is what integrity checks on the grader side rely on. Everything the [workbench](workbench.md) does for a chapter copy applies to the assignment copy too: autosave in the browser, a version history with restore, and — when a new version is published — an *Update…* button in the drawer bar (and *update available* in its status) that replaces the copy after snapshotting it, with Undo; never forced.
 
 What the card and drawer show comes from the notebook's own PEP 723 block, which the grader writes at publish time:
 

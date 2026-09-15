@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The molab button carries marimo's mark** instead of a stand-in rocket —
+  the sketched circle from marimo's logotype, inlined as a `currentColor` path
+  so it takes the palette's foreground and lines up with the GitHub and
+  download glyphs beside it. molab's own logo is a colour illustration rather
+  than a glyph, so it cannot be a `currentColor` path and looked out of place
+  in a monochrome row.
 - **Docs: the workbench and the assignment drawer each have a live demo.**
   *Workbench demo* is a static page offering Read / Run / Edit, with cells
   worth editing and a tour of History; *Assignment demo* is an ordinary

@@ -23,7 +23,7 @@ Any subset works, and `defaults.views` sets a book-wide default:
 | `views` | What the reader gets |
 |---|---|
 | `[read]` (default) | The rendered page. Nothing from the workbench is shipped. |
-| `[read, run]` | A **Run** button: the notebook in marimo's present view — every cell live and reactive, code hidden. Nothing is saved. |
+| `[read, run]` | A **Run** button: the notebook in marimo's present view — every cell live and reactive, code hidden. Nothing is saved (a reader who already has a copy runs that copy). |
 | `[read, edit]` | An **Edit** button: the full editor. Edits persist in the reader's browser; **History** and a copy-status chip appear. |
 | `[edit]` | The page *is* the editor; no view control is rendered. |
 

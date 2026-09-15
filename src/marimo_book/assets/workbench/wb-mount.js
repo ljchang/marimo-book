@@ -13,6 +13,8 @@
 //   hash     sha256 of that file, stamped by the build
 //   theme    light | dark
 //   view-as  present → marimo's app-like view (read by marimo itself)
+//   persist  0 → the `run` view: boot the reader's copy if one exists, else the
+//            published notebook, and never create or save anything
 //   cp       minutes between automatic checkpoints
 //   keep     rolling checkpoints kept
 //   wblog    1 → relay the workers' console output to this page (diagnostics)
@@ -22,6 +24,7 @@
   const src = q.get("src");
   const hash = q.get("hash") || "";
   const theme = q.get("theme") === "dark" ? "dark" : "light";
+  const persist = q.get("persist") !== "0";
   const checkpointMs = Math.max(1, Number(q.get("cp")) || 10) * 60 * 1000;
   const keepCheckpoints = Math.max(1, Number(q.get("keep")) || 20);
   const t0 = performance.now();
@@ -78,6 +81,10 @@
         const res = await fetch(src, { cache: "no-store" });
         if (!res.ok) throw new Error(`workbench: cannot load ${src} (${res.status})`);
         const published = await res.text();
+        if (!persist) {
+          post("loaded", { updateAvailable: false, ms: ms() });
+          return published; // run view: nothing is written
+        }
         const now = Date.now();
         ws = {
           notebookId: nb,
@@ -96,6 +103,7 @@
       return ws.workingSource; // never null → marimo's own fallbacks are never consulted
     },
     async saveFile(contents) {
+      if (!persist) return; // run view: nothing is written
       const ws = await WB.getWorkspace(nb);
       if (!ws) return;
       contents = restoreHeader(contents, ws.baseSource);

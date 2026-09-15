@@ -13,11 +13,19 @@
 //
 // Talks to the frame over postMessage only for boot timing / save events.
 (function () {
+  // One page instance at a time: Material's instant navigation swaps the
+  // article without a page load, so the previous instance's window-level
+  // listeners and history patch are torn down before the next one boots.
+  let teardown = null;
+
   function wbInit() {
     const $ = (sel, root) => (root || document).querySelector(sel);
     const bar = $("#wb-toolbar");
     if (!bar || bar.dataset.wbInit) return;
+    if (teardown) teardown();
     bar.dataset.wbInit = "1";
+    const scope = new AbortController();
+    const signal = scope.signal;
 
     // ---- identity + config from the block ---------------------------------
     const wbRoot = new URL(bar.dataset.wbRoot, location.href); // …/_workbench/
@@ -51,7 +59,7 @@
       place();
       // marimo_book.js clones the launch buttons into the header on
       // DOMContentLoaded; keep our group to their left.
-      document.addEventListener("DOMContentLoaded", place);
+      document.addEventListener("DOMContentLoaded", place, { signal });
       setTimeout(place, 300);
     }
     const segGroup = $("#wb-header .wb-seg");
@@ -110,7 +118,10 @@
       u.searchParams.set("theme", themeName());
       u.searchParams.set("cp", cp);
       u.searchParams.set("keep", keep);
-      if (view === "run") u.searchParams.set("view-as", "present");
+      if (view === "run") {
+        u.searchParams.set("view-as", "present");
+        u.searchParams.set("persist", "0"); // run never creates or saves a copy
+      }
       if (new URL(location.href).searchParams.get("wblog") === "1") u.searchParams.set("wblog", "1");
       return u.toString();
     }
@@ -156,14 +167,23 @@
     for (const b of document.querySelectorAll("#wb-header .wb-seg-btn")) {
       b.addEventListener("click", () => setState(b.dataset.view, true));
     }
-    window.addEventListener("popstate", (e) => {
-      // Only our own entries carry wbView; Material's hash bookkeeping is ignored.
-      if (e.state && typeof e.state.wbView === "string") setState(e.state.wbView, false);
-    });
+    window.addEventListener(
+      "popstate",
+      (e) => {
+        // Only our own entries carry wbView; Material's hash bookkeeping is ignored.
+        if (e.state && typeof e.state.wbView === "string") setState(e.state.wbView, false);
+      },
+      { signal }
+    );
     // Material's navigation.tracking rewrites the URL (path + hash) as the
     // reader scrolls, dropping ?view=; put it back so a reload lands in the
     // same state, while a nav click (a plain URL) still opens the page view.
     const origReplace = history.replaceState.bind(history);
+    teardown = () => {
+      scope.abort();
+      history.replaceState = origReplace;
+      teardown = null;
+    };
     history.replaceState = (st, title, url) => {
       if (url && state !== "read") {
         const u = new URL(url, location.href);
@@ -286,7 +306,7 @@
         e.preventDefault();
         download(bar.dataset.nb.split("/").pop(), ws.workingSource);
       },
-      true
+      { capture: true, signal }
     );
 
     // ---- history drawer ----------------------------------------------------
@@ -461,15 +481,19 @@
     });
 
     // ---- messages from the frame -------------------------------------------
-    window.addEventListener("message", (e) => {
-      if (e.origin !== location.origin || !e.data || e.data.source !== "wb" || e.data.nb !== chapter.nb) return;
-      const d = e.data;
-      const secs = ((performance.now() - frameT0) / 1000).toFixed(1);
-      if (d.type === "editor") els.boot.textContent = `Editor ready in ${secs} s — packages installing, cells will run shortly.`;
-      if (d.type === "ran") els.boot.textContent = `Editor ready; first output at ${secs} s.`;
-      if (d.type === "saved" || d.type === "loaded" || d.type === "created") refreshStatus();
-      if (d.type === "loaded") checkUpdate();
-    });
+    window.addEventListener(
+      "message",
+      (e) => {
+        if (e.origin !== location.origin || !e.data || e.data.source !== "wb" || e.data.nb !== chapter.nb) return;
+        const d = e.data;
+        const secs = ((performance.now() - frameT0) / 1000).toFixed(1);
+        if (d.type === "editor") els.boot.textContent = `Editor ready in ${secs} s — packages installing, cells will run shortly.`;
+        if (d.type === "ran") els.boot.textContent = `Editor ready; first output at ${secs} s.`;
+        if (d.type === "saved" || d.type === "loaded" || d.type === "created") refreshStatus();
+        if (d.type === "loaded") checkUpdate();
+      },
+      { signal }
+    );
 
     // ---- boot --------------------------------------------------------------
     setState(new URL(location.href).searchParams.get("view") || bar.dataset.openIn || "read", false);

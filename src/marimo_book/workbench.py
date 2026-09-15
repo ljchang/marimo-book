@@ -47,10 +47,12 @@ so a reboot still installs the notebook's packages.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
 import shutil
+import textwrap
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
@@ -271,8 +273,36 @@ class AssignmentInfo:
     questions: tuple[str, ...]
 
 
-_HEADING_RE = re.compile(r"^\s{4,}# (?!#)(.+?)\s*$", re.M)
-_QUESTION_RE = re.compile(r"^\s{4,}## (?!#)(.+?)\s*$", re.M)
+_HEADING_RE = re.compile(r"^\s*# (?!#)(.+?)\s*$", re.M)
+_QUESTION_RE = re.compile(r"^\s*## (?!#)(.+?)\s*$", re.M)
+
+
+def _mo_md_strings(source: str) -> list[str]:
+    """The string literals passed to ``mo.md(...)``, in source order.
+
+    Walks the AST (the same approach as ``extract_and_strip_title`` in
+    ``transforms/wasm.py``) so Python comments in code cells — ``# Import
+    libraries`` — are never mistaken for markdown headings.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    found: list[tuple[int, int, str]] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "md"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "mo"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            c = node.args[0]
+            found.append((c.lineno, c.col_offset, textwrap.dedent(c.value)))
+    return [text for _, _, text in sorted(found)]
 
 
 def read_assignment_info(
@@ -282,16 +312,18 @@ def read_assignment_info(
 
     The grader writes its identity into the student notebook's PEP 723 block
     (``grader-server``, ``grader-assignment``, ``grader-version``); the title
-    is the first ``# `` heading inside a cell's markdown and the questions
-    are its ``## `` headings. All best effort — a plain notebook with none of
-    these still opens in the drawer.
+    is the first ``# `` heading in the notebook's ``mo.md`` prose and the
+    questions are its ``## `` headings. All best effort — a plain notebook
+    with none of these still opens in the drawer.
     """
     from marimo._utils.scripts import read_pyproject_from_script
 
     meta = read_pyproject_from_script(source) or {}
-    heading = _HEADING_RE.search(source)
+    prose = _mo_md_strings(source)
+    heading = next((m for text in prose if (m := _HEADING_RE.search(text))), None)
     title = heading.group(1).strip() if heading else file.stem.replace("_", " ").replace("-", " ")
     title = re.sub(r"^Assignment:\s*", "", title)
+    questions = tuple(q.strip() for text in prose for q in _QUESTION_RE.findall(text))
     return AssignmentInfo(
         file=file,
         nb_url=nb_url,
@@ -300,7 +332,7 @@ def read_assignment_info(
         grader_server=str(meta.get("grader-server", "") or ""),
         grader_assignment=str(meta.get("grader-assignment", "") or ""),
         grader_version=str(meta.get("grader-version", "") or ""),
-        questions=tuple(q.strip() for q in _QUESTION_RE.findall(source)),
+        questions=questions,
     )
 
 

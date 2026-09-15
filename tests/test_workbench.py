@@ -365,6 +365,23 @@ def test_read_assignment_info_from_the_notebook() -> None:
     assert info.questions == ("Q1. Load the data", "Q2. Group and aggregate")
 
 
+def test_read_assignment_info_ignores_python_comments() -> None:
+    """Only ``mo.md`` prose counts: an indented ``# comment`` in a code cell
+    ahead of the intro is not the title, nor is a commented-out ``## call``."""
+    from marimo_book.workbench import read_assignment_info
+
+    src = (
+        "import marimo\n\napp = marimo.App()\n\n\n"
+        "@app.cell\ndef _():\n    # Import libraries\n    import marimo as mo\n"
+        "    ## old_call(mo)\n    return (mo,)\n\n\n"
+        '@app.cell\ndef _(mo):\n    mo.md(\n        r"""\n        # Real title\n\n'
+        '        ## Q1. Real question\n        """\n    )\n    return\n'
+    )
+    info = read_assignment_info(src, file=Path("a.py"), nb_url="u", published_hash="h")
+    assert info.title == "Real title"
+    assert info.questions == ("Q1. Real question",)
+
+
 def test_read_assignment_info_degrades_without_a_header() -> None:
     from marimo_book.workbench import read_assignment_info
 

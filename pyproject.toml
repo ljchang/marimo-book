@@ -36,6 +36,9 @@ dependencies = [
     # them so an upstream dependency shuffle can't break our imports.
     "tomlkit>=0.12",
     "markdown>=3.5",
+    # checks.py parses requirement strings (PEP 508) when deciding whether a
+    # workbench notebook can boot in Pyodide.
+    "packaging>=23",
     # .bib parsing for the native citations transform
     # (transforms/citations.py). Small + pure-Python, so a base dep — same
     # friction rationale as mkdocs-autorefs below.

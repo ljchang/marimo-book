@@ -231,13 +231,14 @@ def _check_workbench(
 
     for entry in entries:
         views = entry.effective_views(book.defaults)
-        for candidate, where in ((entry.open_in, "entry"), (book.defaults.open_in, "defaults")):
-            if candidate is not None and candidate not in views:
-                report.errors.append(
-                    f"{entry.file}: open_in ({where}): {candidate!r} is not one of "
-                    f"this page's views {views}"
-                )
-                break
+        # Same precedence as FileEntry.effective_open_in: an entry's own
+        # open_in must be one of its views; the book-wide open_in is only a
+        # preference (validated against defaults.views by the model) and a
+        # page that narrows its views simply falls back to its first view.
+        if entry.open_in is not None and entry.open_in not in views:
+            report.errors.append(
+                f"{entry.file}: open_in: {entry.open_in!r} is not one of this page's views {views}"
+            )
         if entry.file.suffix != ".py" and (entry.views is not None and views != ["read"]):
             report.errors.append(
                 f"{entry.file}: views other than [read] only apply to marimo notebooks"

@@ -415,7 +415,24 @@ def test_zensical_shell_needs_extra(tmp_path: Path, monkeypatch) -> None:
 # --- workbench ------------------------------------------------------------------
 
 
-def test_open_in_outside_views_is_error(tmp_path: Path) -> None:
+def test_entry_open_in_outside_its_views_is_error(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py", "views": ["read", "run"], "open_in": "edit"}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("open_in" in e and "content/nb.py" in e for e in report.errors)
+
+
+def test_book_open_in_is_only_a_preference_for_narrower_pages(tmp_path: Path) -> None:
+    """``defaults.open_in`` need not be offered by every page: a page that
+    narrows its views falls back (effective_open_in), so no error."""
     from marimo_book.checks import run_checks
 
     book = _book(
@@ -423,12 +440,15 @@ def test_open_in_outside_views_is_error(tmp_path: Path) -> None:
         {
             "title": "T",
             "defaults": {"open_in": "edit", "views": ["read", "edit"]},
-            "toc": [{"file": "content/nb.py", "views": ["read", "run"]}],
+            "toc": [
+                {"file": "content/nb.py", "views": ["run"], "open_in": "run"},
+                {"file": "content/other.py", "views": ["read", "run"]},
+            ],
         },
-        files=["content/nb.py"],
+        files=["content/nb.py", "content/other.py"],
     )
     report = run_checks(book, tmp_path)
-    assert any("open_in" in e and "content/nb.py" in e for e in report.errors)
+    assert not [e for e in report.errors if "open_in" in e]
 
 
 def test_views_on_markdown_page_is_error(tmp_path: Path) -> None:

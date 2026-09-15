@@ -493,6 +493,10 @@ def _render_body_signature(book: Book) -> str:
     # re-execution of heavy notebooks) each time the knob is tuned or a
     # release adds/renames it. Same rationale as _RENDER_OUTPUT_VERSION.
     defaults.pop("execution_timeout", None)
+    # The workbench views are page chrome added at finalize time (see
+    # _finalize_page), never part of the rendered body — same reasoning.
+    defaults.pop("views", None)
+    defaults.pop("open_in", None)
     relevant: dict = {
         "defaults": defaults,
         "dependencies": book.dependencies.model_dump(mode="json"),

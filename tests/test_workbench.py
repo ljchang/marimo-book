@@ -268,3 +268,23 @@ def test_build_ships_nothing_for_read_only_books(tmp_path: Path) -> None:
     assert "wb-toolbar" not in (docs / "nb.md").read_text(encoding="utf-8")
     cfg = yaml.safe_load((out / "mkdocs.yml").read_text())
     assert not any("workbench" in c for c in cfg["extra_css"])
+
+
+# --- cache signature --------------------------------------------------------------
+
+
+def test_views_never_invalidate_cached_renders() -> None:
+    """``views`` / ``open_in`` are finalize-time chrome: toggling them book-wide
+    must not change the render-body signature (which would mark every committed
+    ``_rendered/`` body stale and force a full re-execution)."""
+    from marimo_book.preprocessor import _render_body_signature
+
+    plain = Book.model_validate({"title": "T", "toc": [{"file": "content/nb.py"}]})
+    edited = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py"}],
+            "defaults": {"views": ["read", "run", "edit"], "open_in": "edit"},
+        }
+    )
+    assert _render_body_signature(plain) == _render_body_signature(edited)

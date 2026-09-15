@@ -438,6 +438,13 @@ class FileEntry(BaseModel):
     # follow the book default. Only meaningful for ``.py`` entries.
     views: list[View] | None = None
     open_in: View | None = None
+    # A graded assignment that belongs to this page: the path (relative to
+    # the book root) of the *student* notebook a grader published. It is
+    # rendered as a card at the end of the page and opens in the workbench's
+    # bottom drawer as its own notebook with its own local copy — never
+    # merged into the chapter, so what a student submits stays byte-for-byte
+    # what the grader published plus their answers.
+    assignment: Path | None = None
 
     @field_validator("views")
     @classmethod
@@ -462,9 +469,13 @@ class FileEntry(BaseModel):
         return "read" if "read" in views else views[0]
 
     def uses_workbench(self, defaults: Defaults) -> bool:
-        """Whether this page needs the workbench runtime (``run`` or ``edit``)."""
+        """Whether this page's own notebook opens in the workbench (``run`` or ``edit``)."""
         views = self.effective_views(defaults)
         return self.file.suffix == ".py" and ("run" in views or "edit" in views)
+
+    def uses_shell(self, defaults: Defaults) -> bool:
+        """Whether the page carries the workbench shell at all (views or an assignment)."""
+        return self.uses_workbench(defaults) or self.assignment is not None
 
 
 class UrlEntry(BaseModel):

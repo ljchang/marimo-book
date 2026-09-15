@@ -317,3 +317,157 @@ def test_precompute_splice_keeps_the_workbench_block_and_tail() -> None:
     assert page.index("marimo-book-buttons") < page.index("wb-toolbar") < page.index("new body")
     assert "old body" not in page
     assert page.rstrip().endswith('<section id="wb-assignment">card</section>')
+
+
+# --- assignments ------------------------------------------------------------------
+
+ASSIGNMENT_SRC = '''# /// script
+# dependencies = ["marimo", "marimo-grader-client"]
+# grader-server = "https://grader.example.edu"
+# grader-assignment = "pandas"
+# grader-version = "3"
+# ///
+
+import marimo
+
+app = marimo.App()
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        # Assignment: Introduction to Pandas
+
+        Read the chapter first.
+
+        ## Q1. Load the data
+        ## Q2. Group and aggregate
+        """
+    )
+    return
+
+
+if __name__ == "__main__":
+    app.run()
+'''
+
+
+def test_read_assignment_info_from_the_notebook() -> None:
+    from marimo_book.workbench import read_assignment_info
+
+    info = read_assignment_info(
+        ASSIGNMENT_SRC, file=Path("content/assignments/pandas.py"), nb_url="u", published_hash="h"
+    )
+    assert info.title == "Introduction to Pandas"  # "Assignment:" prefix stripped
+    assert info.grader_server == "https://grader.example.edu"
+    assert info.grader_assignment == "pandas" and info.grader_version == "3"
+    assert info.questions == ("Q1. Load the data", "Q2. Group and aggregate")
+
+
+def test_read_assignment_info_ignores_python_comments() -> None:
+    """Only ``mo.md`` prose counts: an indented ``# comment`` in a code cell
+    ahead of the intro is not the title, nor is a commented-out ``## call``."""
+    from marimo_book.workbench import read_assignment_info
+
+    src = (
+        "import marimo\n\napp = marimo.App()\n\n\n"
+        "@app.cell\ndef _():\n    # Import libraries\n    import marimo as mo\n"
+        "    ## old_call(mo)\n    return (mo,)\n\n\n"
+        '@app.cell\ndef _(mo):\n    mo.md(\n        r"""\n        # Real title\n\n'
+        '        ## Q1. Real question\n        """\n    )\n    return\n'
+    )
+    info = read_assignment_info(src, file=Path("a.py"), nb_url="u", published_hash="h")
+    assert info.title == "Real title"
+    assert info.questions == ("Q1. Real question",)
+
+
+def test_read_assignment_info_degrades_without_a_header() -> None:
+    from marimo_book.workbench import read_assignment_info
+
+    info = read_assignment_info(
+        "import marimo\napp = marimo.App()\n",
+        file=Path("content/assignments/week_one.py"),
+        nb_url="u",
+        published_hash="h",
+    )
+    assert info.title == "week one"
+    assert info.grader_server == "" and info.questions == ()
+
+
+def test_assignment_tail_carries_card_and_drawer() -> None:
+    from marimo_book.workbench import read_assignment_info, render_assignment_tail
+
+    info = read_assignment_info(
+        ASSIGNMENT_SRC,
+        file=Path("content/assignments/pandas.py"),
+        nb_url="_workbench/nb/content/assignments/pandas.py",
+        published_hash="abc",
+    )
+    html = render_assignment_tail(info, rel_under_docs=Path("a/nb.md"))
+    assert 'id="wb-assignment"' in html and 'id="wb-drawer"' in html
+    assert 'data-src="../../_workbench/nb/content/assignments/pandas.py"' in html
+    assert 'data-grader-server="https://grader.example.edu"' in html
+    assert "<li>Q1. Load the data</li>" in html
+    assert "Assignment: Introduction to Pandas" in html
+    assert "pandas · v3" in html
+    assert "\n\n" not in html, "one raw HTML block for Python-Markdown"
+
+
+def test_assignment_tail_without_questions_stays_one_html_block() -> None:
+    from marimo_book.workbench import read_assignment_info, render_assignment_tail
+
+    info = read_assignment_info(
+        "import marimo\napp = marimo.App()\n", file=Path("hw.py"), nb_url="u", published_hash="h"
+    )
+    html = render_assignment_tail(info, rel_under_docs=Path("nb.md"))
+    assert "wb-questions" not in html
+    assert "\n\n" not in html, "one raw HTML block for Python-Markdown"
+
+
+def test_assignment_only_page_ships_the_shell_without_a_chapter_copy(tmp_path: Path) -> None:
+    from marimo_book.config import load_book
+    from marimo_book.preprocessor import Preprocessor
+
+    book_dir = _book_dir(
+        tmp_path, {"file": "content/nb.py", "assignment": "content/assignments/hw.py"}
+    )
+    (book_dir / "content" / "assignments").mkdir()
+    (book_dir / "content" / "assignments" / "hw.py").write_text(ASSIGNMENT_SRC, encoding="utf-8")
+    book = load_book(book_dir / "book.yml")
+    out = tmp_path / "_site_src"
+    with patch("marimo_book.workbench.marimo_static_dir", return_value=_fake_static(tmp_path)):
+        Preprocessor(book, book_dir=book_dir).build(out_dir=out)
+
+    docs = out / "docs"
+    assert (docs / WORKBENCH_DIR / "index.html").exists()
+    assert (docs / WORKBENCH_DIR / "nb" / "content" / "assignments" / "hw.py").exists()
+    assert not (docs / WORKBENCH_DIR / "nb" / "content" / "nb.py").exists()  # views: [read]
+    page = (docs / "nb.md").read_text(encoding="utf-8")
+    assert 'data-views="read"' in page and 'data-src=""' in page
+    assert page.index("wb-block") < page.index("Simple Notebook") < page.index('id="wb-assignment"')
+    assert page.rstrip().endswith("</div>")  # the drawer closes the page
+    from marimo_book.workbench import WORKBENCH_TAIL_START
+
+    assert (
+        page.index("Simple Notebook")
+        < page.index(WORKBENCH_TAIL_START)
+        < page.index("wb-assignment")
+    )
+    assert 'id="wb-asg-update"' in page
+    from marimo_book.workbench import WORKBENCH_TAIL_START
+
+    assert (
+        page.index("Simple Notebook")
+        < page.index(WORKBENCH_TAIL_START)
+        < page.index("wb-assignment")
+    )
+
+
+def test_assignment_key_validates() -> None:
+    book = Book.model_validate(
+        {"title": "T", "toc": [{"file": "content/nb.py", "assignment": "content/assignments/a.py"}]}
+    )
+    assert book.toc[0].assignment == Path("content/assignments/a.py")
+    assert book.toc[0].uses_shell(book.defaults) and not book.toc[0].uses_workbench(book.defaults)
+    assert workbench_enabled(book)

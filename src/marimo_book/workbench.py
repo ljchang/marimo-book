@@ -47,10 +47,13 @@ so a reboot still installs the notebook's packages.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
 import shutil
+import textwrap
+from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
@@ -90,7 +93,7 @@ def workbench_enabled(book: Book) -> bool:
     """Whether any TOC page needs the workbench runtime staged."""
     from .preprocessor import _iter_file_entries  # local: avoid an import cycle
 
-    return any(e.uses_workbench(book.defaults) for e in _iter_file_entries(book.toc))
+    return any(e.uses_shell(book.defaults) for e in _iter_file_entries(book.toc))
 
 
 def marimo_static_dir() -> Path:
@@ -256,6 +259,135 @@ def stage_workbench_notebook(
     return rel.as_posix(), hashlib.sha256(published.encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class AssignmentInfo:
+    """What the page needs to know about its assignment (from the staged copy)."""
+
+    file: Path  # path relative to the book root (the TOC value)
+    nb_url: str  # site-root-relative URL of the staged notebook
+    published_hash: str
+    title: str
+    grader_server: str
+    grader_assignment: str
+    grader_version: str
+    questions: tuple[str, ...]
+
+
+_HEADING_RE = re.compile(r"^\s*# (?!#)(.+?)\s*$", re.M)
+_QUESTION_RE = re.compile(r"^\s*## (?!#)(.+?)\s*$", re.M)
+
+
+def _mo_md_strings(source: str) -> list[str]:
+    """The string literals passed to ``mo.md(...)``, in source order.
+
+    Walks the AST (the same approach as ``extract_and_strip_title`` in
+    ``transforms/wasm.py``) so Python comments in code cells — ``# Import
+    libraries`` — are never mistaken for markdown headings.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    found: list[tuple[int, int, str]] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "md"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "mo"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            c = node.args[0]
+            found.append((c.lineno, c.col_offset, textwrap.dedent(c.value)))
+    return [text for _, _, text in sorted(found)]
+
+
+def read_assignment_info(
+    source: str, *, file: Path, nb_url: str, published_hash: str
+) -> AssignmentInfo:
+    """Title, grader identity and question headings, read from the notebook itself.
+
+    The grader writes its identity into the student notebook's PEP 723 block
+    (``grader-server``, ``grader-assignment``, ``grader-version``); the title
+    is the first ``# `` heading in the notebook's ``mo.md`` prose and the
+    questions are its ``## `` headings. All best effort — a plain notebook
+    with none of these still opens in the drawer.
+    """
+    from marimo._utils.scripts import read_pyproject_from_script
+
+    meta = read_pyproject_from_script(source) or {}
+    prose = _mo_md_strings(source)
+    heading = next((m for text in prose if (m := _HEADING_RE.search(text))), None)
+    title = heading.group(1).strip() if heading else file.stem.replace("_", " ").replace("-", " ")
+    title = re.sub(r"^Assignment:\s*", "", title)
+    questions = tuple(q.strip() for text in prose for q in _QUESTION_RE.findall(text))
+    return AssignmentInfo(
+        file=file,
+        nb_url=nb_url,
+        published_hash=published_hash,
+        title=title,
+        grader_server=str(meta.get("grader-server", "") or ""),
+        grader_assignment=str(meta.get("grader-assignment", "") or ""),
+        grader_version=str(meta.get("grader-version", "") or ""),
+        questions=questions,
+    )
+
+
+def render_assignment_tail(info: AssignmentInfo, *, rel_under_docs: Path) -> str:
+    """The card at the end of the page, and the (initially hidden) drawer.
+
+    The card is the published, no-JS view — title, grader version, the
+    questions — with an *Open assignment* button; the drawer hosts the
+    assignment's own editor frame under its own bar. ``workbench.js`` fills
+    in status, the grader chip and the frame.
+    """
+    prefix = "../" * page_depth(rel_under_docs)
+    attrs = {
+        "data-nb": info.file.as_posix(),
+        "data-src": prefix + info.nb_url,
+        "data-hash": info.published_hash,
+        "data-grader-server": info.grader_server,
+    }
+    attr_html = " ".join(f'{k}="{escape(v, quote=True)}"' for k, v in attrs.items())
+    meta_bits = [
+        b
+        for b in (info.grader_assignment, f"v{info.grader_version}" if info.grader_version else "")
+        if b
+    ]
+    meta = " · ".join(meta_bits)
+    questions = "".join(f"<li>{escape(q)}</li>" for q in info.questions)
+    # Own line only when present: an empty line would split the raw HTML block.
+    qlist = f'\n<ol class="wb-questions">{questions}</ol>' if questions else ""
+    title = escape(info.title)
+    return f"""<section id="wb-assignment" class="wb-assignment" {attr_html}>
+<h2>Assignment: {title}</h2>
+<p class="wb-meta">{escape(meta)}</p>
+<p id="wb-asg-card-status" class="wb-asg-status"></p>{qlist}
+<div class="wb-asg-actions">
+<button id="wb-asg-start" class="wb-btn primary">Open assignment</button>
+<span>Opens in a drawer at the bottom of the page, so you can keep reading while you work. Autosaves in this browser.</span>
+</div>
+</section>
+<div id="wb-drawer" class="wb-drawer" hidden data-state="open" aria-label="Assignment">
+<div id="wb-drawer-handle" class="wb-drawer-handle" title="Drag to resize · double-click to maximize"></div>
+<div class="wb-drawer-bar">
+<strong>Assignment · {title}</strong>
+<span class="wb-meta">{escape(meta)}</span>
+<span id="wb-asg-status" class="wb-chip"></span>
+<span class="wb-grow"></span>
+<button id="wb-asg-update" class="wb-hbtn" hidden title="A newer version of this assignment was published">Update…</button>
+<button id="wb-grader" class="wb-hbtn" hidden></button>
+<button id="wb-asg-history" class="wb-hbtn" title="Version history of your assignment copy">History</button>
+<button id="wb-drawer-min" class="wb-hbtn" title="Minimize to a bar">Minimize</button>
+<button id="wb-drawer-close" class="wb-hbtn" title="Hide the drawer (your work is kept)">Hide</button>
+</div>
+<div id="wb-asg-frame" class="wb-asg-frame"></div>
+</div>"""
+
+
 def render_workbench_block(
     *,
     entry: FileEntry,
@@ -277,7 +409,9 @@ def render_workbench_block(
     prefix = "../" * page_depth(rel_under_docs)
     attrs = {
         "data-nb": Path(entry.file).as_posix(),
-        "data-src": prefix + nb_url,
+        # Empty when the page's own notebook never opens in the workbench
+        # (an assignment-only page): the shell then creates no chapter frame.
+        "data-src": prefix + nb_url if nb_url else "",
         "data-hash": published_hash,
         "data-views": ",".join(views),
         "data-open-in": open_in,
@@ -299,6 +433,7 @@ def render_workbench_block(
 <span id="wb-status" class="wb-chip" hidden></span>
 <div class="wb-seg" role="group" aria-label="Page view">{seg}</div>
 <button id="wb-history-btn" class="wb-hbtn" title="Version history of your copy" hidden>History</button>
+<button id="wb-asg-toggle" class="wb-hbtn" title="Open the assignment in a drawer">Assignment</button>
 </div>
 </template>
 </div>

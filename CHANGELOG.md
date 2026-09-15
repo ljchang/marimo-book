@@ -52,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (marimo-grader-client ≥ 0.1.1) is relayed to the page, which records the
   submission as a version in the assignment's History.
 
+### Fixed
+
+- **Prose from a composite cell ran together on static pages.** marimo renders
+  `mo.vstack([mo.md(...), mo.image(...), ...])` itself — the documented way to
+  mix prose and figures — and emits each paragraph as an inline
+  `<span class="paragraph">`, blocking it in its own stylesheet. Static pages
+  never load that stylesheet (only WASM pages do, through the islands bundle),
+  so every paragraph of such a cell rendered on one line, byline included.
+  `extra.css` now blocks them.
+
 ## [0.1.39] — 2026-09-13
 
 ### Added

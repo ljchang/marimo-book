@@ -974,3 +974,23 @@ def test_citations_render_and_bib_edits_apply_without_rerender(tmp_path: Path) -
     assert report.pages_cached == 1  # notebook untouched
     staged = (tmp_path / "_site_src" / "docs" / "index.md").read_text(encoding="utf-8")
     assert ">Doe, 2021</a>)" in staged  # .bib edit applied at finalize time
+
+
+def test_staged_css_blocks_marimo_rendered_paragraphs(tmp_path: Path) -> None:
+    """A composite output (`mo.vstack([mo.md(...), ...])`) is rendered by marimo
+    itself, which emits each paragraph as an inline `<span class="paragraph">`
+    and blocks it in its own stylesheet. Static pages never load that
+    stylesheet, so extra.css must do it or the prose runs together on one line.
+    """
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import Preprocessor
+
+    (tmp_path / "content").mkdir()
+    (tmp_path / "content" / "intro.md").write_text("# Intro\n", encoding="utf-8")
+    book = Book.model_validate({"title": "T", "toc": [{"file": "content/intro.md"}]})
+    out = tmp_path / "_site_src"
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
+
+    css = (out / "docs" / "stylesheets" / "extra.css").read_text(encoding="utf-8")
+    assert ".marimo-book-output .markdown .paragraph" in css
+    assert ".marimo-book-output .markdown.contents" in css

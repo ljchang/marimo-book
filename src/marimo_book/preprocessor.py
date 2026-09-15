@@ -497,23 +497,38 @@ def _render_body_signature(book: Book) -> str:
     package release. Stored with each ``RenderedStore`` entry so a build can
     tell a committed body is stale even when the source bytes are unchanged.
     """
-    defaults = book.defaults.model_dump(mode="json")
-    # execution_timeout can only abort a render, never change its output —
-    # including it would mark every committed body stale (and force a costly
-    # re-execution of heavy notebooks) each time the knob is tuned or a
-    # release adds/renames it. Same rationale as _RENDER_OUTPUT_VERSION.
-    defaults.pop("execution_timeout", None)
-    # The workbench views are page chrome added at finalize time (see
-    # _finalize_page), never part of the rendered body — same reasoning.
-    defaults.pop("views", None)
-    defaults.pop("open_in", None)
-    # Likewise the byline: on the static path it is stripped at finalize time,
-    # and ``_rendered/`` only ever holds static-path bodies (a cached page is
-    # rendered by render_py_body, never through the islands pipeline). Keeping
-    # it here would make toggling the flag re-execute every heavy notebook.
-    # WASM pages *do* bake it into the body, at the source level — which is why
-    # _book_signature, the transient cache's key, adds it back.
-    defaults.pop("hide_author_line", None)
+    # An explicit list, not ``model_dump()``: every field named here is one
+    # that genuinely changes a notebook's rendered body, and a new knob has to
+    # be added deliberately. Hashing the whole model instead meant that merely
+    # *adding* a field to ``Defaults`` changed the hash and marked every
+    # committed body stale — 0.1.40's ``views`` / ``open_in`` /
+    # ``hide_author_line`` did exactly that, which is a costly re-execution of
+    # GPU and download-heavy notebooks for no change in output.
+    #
+    # Deliberately absent:
+    #   execution_timeout  can abort a render, never change its output.
+    #   views / open_in    workbench chrome, composed at finalize time.
+    #   hide_author_line   stripped at finalize time on the static path, and
+    #                      ``_rendered/`` only ever holds static-path bodies
+    #                      (a cached page is rendered by render_py_body, never
+    #                      through the islands pipeline). WASM pages do bake it
+    #                      in, at the source level — which is why
+    #                      _book_signature, the transient cache's key, adds it
+    #                      back.
+    defaults = {
+        "mode": book.defaults.mode,
+        # Pinned, not read from the config. The byline is stripped at finalize
+        # time on the static path and ``_rendered/`` only ever holds
+        # static-path bodies, so the flag cannot change a committed body — but
+        # it *was* hashed before 0.1.40, and dropping the key outright would
+        # change the payload's shape and stale every body ever committed. Held
+        # at the historical default so those stay valid. Do not read the flag
+        # here; the transient cache (_book_signature) tracks it for WASM pages.
+        "hide_author_line": True,
+        "show_source_link": book.defaults.show_source_link,
+        "hide_first_code_cell": book.defaults.hide_first_code_cell,
+        "suppress_warnings": book.defaults.suppress_warnings,
+    }
     relevant: dict = {
         "defaults": defaults,
         "dependencies": book.dependencies.model_dump(mode="json"),

@@ -368,3 +368,29 @@ def test_render_body_sig_tracks_pyodide_version(tmp_path: Path) -> None:
     with patch("marimo_book.preprocessor._pyodide_version", return_value="315.0.0"):
         sig_b = _render_body_signature(book)
     assert sig_a != sig_b
+
+
+def test_render_body_sig_ignores_new_defaults_fields(tmp_path: Path) -> None:
+    """Adding a field to ``Defaults`` must not invalidate committed bodies.
+
+    Regression guard: the signature used to hash ``defaults.model_dump()``, so
+    every new knob — even pure page chrome — changed the hash and marked every
+    ``_rendered/`` body stale, forcing a re-execution of GPU and
+    download-heavy notebooks for output that did not change. It now hashes an
+    explicit list of render-affecting fields.
+    """
+    from marimo_book.preprocessor import _render_body_signature
+
+    book = _book_with_cached_nb(tmp_path)
+    baseline = _render_body_signature(book)
+
+    # Fields that are page chrome or scheduling, not render inputs.
+    book.defaults.execution_timeout = 12.5
+    book.defaults.views = ["read", "run", "edit"]
+    book.defaults.open_in = "edit"
+    book.defaults.hide_author_line = not book.defaults.hide_author_line
+    assert _render_body_signature(book) == baseline
+
+    # …while a field that does change the rendered body still invalidates.
+    book.defaults.hide_first_code_cell = not book.defaults.hide_first_code_cell
+    assert _render_body_signature(book) != baseline

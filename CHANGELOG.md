@@ -5,6 +5,18 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Docs: the workbench and the assignment drawer each have a live demo.**
+  *Workbench demo* is a static page offering Read / Run / Edit, with cells
+  worth editing and a tour of History; *Assignment demo* is an ordinary
+  static page — no `views` — that still carries an assignment, showing that a
+  chapter readers cannot run can still carry one they can. They replace the
+  sample that was bolted onto the WASM demo page, which conflated two features
+  and ran two Pyodide kernels on one page.
+
 ## [0.1.40] — 2026-09-15
 
 ### Added

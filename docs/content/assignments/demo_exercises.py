@@ -20,15 +20,17 @@ def _():
 def _(mo):
     mo.md(
         r"""
-        # Assignment: WASM demo exercises
+        # Assignment: Compound interest
 
         A tiny stand-in for a grader-published student notebook, so this book can
-        show the assignment drawer. A real assignment carries its grader identity
-        in the PEP 723 block at the top of the file and uses the grader's widget
-        cells for sign-in, checks and submission; this one only has questions.
+        show the assignment drawer with something real in it. A published
+        assignment carries its grader identity in the PEP 723 block at the top of
+        the file, and its sign-in, check and submit cells come from the grader's
+        widget; this one only has questions and their checks.
 
         Answer in the cells marked `# YOUR CODE HERE`. Your work is saved in this
-        browser as you type — open **History** in the drawer bar to see versions.
+        browser as you type — open **History** in the drawer's bar to see every
+        version of it, and to restore one.
         """
     )
     return

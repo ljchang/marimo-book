@@ -6,8 +6,8 @@ marimo's own editor, inside the page, with no server behind it. A reader's
 edits are kept in their browser as a local copy of the published notebook,
 with a version history, and survive reloads and republishes.
 
-The [WASM demo](wasm_demo.md) page of this book offers all three views;
-try **Edit** in its header.
+The [Workbench demo](workbench_demo.md) page of this book offers all three
+views; try **Edit** in its header.
 
 ## Enable it
 
@@ -106,8 +106,10 @@ site's storage and needs no sandbox attributes.
 
 A page can also carry a graded assignment — a separate notebook, opened in
 a drawer at the bottom of the page with its own local copy, history and
-grader sign-in — via `assignment:` on the TOC entry. See
-[Assignments and grading](assignments-and-grading.md).
+grader sign-in — via `assignment:` on the TOC entry. There is a live
+[Assignment demo](assignment_demo.md), and
+[Assignments and grading](assignments-and-grading.md) covers the
+publishing flow.
 
 ## Diagnostics
 

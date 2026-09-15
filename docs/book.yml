@@ -90,12 +90,14 @@ toc:
       - file: content/precompute_demo.py
       - file: content/wasm_demo.py
         mode: wasm
-        # Also offers the in-browser workbench (Run / Edit in the header):
-        # marimo's editor in the page, edits kept in the reader's browser.
+      - file: content/workbench_demo.py
+        # The feature's demo, so it offers all three views. A book usually
+        # picks a subset — `views: [read, edit]` is the common one.
         views: [read, run, edit]
-        # …and carries a (grader-less) sample assignment that opens in the
-        # workbench's bottom drawer as its own notebook with its own copy.
-        assignment: content/assignments/wasm_demo_exercises.py
+      - file: content/assignment_demo.py
+        # No `views`: an ordinary static page that still carries an
+        # assignment, which opens in the workbench's bottom drawer.
+        assignment: content/assignments/demo_exercises.py
       - file: content/workbench.md
       - file: content/widgets.py
       - file: content/dependencies.md

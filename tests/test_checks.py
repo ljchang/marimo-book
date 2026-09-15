@@ -471,3 +471,20 @@ def test_workbench_page_with_pure_deps_passes(tmp_path: Path) -> None:
     report = run_checks(book, tmp_path)
     assert not report.errors
     assert not any("Pyodide" in w for w in report.warnings)
+
+
+def test_native_dependency_with_any_specifier_warns(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["torch!=1.9", "opencv-python~=4.9"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    warned = [w for w in report.warnings if "Pyodide" in w]
+    assert len(warned) == 1 and "opencv-python" in warned[0] and "torch" in warned[0]

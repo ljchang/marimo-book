@@ -212,6 +212,17 @@ _NO_PYODIDE_WHEEL = frozenset(
 )
 
 
+def _requirement_name(requirement: str) -> str:
+    """Canonical project name of a PEP 508 requirement string (``torch!=1.9`` → ``torch``)."""
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    try:
+        return canonicalize_name(Requirement(requirement).name)
+    except InvalidRequirement:
+        return requirement.split("[")[0].split(";")[0].strip().lower()
+
+
 def _check_workbench(
     book: Book, book_dir: Path, entries: list[FileEntry], report: CheckReport
 ) -> None:
@@ -244,9 +255,7 @@ def _check_workbench(
             )
         except Exception:  # noqa: BLE001 - a syntax error is reported at build time
             continue
-        names = {
-            d.split("[")[0].split("=")[0].split(">")[0].split("<")[0].strip().lower() for d in deps
-        }
+        names = {_requirement_name(d) for d in deps}
         bad = sorted(names & _NO_PYODIDE_WHEEL)
         if bad:
             report.warnings.append(

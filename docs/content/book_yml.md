@@ -256,6 +256,8 @@ Page-level rendering defaults.
 | `show_source_link` | bool | `true` | Show the source-link icon next to the title |
 | `hide_first_code_cell` | bool | `true` | Drop the conventional `import marimo as mo` setup cell |
 | `suppress_warnings` | bool | `false` | Run notebook export with `PYTHONWARNINGS=ignore` so library warnings don't surface as visible stderr blocks in the page |
+| `views` | list of `read` \| `run` \| `edit` | `[read]` | Which views notebook pages offer; `run`/`edit` add the [in-browser workbench][workbench] |
+| `open_in` | `read` \| `run` \| `edit` | first of `views` | The view a page opens in |
 
 `suppress_warnings: true` is useful for tutorial books that import
 scientific libraries — numpy, pandas, scikit-learn, etc. routinely
@@ -271,7 +273,9 @@ Three shapes, inferred from which key is present:
 
 - `file: path` — a local `.md` or marimo `.py`, rendered as a page.
   Optional `title:` overrides the first `#` heading in the file. Optional
-  `mode: wasm` opts that page into [WASM render mode][wasm].
+  `mode: wasm` opts that page into [WASM render mode][wasm]. Optional
+  `views:` / `open_in:` override the [workbench][workbench] defaults for
+  that notebook (`views: [read, edit]`, `open_in: edit`, …).
 - `url: URL` (+ `title:`) — external link in the sidebar.
 - `section: name` + `children: [...]` — a nested group. Recursive. An
   empty section (`children:` blank or omitted) is silently dropped from
@@ -284,6 +288,24 @@ header logo's "back to home" link works without any extra configuration,
 and you don't need to know about the mkdocs `index.md` convention.
 
 [wasm]: building.md#wasm-render-mode
+[workbench]: workbench.md
+
+### Workbench
+
+Book-wide knobs for the [in-browser workbench][workbench] (marimo's editor
+mounted in the page, edits kept in the reader's browser). Only read when
+some page lists `run` or `edit` in its `views`.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `checkpoint_minutes` | int | `10` | Minutes of editing between automatic history checkpoints |
+| `max_checkpoints` | int | `20` | Rolling checkpoints kept per notebook; named versions and update snapshots are never pruned |
+
+```yaml
+workbench:
+  checkpoint_minutes: 5
+  max_checkpoints: 50
+```
 
 ### Shell
 

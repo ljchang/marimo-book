@@ -88,6 +88,17 @@ from .transforms.widget_state import (
     referenced_buffer_hashes,
     stage_referenced_buffers,
 )
+from .workbench import (
+    WORKBENCH_BLOCK_END,
+    WORKBENCH_TAIL_START,
+    render_workbench_block,
+    shell_extra_css,
+    shell_extra_javascript,
+    stage_shell_assets,
+    stage_workbench_notebook,
+    stage_workbench_runtime,
+    workbench_enabled,
+)
 
 # Directories and glob patterns of assets we copy verbatim when present.
 _ASSET_DIRS: tuple[str, ...] = ("images", "Code", "data")
@@ -484,6 +495,10 @@ def _render_body_signature(book: Book) -> str:
     # re-execution of heavy notebooks) each time the knob is tuned or a
     # release adds/renames it. Same rationale as _RENDER_OUTPUT_VERSION.
     defaults.pop("execution_timeout", None)
+    # The workbench views are page chrome added at finalize time (see
+    # _finalize_page), never part of the rendered body — same reasoning.
+    defaults.pop("views", None)
+    defaults.pop("open_in", None)
     relevant: dict = {
         "defaults": defaults,
         "dependencies": book.dependencies.model_dump(mode="json"),
@@ -537,12 +552,23 @@ def _spliced_page_and_body(original_page: str, result) -> tuple[str, str]:
     body = _splice_controls_inline(
         result.body, result.widget_html, anchor_cell_idx=result.splice_anchor_cell_idx
     )
+    head = ""
     if marker_open in original_page:
         head_end = original_page.index(marker_open)
         close_at = original_page.index(marker_close, head_end) + len(marker_close)
         head = original_page[:close_at]
-        return head + "\n\n" + body, body
-    return body, body
+    # The workbench block (render_workbench_block) sits between the buttons
+    # and the body and ends with an explicit marker, since it nests <div>s;
+    # its tail (an assignment card + drawer) follows the body. Both are page
+    # chrome the splice must carry over, like the button row.
+    if WORKBENCH_BLOCK_END in original_page:
+        head = original_page[: original_page.index(WORKBENCH_BLOCK_END) + len(WORKBENCH_BLOCK_END)]
+    tail = ""
+    if WORKBENCH_TAIL_START in original_page:
+        tail = "\n\n" + original_page[original_page.index(WORKBENCH_TAIL_START) :].rstrip() + "\n"
+    if head:
+        return head + "\n\n" + body + tail, body
+    return body + tail, body
 
 
 def _splice_controls_inline(
@@ -765,6 +791,13 @@ class Preprocessor:
 
         self._stage_assets(docs_dir, report)
         self._write_defaults(docs_dir)
+        # The in-browser workbench (marimo's editor + local copies) ships only
+        # when some page offers a run/edit view: its assets are ~27 MB.
+        use_workbench = workbench_enabled(self.book)
+        if use_workbench:
+            self._progress("Staging workbench runtime (marimo editor assets)")
+            stage_workbench_runtime(docs_dir)
+            stage_shell_assets(docs_dir)
 
         file_entries = _iter_file_entries(self.book.toc)
 
@@ -961,12 +994,16 @@ class Preprocessor:
             nav.extend(api_nav)
             report.pages += count_pages(api_nav)
 
+        from .shell import _versioned
+
         emit_mkdocs_yml(
             self.book,
             docs_dir=docs_dir.relative_to(out_dir),
             site_dir=site_dir,
             out_path=out_dir / "mkdocs.yml",
             nav=nav,
+            extra_css=shell_extra_css() if use_workbench else None,
+            extra_javascript=shell_extra_javascript(_versioned) if use_workbench else None,
             api_paths=api_paths or None,
         )
 
@@ -1571,6 +1608,27 @@ def _finalize_page(
     # stores (transient cache for live renders, ``_rendered/`` for committed
     # ones); copy them under docs/ so mkdocs ships them next to the page.
     _stage_page_assets(body, docs_dir, book_dir, str(entry.file))
+    if entry.uses_workbench(book.defaults):
+        # Finalize-time like the buttons: the workbench block is page chrome,
+        # not part of the rendered body, so ``views`` edits never invalidate a
+        # cached render. The notebook the editor boots is staged alongside.
+        src_abs = (book_dir / entry.file).resolve()
+        nb_url, published_hash = stage_workbench_notebook(
+            src_abs,
+            Path(entry.file),
+            docs_dir,
+            book.dependencies,
+            requires_python=book.dependencies.requires_python
+            or _running_python_version_constraint(),
+        )
+        block = render_workbench_block(
+            entry=entry,
+            book=book,
+            nb_url=nb_url,
+            published_hash=published_hash,
+            rel_under_docs=rel_under_docs,
+        )
+        body = f"{block}\n\n{body.lstrip()}"
     # Bodies keep site-root-relative asset URLs (so cached bodies are
     # page-location-independent); make them relative to this page's URL.
     page = localize_asset_urls(_compose_page(buttons, body), rel_under_docs)

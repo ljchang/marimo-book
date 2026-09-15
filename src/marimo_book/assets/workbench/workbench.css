@@ -1,0 +1,86 @@
+/* marimo-book workbench — page shell: header controls, update banner, frame,
+   history drawer. Colors come from Material's own variables so both palettes
+   and a custom theme palette work unchanged. */
+
+.wb-banner[hidden], .wb-toast[hidden], .wb-frame[hidden], #wb-read[hidden],
+.wb-history[hidden], .wb-chip[hidden], .wb-hbtn[hidden], .wb-btn[hidden],
+.wb-head .wb-seg[hidden] { display: none !important; }
+
+/* Header group: status chip · Read|Run|Edit · History */
+.wb-head { display: flex; align-items: center; gap: .45rem; margin-inline: .6rem .2rem; font-size: .68rem; color: inherit; }
+.wb-seg { display: inline-flex; border: 1px solid currentColor; border-radius: .25rem; overflow: hidden; opacity: .95; }
+.wb-seg-btn {
+  appearance: none; border: 0; background: transparent; color: inherit;
+  padding: .2rem .55rem; font: inherit; cursor: pointer; border-right: 1px solid currentColor;
+}
+.wb-seg-btn:last-child { border-right: 0; }
+.wb-seg-btn[aria-pressed="true"] { background: var(--md-primary-fg-color); color: var(--md-primary-bg-color); }
+.wb-seg-btn:focus-visible, .wb-btn:focus-visible, .wb-hbtn:focus-visible { outline: 2px solid var(--md-accent-fg-color); outline-offset: 2px; }
+.wb-chip { white-space: nowrap; opacity: .85; font-variant-numeric: tabular-nums; }
+.wb-chip .dot, .wb-hbtn .dot { display: inline-block; width: .45rem; height: .45rem; border-radius: 50%; background: var(--md-accent-fg-color); margin-right: .25rem; vertical-align: middle; }
+.wb-hbtn {
+  appearance: none; font: inherit; cursor: pointer; padding: .2rem .55rem; line-height: inherit;
+  border: 1px solid currentColor; border-radius: .25rem; background: transparent; color: inherit; white-space: nowrap; opacity: .95;
+}
+@media (max-width: 960px) { .wb-chip, #wb-history-btn { display: none; } }
+@media (max-width: 720px) {
+  .wb-seg-btn[data-view="run"], .wb-seg-btn[data-view="edit"] { display: none; }
+  .wb-head { margin-inline: .3rem; }
+}
+
+/* In-article pieces */
+.wb-toolbar { display: none; }
+.wb-grow { flex: 1; }
+.wb-btn {
+  appearance: none; font: inherit; cursor: pointer; padding: .3rem .6rem;
+  border: 1px solid var(--md-default-fg-color--lighter); border-radius: .25rem;
+  background: var(--md-default-bg-color); color: var(--md-default-fg-color);
+}
+.wb-btn.primary { border-color: var(--md-primary-fg-color); color: var(--md-primary-fg-color); font-weight: 600; }
+.wb-btn.danger { color: #b3261e; border-color: #b3261e; }
+
+.wb-banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+  margin: 0 0 1rem; padding: .6rem .8rem; font-size: .72rem;
+  border-left: 3px solid var(--md-accent-fg-color); background: var(--md-code-bg-color);
+}
+.wb-banner p { margin: 0; }
+
+.wb-frame { margin: 0 0 1.5rem; }
+.wb-frame iframe {
+  width: 100%; height: calc(100vh - 7rem); min-height: 320px;
+  border: 1px solid var(--md-default-fg-color--lightest); border-radius: .25rem;
+  background: var(--md-default-bg-color);
+}
+.wb-boot { font-size: .7rem; color: var(--md-default-fg-color--light); margin: .3rem 0 0; }
+
+.wb-toast {
+  position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 50;
+  padding: .5rem .8rem; font-size: .72rem; border-radius: .25rem;
+  background: var(--md-default-fg-color); color: var(--md-default-bg-color);
+  display: flex; gap: .6rem; align-items: center; max-width: min(90vw, 40rem);
+}
+.wb-toast button { font: inherit; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: .2rem; padding: .15rem .5rem; cursor: pointer; }
+
+/* History drawer */
+.wb-history {
+  position: fixed; top: 0; right: 0; height: 100vh; width: min(460px, 100vw); z-index: 60;
+  background: var(--md-default-bg-color); color: var(--md-default-fg-color);
+  border-left: 1px solid var(--md-default-fg-color--lightest); box-shadow: -4px 0 16px rgba(0,0,0,.12);
+  display: flex; flex-direction: column; font-size: .72rem;
+}
+.wb-history-head { display: flex; align-items: center; justify-content: space-between; padding: .8rem 1rem; border-bottom: 1px solid var(--md-default-fg-color--lightest); }
+.wb-history-save { display: flex; gap: .4rem; padding: .6rem 1rem; border-bottom: 1px solid var(--md-default-fg-color--lightest); }
+.wb-history-save input { flex: 1; font: inherit; padding: .3rem .4rem; border: 1px solid var(--md-default-fg-color--lighter); border-radius: .2rem; background: transparent; color: inherit; }
+.wb-history-list { list-style: none; margin: 0; padding: .4rem 0; overflow: auto; max-height: 40%; border-bottom: 1px solid var(--md-default-fg-color--lightest); }
+.wb-history-list li { display: grid; grid-template-columns: 14px 1fr; gap: .5rem; padding: .35rem 1rem; cursor: pointer; }
+.wb-history-list li:hover, .wb-history-list li[aria-selected="true"] { background: var(--md-code-bg-color); }
+.wb-history-list .dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--md-primary-fg-color); margin-top: .35rem; }
+.wb-history-list .dot.now { background: var(--md-primary-fg-color); }
+.wb-history-list small { display: block; color: var(--md-default-fg-color--light); }
+.wb-preview { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.wb-preview-head { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .5rem 1rem; }
+.wb-preview pre { flex: 1; margin: 0; padding: .6rem 1rem; overflow: auto; font-size: .62rem; line-height: 1.5; background: var(--md-code-bg-color); }
+.wb-preview pre .add { background: rgba(46,160,67,.25); }
+.wb-preview pre .del { background: rgba(248,81,73,.25); text-decoration: line-through; }
+.wb-history-foot { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .6rem 1rem; border-top: 1px solid var(--md-default-fg-color--lightest); }

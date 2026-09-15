@@ -410,3 +410,101 @@ def test_zensical_shell_needs_extra(tmp_path: Path, monkeypatch) -> None:
     )
     report = checks.run_checks(book, tmp_path)
     assert any("[zensical]" in e for e in report.errors)
+
+
+# --- workbench ------------------------------------------------------------------
+
+
+def test_entry_open_in_outside_its_views_is_error(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py", "views": ["read", "run"], "open_in": "edit"}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("open_in" in e and "content/nb.py" in e for e in report.errors)
+
+
+def test_book_open_in_is_only_a_preference_for_narrower_pages(tmp_path: Path) -> None:
+    """``defaults.open_in`` need not be offered by every page: a page that
+    narrows its views falls back (effective_open_in), so no error."""
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "defaults": {"open_in": "edit", "views": ["read", "edit"]},
+            "toc": [
+                {"file": "content/nb.py", "views": ["run"], "open_in": "run"},
+                {"file": "content/other.py", "views": ["read", "run"]},
+            ],
+        },
+        files=["content/nb.py", "content/other.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert not [e for e in report.errors if "open_in" in e]
+
+
+def test_views_on_markdown_page_is_error(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/intro.md", "views": ["read", "edit"]}]},
+        files=["content/intro.md"],
+    )
+    report = run_checks(book, tmp_path)
+    assert any("only apply to marimo notebooks" in e for e in report.errors)
+
+
+def test_native_dependency_on_workbench_page_warns(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
+        files=["content/nb.py"],
+    )
+    (tmp_path / "content" / "nb.py").write_text(
+        "import marimo\napp = marimo.App()\n\n@app.cell\ndef _():\n    import torch\n    return\n",
+        encoding="utf-8",
+    )
+    report = run_checks(book, tmp_path)
+    assert any("torch" in w and "Pyodide" in w for w in report.warnings)
+    assert not report.errors
+
+
+def test_workbench_page_with_pure_deps_passes(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "run", "edit"]}]},
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    assert not report.errors
+    assert not any("Pyodide" in w for w in report.warnings)
+
+
+def test_native_dependency_with_any_specifier_warns(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["torch!=1.9", "opencv-python~=4.9"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    warned = [w for w in report.warnings if "Pyodide" in w]
+    assert len(warned) == 1 and "opencv-python" in warned[0] and "torch" in warned[0]

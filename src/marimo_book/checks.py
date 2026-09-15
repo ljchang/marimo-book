@@ -86,6 +86,7 @@ def run_checks(book: Book, book_dir: Path) -> CheckReport:
     _check_cached_freshness(book, book_dir, entries, report)
     _check_duplicate_outputs(entries, report)
     _check_inert_knobs(book, report)
+    _check_workbench(book, book_dir, entries, report)
     _check_empty_sections(book.toc, report)
     _check_internal_links(book, book_dir, entries, report)
     _check_bibliography(book, book_dir, entries, report)
@@ -185,6 +186,83 @@ def _check_duplicate_outputs(entries: list[FileEntry], report: CheckReport) -> N
 
 
 # --- warnings -------------------------------------------------------------------
+
+
+# Packages with native extensions that have no Pyodide wheel. A notebook that
+# imports one can't boot in the browser, so a run/edit view on it would only
+# ever show an install error. Warned, not errored: the list is a heuristic.
+_NO_PYODIDE_WHEEL = frozenset(
+    {
+        "torch",
+        "torchvision",
+        "torchaudio",
+        "tensorflow",
+        "jax",
+        "jaxlib",
+        "numba",
+        "cupy",
+        "psutil",
+        "opencv-python",
+        "opencv-python-headless",
+        "lxml",
+        "pyarrow",
+        "polars",
+        "nibabel",
+    }
+)
+
+
+def _requirement_name(requirement: str) -> str:
+    """Canonical project name of a PEP 508 requirement string (``torch!=1.9`` → ``torch``)."""
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    try:
+        return canonicalize_name(Requirement(requirement).name)
+    except InvalidRequirement:
+        return requirement.split("[")[0].split(";")[0].strip().lower()
+
+
+def _check_workbench(
+    book: Book, book_dir: Path, entries: list[FileEntry], report: CheckReport
+) -> None:
+    """``views`` / ``open_in`` must be consistent, and only make sense on notebooks."""
+    from .transforms.pep723 import derive_dependencies
+
+    for entry in entries:
+        views = entry.effective_views(book.defaults)
+        # Same precedence as FileEntry.effective_open_in: an entry's own
+        # open_in must be one of its views; the book-wide open_in is only a
+        # preference (validated against defaults.views by the model) and a
+        # page that narrows its views simply falls back to its first view.
+        if entry.open_in is not None and entry.open_in not in views:
+            report.errors.append(
+                f"{entry.file}: open_in: {entry.open_in!r} is not one of this page's views {views}"
+            )
+        if entry.file.suffix != ".py" and (entry.views is not None and views != ["read"]):
+            report.errors.append(
+                f"{entry.file}: views other than [read] only apply to marimo notebooks"
+            )
+        if not entry.uses_workbench(book.defaults):
+            continue
+        src = book_dir / entry.file
+        if not src.exists():
+            continue  # reported by _check_toc_files
+        try:
+            deps = derive_dependencies(
+                src.read_text(encoding="utf-8"),
+                extras=book.dependencies.extras,
+                overrides=book.dependencies.overrides,
+            )
+        except Exception:  # noqa: BLE001 - a syntax error is reported at build time
+            continue
+        names = {_requirement_name(d) for d in deps}
+        bad = sorted(names & _NO_PYODIDE_WHEEL)
+        if bad:
+            report.warnings.append(
+                f"{entry.file}: views include run/edit but the notebook imports "
+                f"{', '.join(bad)}, which cannot run in the browser (no Pyodide wheel)"
+            )
 
 
 def _check_inert_knobs(book: Book, report: CheckReport) -> None:

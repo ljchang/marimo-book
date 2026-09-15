@@ -430,6 +430,11 @@ def _book_signature(book: Book, *, book_dir: Path | None = None) -> str:
     relevant: dict = {
         "body": _render_body_signature(book),
         "precompute": book.precompute.model_dump(mode="json"),
+        # Excluded from the ``_rendered/`` signature (finalize-time on the
+        # static path) but baked into a WASM body, which is stripped in the
+        # source the islands runtime executes — and WASM bodies live in *this*
+        # cache, so toggling the flag has to re-render them.
+        "hide_author_line": book.defaults.hide_author_line,
         # Which packages rendered the cached bodies (see _environment_signature).
         "environment": _environment_signature(book_dir),
     }
@@ -502,6 +507,13 @@ def _render_body_signature(book: Book) -> str:
     # _finalize_page), never part of the rendered body — same reasoning.
     defaults.pop("views", None)
     defaults.pop("open_in", None)
+    # Likewise the byline: on the static path it is stripped at finalize time,
+    # and ``_rendered/`` only ever holds static-path bodies (a cached page is
+    # rendered by render_py_body, never through the islands pipeline). Keeping
+    # it here would make toggling the flag re-execute every heavy notebook.
+    # WASM pages *do* bake it into the body, at the source level — which is why
+    # _book_signature, the transient cache's key, adds it back.
+    defaults.pop("hide_author_line", None)
     relevant: dict = {
         "defaults": defaults,
         "dependencies": book.dependencies.model_dump(mode="json"),

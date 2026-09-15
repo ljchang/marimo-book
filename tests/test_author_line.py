@@ -161,3 +161,45 @@ def test_markdown_pages_keep_their_byline(tmp_path: Path) -> None:
     out = tmp_path / "_site_src"
     Preprocessor(book, book_dir=tmp_path).build(out_dir=out)
     assert "Written by A Person" in (out / "docs" / "index.md").read_text(encoding="utf-8")
+
+
+# --- caching ------------------------------------------------------------------
+
+
+def test_toggling_the_flag_does_not_invalidate_rendered_bodies(tmp_path: Path) -> None:
+    """``_rendered/`` holds static-path bodies, where the byline is stripped at
+    finalize time — so flipping the flag must not re-execute a `mode: cached`
+    notebook (Download_Data in dartbrains is a ~46 GB download)."""
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import _render_body_signature
+
+    def book(hide: bool) -> Book:
+        return Book.model_validate(
+            {
+                "title": "T",
+                "toc": [{"file": "content/nb.py"}],
+                "defaults": {"hide_author_line": hide},
+            }
+        )
+
+    assert _render_body_signature(book(True)) == _render_body_signature(book(False))
+
+
+def test_toggling_the_flag_does_invalidate_the_transient_cache(tmp_path: Path) -> None:
+    """A WASM body bakes the byline in at the source level, and WASM bodies
+    live in the transient cache — so that key must track the flag."""
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import _book_signature
+
+    def book(hide: bool) -> Book:
+        return Book.model_validate(
+            {
+                "title": "T",
+                "toc": [{"file": "content/nb.py", "mode": "wasm"}],
+                "defaults": {"hide_author_line": hide},
+            }
+        )
+
+    assert _book_signature(book(True), book_dir=tmp_path) != _book_signature(
+        book(False), book_dir=tmp_path
+    )

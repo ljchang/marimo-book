@@ -215,6 +215,21 @@ _NO_PYODIDE_WHEEL = frozenset(
 )
 
 
+def _is_pinned(requirement: str) -> bool:
+    """Whether a PEP 508 requirement constrains its version at all.
+
+    A URL requirement (``name @ https://…``) is not "pinned" for this purpose:
+    marimo's strip leaves those intact, so they do reach the browser as written.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        parsed = Requirement(requirement)
+    except InvalidRequirement:
+        return False
+    return parsed.url is None and bool(parsed.specifier)
+
+
 def _requirement_name(requirement: str) -> str:
     """Canonical project name of a PEP 508 requirement string (``torch!=1.9`` → ``torch``)."""
     from packaging.requirements import InvalidRequirement, Requirement
@@ -280,6 +295,23 @@ def _check_workbench(
             report.warnings.append(
                 f"{entry.file}: views include run/edit but the notebook imports "
                 f"{', '.join(bad)}, which cannot run in the browser (no Pyodide wheel)"
+            )
+
+        # marimo installs script-metadata dependencies by *name*: its
+        # `strip_requirement_name` drops version specifiers before handing them
+        # to micropip (marimo/_pyodide/pyodide_session.py::find_packages). So a
+        # pin in the block is advisory in the browser — the reader gets
+        # whatever the bare name resolves to, which is the newest *stable*
+        # release. dartbrains pinned `nltools==0.6.0.dev2`; readers got 0.5.1,
+        # which needs numpy<1.24 and has no Pyodide wheel, and the boot failed.
+        pinned = sorted(d for d in deps if _is_pinned(d))
+        if pinned:
+            report.warnings.append(
+                f"{entry.file}: views include run/edit but "
+                f"{', '.join(pinned)} carry version specifiers, which marimo "
+                f"drops when installing in the browser — readers get whatever "
+                f"the bare name resolves to. Only offer run/edit here if the "
+                f"unpinned package works in Pyodide."
             )
 
 

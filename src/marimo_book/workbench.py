@@ -86,6 +86,11 @@ _MOUNT_CONFIG_RE = re.compile(
     re.S,
 )
 
+# marimo's frontend bundle. Held back and injected by ``wb-mount.js`` once the
+# mount config carries the notebook, because a module script runs after parsing
+# and would otherwise start before an awaited IndexedDB read could fill it in.
+_BUNDLE_RE = re.compile(r'<script type="module"[^>]*\ssrc="(?P<src>[^"]+)"[^>]*>\s*</script>')
+
 _ASSETS_ROOT = Path(__file__).parent / "assets" / "workbench"
 
 
@@ -141,9 +146,27 @@ def mount_page_html(index_html: str, *, marimo_version: str, config: dict) -> st
         ("{{ base_url }}", ""),
     ):
         html = html.replace(placeholder, value)
+    # Pull marimo's bundle out of the document; wb-mount.js appends it once
+    # the config is ready. Without this, marimo boots with an empty `code` and
+    # never reads the notebook's PEP 723 block, so it prompts the reader to
+    # install packages by hand instead of installing what the book pinned.
+    bundle_match = _BUNDLE_RE.search(html)
+    if bundle_match is None:
+        raise RuntimeError(
+            "marimo's index.html has no module bundle script; "
+            "the installed marimo is newer than the workbench supports"
+        )
+    html = html[: bundle_match.start()] + html[bundle_match.end() :]
+
     boot = (
         "<script>window.__WB__ = "
-        + json.dumps({"marimoVersion": marimo_version, "config": config})
+        + json.dumps(
+            {
+                "marimoVersion": marimo_version,
+                "config": config,
+                "bundle": bundle_match.group("src"),
+            }
+        )
         + ";</script>\n"
         '<script src="./wb-store.js"></script>\n'
         '<script src="./wb-mount.js"></script>'

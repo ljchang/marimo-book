@@ -103,8 +103,11 @@ def test_mount_page_swaps_marimos_frozen_config_for_our_script() -> None:
     assert '"marimoVersion": "9.9.9"' in html
     assert "<marimo-wasm hidden" in html
     assert "{{ " not in html, "every template placeholder must be filled"
-    # marimo's own bundle keeps loading from ./assets/ next to the page.
-    assert 'src="./assets/' in html
+    # marimo's own bundle still comes from ./assets/ next to the page — but by
+    # way of __WB__.bundle now, so wb-mount.js can start it once the mount
+    # config carries the notebook rather than letting it race the read.
+    assert '"bundle": "./assets/' in html
+    assert '<script type="module"' not in html
 
 
 def test_mount_page_rejects_an_unknown_index_layout() -> None:
@@ -471,3 +474,53 @@ def test_assignment_key_validates() -> None:
     assert book.toc[0].assignment == Path("content/assignments/a.py")
     assert book.toc[0].uses_shell(book.defaults) and not book.toc[0].uses_workbench(book.defaults)
     assert workbench_enabled(book)
+
+
+# --- the reader must not be asked to install packages by hand -----------------
+
+
+def test_the_mount_page_holds_marimos_bundle_back() -> None:
+    """marimo's frontend is a module script, so it runs after parsing — before
+    an awaited IndexedDB read could fill in `code`. wb-mount.js appends it once
+    the config carries the notebook."""
+    import marimo
+
+    from marimo_book.workbench import mount_page_html
+
+    index = (Path(marimo.__file__).parent / "_static" / "index.html").read_text()
+    out = mount_page_html(index, marimo_version="0.24.2", config={})
+
+    assert '<script type="module"' not in out, "the bundle must not auto-run"
+    assert '"bundle"' in out, "its URL has to reach wb-mount.js"
+    assert "wb-mount.js" in out
+    assert "<marimo-wasm" in out
+
+
+def test_a_newer_marimo_without_a_bundle_script_is_an_error() -> None:
+    """Silently shipping a page that never boots would be worse."""
+    import pytest
+
+    from marimo_book.workbench import mount_page_html
+
+    stub = (
+        '<html><head><script data-marimo="true">'
+        'Object.defineProperty(window, "__MARIMO_MOUNT_CONFIG__", {})</script>'
+        "</head></html>"
+    )
+    with pytest.raises(RuntimeError, match="module bundle script"):
+        mount_page_html(stub, marimo_version="0.24.2", config={})
+
+
+def test_the_mount_script_reads_the_notebook_before_configuring() -> None:
+    source = (
+        Path(__file__).parent.parent
+        / "src"
+        / "marimo_book"
+        / "assets"
+        / "workbench"
+        / "wb-mount.js"
+    ).read_text()
+
+    assert 'code: ""' not in source, "an empty code hides the notebook's PEP 723 block"
+    assert "store\n    .readFile()" in source or "store.readFile()" in source
+    assert "__WB__" in source

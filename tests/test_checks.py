@@ -526,7 +526,7 @@ def test_native_dependency_with_any_specifier_warns(tmp_path: Path) -> None:
         files=["content/nb.py"],
     )
     report = run_checks(book, tmp_path)
-    warned = [w for w in report.warnings if "Pyodide" in w]
+    warned = [w for w in report.warnings if "no Pyodide wheel" in w]
     assert len(warned) == 1 and "numba" in warned[0] and "torch" in warned[0]
 
 
@@ -559,3 +559,69 @@ def test_assignment_without_pep723_block_warns(tmp_path: Path) -> None:
     report = run_checks(book, tmp_path)
     assert not report.errors
     assert any("no PEP 723 block" in w for w in report.warnings)
+
+
+# --- a pin in the block does not survive the browser --------------------------
+
+
+def test_pinned_workbench_dependencies_warn(tmp_path: Path) -> None:
+    """marimo strips version specifiers before installing, so a pin is
+    advisory in the browser. dartbrains pinned nltools==0.6.0.dev2 and readers
+    got 0.5.1, which cannot run in Pyodide."""
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools==0.6.0.dev2"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    warned = [w for w in report.warnings if "version specifiers" in w]
+    assert len(warned) == 1 and "nltools==0.6.0.dev2" in warned[0]
+
+
+def test_an_unpinned_workbench_dependency_does_not_warn(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+        files=["content/nb.py"],
+    )
+    assert not [w for w in run_checks(book, tmp_path).warnings if "version specifiers" in w]
+
+
+def test_a_url_requirement_is_not_treated_as_pinned(tmp_path: Path) -> None:
+    """marimo's strip leaves `name @ url` intact, so those do reach the browser
+    as written."""
+    from marimo_book.checks import _is_pinned
+
+    assert not _is_pinned("nltools @ https://example.invalid/nltools-0.6.0-py3-none-any.whl")
+    assert not _is_pinned("nltools")
+    assert _is_pinned("nltools==0.6.0.dev2")
+    assert _is_pinned("nltools>=0.6")
+
+
+def test_a_read_only_page_may_pin_freely(tmp_path: Path) -> None:
+    """The warning is about what the *browser* installs; a static page's
+    dependencies are the build's business."""
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools==0.6.0.dev2"]},
+            "toc": [{"file": "content/nb.py"}],
+        },
+        files=["content/nb.py"],
+    )
+    assert not [w for w in run_checks(book, tmp_path).warnings if "version specifiers" in w]

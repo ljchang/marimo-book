@@ -5,6 +5,29 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The workbench installs a notebook's packages instead of asking the reader
+  to.** The mount config passed `code: ""`, so marimo's Pyodide session found
+  no script metadata to install from (`PyodideSession.find_packages` reads the
+  PEP 723 block out of exactly that string) and fell back to its *Missing
+  packages* prompt — a reader on any chapter with a non-Pyodide-bundled import
+  had to press Install and hope. `wb-mount.js` now resolves the notebook
+  before writing the config, and `mount_page_html` holds marimo's bundle back
+  so it starts afterwards rather than racing the IndexedDB read (the bundle is
+  a module script, so it would otherwise run first). Verified in Chrome: a
+  notebook whose block declares a non-bundled package now boots and runs it
+  with no prompt.
+- **`check` warns when a workbench page pins a dependency.** marimo installs
+  script-metadata dependencies by *name* — `strip_requirement_name` drops the
+  specifier — so a pin is advisory in the browser and the reader gets whatever
+  the bare name resolves to, which is the newest *stable* release. dartbrains
+  pinned `nltools==0.6.0.dev2`; readers got 0.5.1, which needs `numpy<1.24`,
+  has no Pyodide wheel, and failed to install. A URL requirement
+  (`name @ https://…`) survives the strip and is not warned about.
+
 ## [0.1.41] — 2026-09-16
 
 ### Fixed

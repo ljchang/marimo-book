@@ -74,8 +74,17 @@
     return contents;
   }
 
+  // The source marimo boots. Resolved *before* the mount config is written,
+  // because marimo reads the notebook's PEP 723 block out of `config.code` to
+  // decide what to install (`PyodideSession.find_packages`). With the empty
+  // string this used to pass, that path finds nothing and marimo falls back to
+  // its "Missing packages" prompt — which installs bare names, so a reader on
+  // a chapter with any non-bundled import had to click Install and hope.
+  let resolved = null;
+
   const store = {
     async readFile() {
+      if (resolved !== null) return resolved;
       let ws = await WB.getWorkspace(nb);
       if (!ws) {
         const res = await fetch(src, { cache: "no-store" });
@@ -83,7 +92,8 @@
         const published = await res.text();
         if (!persist) {
           post("loaded", { updateAvailable: false, ms: ms() });
-          return published; // run view: nothing is written
+          resolved = published; // run view: nothing is written
+          return resolved;
         }
         const now = Date.now();
         ws = {
@@ -100,7 +110,8 @@
         post("created");
       }
       post("loaded", { updateAvailable: Boolean(hash) && ws.baseHash !== hash, ms: ms() });
-      return ws.workingSource; // never null → marimo's own fallbacks are never consulted
+      resolved = ws.workingSource; // never null → marimo's own fallbacks are never consulted
+      return resolved;
     },
     async saveFile(contents) {
       if (!persist) return; // run view: nothing is written
@@ -109,6 +120,7 @@
       contents = restoreHeader(contents, ws.baseSource);
       if (contents === ws.workingSource) return;
       const now = Date.now();
+      resolved = contents;
       ws.workingSource = contents;
       ws.updatedAt = now;
       if (now - (ws.lastCheckpointAt || 0) > checkpointMs) {
@@ -125,11 +137,12 @@
   const config = boot.config || {};
   config.display = Object.assign({}, config.display, { theme });
 
-  window.__MARIMO_MOUNT_CONFIG__ = {
+  function mountConfig(code) {
+    return {
     // The name marimo's save flow requires (without one, Save is a no-op).
     // The worker rewrites this file from our store on every boot.
     filename: "notebook.py",
-    code: "",
+    code,
     version: boot.marimoVersion || "unknown",
     mode: "edit", // `?view-as=present` in the frame URL opens the app-like view
     serverToken: "",
@@ -141,7 +154,30 @@
     session: null,
     notebook: null,
     runtimeConfig: [],
-  };
+    };
+  }
+
+  // Resolve the notebook, publish the config, *then* start marimo's bundle.
+  // Ordering is the whole point: marimo's frontend is a module script, which
+  // runs after parsing, so it would otherwise start before an awaited read
+  // could fill in `code`. `mount_page_html` holds the bundle back for us and
+  // leaves its URL on `__WB__.bundle`.
+  store
+    .readFile()
+    .catch((e) => {
+      post("error", { message: String((e && e.message) || e) });
+      return ""; // let marimo boot and show its own failure
+    })
+    .then((code) => {
+      window.__MARIMO_MOUNT_CONFIG__ = mountConfig(code);
+      const bundle = boot.bundle;
+      if (!bundle) return; // nothing held back (older staged page)
+      const tag = document.createElement("script");
+      tag.type = "module";
+      tag.crossOrigin = "anonymous";
+      tag.src = bundle;
+      document.head.appendChild(tag);
+    });
 
   // A grader widget inside the notebook announces a successful submission as
   // a `marimo-grader:submitted` DOM event (marimo-grader-client >= 0.1.1);

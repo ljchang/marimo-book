@@ -55,6 +55,28 @@
     parent.postMessage({ source: "wb", nb, type, ...(data || {}) }, location.origin);
   };
 
+  // The `theme` parameter above pins marimo's theme at boot, but nothing
+  // marimo reads afterwards is reactive — so the page shell relays palette
+  // toggles here. `data-vscode-theme-kind` is the one theme input marimo does
+  // recompute: a MutationObserver on <body> feeds the atom that *overrides*
+  // the configured theme, so setting it re-themes the editor live, CodeMirror's
+  // syntax colours and the data tables' canvas included — neither of which any
+  // amount of CSS could reach.
+  //
+  // It is deliberately not set at boot: marimo reads the attribute's mere
+  // presence as "running inside the VS Code extension" (`isInVscodeExtension()`
+  // is a bare `querySelector`) and hides the data table's row- and
+  // column-explorer buttons. A reader who never touches the palette keeps the
+  // full table UI; one who does trades those two buttons for a theme that
+  // follows the page.
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin || !e.data || e.data.source !== "wb") return;
+    if (e.data.type !== "theme") return;
+    const next = e.data.theme === "dark" ? "dark" : "light";
+    document.body.dataset.theme = next;
+    document.body.dataset.vscodeThemeKind = next === "dark" ? "vscode-dark" : "vscode-light";
+  });
+
   // marimo's save worker regenerates the file from the cells alone, so the
   // PEP 723 header (dependencies, and whatever else rides in it) and the
   // `marimo.App(...)` kwargs are lost on the first save. Re-attach them from

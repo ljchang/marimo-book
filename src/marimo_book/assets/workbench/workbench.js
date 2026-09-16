@@ -148,6 +148,33 @@
     const themeName = () => (document.body.getAttribute("data-md-color-scheme") === "slate" ? "dark" : "light");
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+    // marimo bakes its theme in at boot — from `frameUrl`'s `theme=` and the
+    // matching `config.display.theme` — and nothing it reads afterwards is
+    // reactive, so a palette toggle would leave a light editor sitting in a
+    // dark page until the frame is rebuilt (a Pyodide reboot, and the kernel
+    // state with it). Relay the change instead; wb-mount.js applies it live.
+    let appliedTheme = themeName();
+    function broadcastTheme() {
+      const next = themeName();
+      // Material rewrites every data-md-color-* attribute on each emission,
+      // so only a changed value means the reader (or the OS) switched.
+      if (next === appliedTheme) return;
+      appliedTheme = next;
+      for (const f of [frame, asgFrame]) {
+        if (f && f.contentWindow) {
+          f.contentWindow.postMessage({ source: "wb", type: "theme", theme: next }, location.origin);
+        }
+      }
+    }
+    if (typeof MutationObserver !== "undefined") {
+      const themeObserver = new MutationObserver(broadcastTheme);
+      themeObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ["data-md-color-scheme"],
+      });
+      signal.addEventListener("abort", () => themeObserver.disconnect());
+    }
+
     function frameUrl(target, view) {
       const u = new URL("index.html", wbRoot);
       u.searchParams.set("nb", target.nb);

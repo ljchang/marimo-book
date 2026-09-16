@@ -23,6 +23,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounds, and a lower bound naming a pre-release — which selects the newest
   stable just as an exact pin does. Not flagged: ordinary lower bounds, and URL
   requirements, which survive the strip intact.
+### Fixed
+
+- **Notebooks follow the palette toggle.** A `mode: wasm` page rendered its
+  cells light on a dark page, and an open edit frame kept whichever theme it
+  booted with — flipping the palette left a white editor sitting in a dark
+  article. Two causes, both upstream. marimo's islands entry point never mounts
+  `ThemeProvider`, so nothing puts the `dark` class on `<body>` that every
+  colour token in the bundle resolves through: islands dark mode was not stale,
+  it was unreachable. And marimo decides its theme once — the islands theme atom
+  sniffs the DOM with no reactive dependency, the embedded editor reads `?theme=`
+  and `config.display.theme` at mount — so a host that changes its own theme has
+  no way to say so.
+
+  `marimo_book.js` now keeps `<body>`'s `dark` class and `data-theme` in step
+  with Material's `data-md-color-scheme`, and the workbench relays palette
+  changes into its frame over `postMessage`. Both then write
+  `data-vscode-theme-kind`, the one theme input marimo recomputes after boot
+  (a MutationObserver feeds the atom that overrides the inferred theme), which
+  re-themes what CSS cannot reach: CodeMirror's syntax colours, the data
+  tables' canvas, Vega and mermaid. The frame is re-themed in place, so no
+  Pyodide reboot and no lost kernel state.
+
+  marimo also reads that attribute's mere presence as "running inside the VS
+  Code extension" and hides two data-table controls, so it is written only once
+  the scheme actually changes under a booted page — a reader who never toggles
+  keeps the full table UI. `notes/marimo-islands-theme-upstream.md` is the
+  issue to file for a first-class hook that would let the attribute go.
 
 ## [0.1.41] — 2026-09-16
 

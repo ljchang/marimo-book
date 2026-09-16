@@ -484,6 +484,34 @@ def _pyodide_version() -> str | None:
     return str(PYODIDE_VERSION)
 
 
+def _render_relevant_dependencies(dependencies: Dependencies) -> dict:
+    """The part of ``dependencies`` that can change a *static* rendered body.
+
+    Dependency configuration reaches a rendered body only through the
+    environment the notebook executes in.
+
+    In ``sandbox`` mode that environment *is* the generated PEP 723 block, so
+    every field counts — ``overrides`` and ``extras`` decide what uv installs.
+
+    In ``env`` mode (the default) the notebook runs in whatever environment
+    invoked the build, and the block is only read later, by micropip in the
+    browser. That is a WASM concern, tracked by :func:`_book_signature`, and
+    one a ``_rendered/`` body never carries: those hold static-path bodies
+    only. Hashing the whole model regardless meant that merely adding an
+    override — a browser-only knob — marked every committed body stale, which
+    in dartbrains is a 46 GB re-download in ``Download_Data``. This is the
+    same over-broad hashing that 0.1.40's ``views`` / ``hide_author_line``
+    fixed for ``defaults``.
+
+    The irrelevant fields are pinned to their defaults rather than dropped, so
+    the payload keeps the shape bodies were already hashed with and a book
+    that never set them sees no change at all.
+    """
+    if dependencies.mode == "sandbox":
+        return dependencies.model_dump(mode="json")
+    return Dependencies(mode=dependencies.mode).model_dump(mode="json")
+
+
 def _render_body_signature(book: Book) -> str:
     """Hash the fields that change a notebook's *rendered body*.
 
@@ -531,7 +559,7 @@ def _render_body_signature(book: Book) -> str:
     }
     relevant: dict = {
         "defaults": defaults,
-        "dependencies": book.dependencies.model_dump(mode="json"),
+        "dependencies": _render_relevant_dependencies(book.dependencies),
         "widget_defaults": book.widget_defaults,
         # The image policy changes the bytes and file names a body references.
         "images": book.images.model_dump(mode="json"),

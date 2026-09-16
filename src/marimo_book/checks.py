@@ -195,10 +195,11 @@ def _check_duplicate_outputs(entries: list[FileEntry], report: CheckReport) -> N
 #
 # Checked in a browser (2026-09-15) by asking micropip to install each — do not
 # add a package here without doing the same, because "has native code" is not
-# the test: polars is Rust to the core and installs fine. Pure-Python packages
-# never belong here whatever they wrap (nibabel, nilearn), and neither do the
-# ones Pyodide bundles (lxml, opencv-python, scikit-learn). `jax` stays because
-# jaxlib, which it is useless without, has no wheel Pyodide can load.
+# the test: polars is Rust to the core and installs fine, and pyarrow (22.0.0)
+# ships in the Pyodide release marimo pins. Pure-Python packages never belong
+# here whatever they wrap (nibabel, nilearn), and neither do the ones Pyodide
+# bundles (lxml, opencv-python, scikit-learn). `jax` stays because jaxlib,
+# which it is useless without, has no wheel Pyodide can load.
 _NO_PYODIDE_WHEEL = frozenset(
     {
         "torch",
@@ -210,7 +211,6 @@ _NO_PYODIDE_WHEEL = frozenset(
         "numba",
         "cupy",
         "psutil",
-        "pyarrow",
     }
 )
 

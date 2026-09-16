@@ -184,12 +184,27 @@
   if (!boot.bundle) {
     window.__MARIMO_MOUNT_CONFIG__ = mountConfig("");
   } else {
-    store
-      .readFile()
-      .catch((e) => {
+    // Bounded, because marimo's boot now waits on this. `fetch` has no timeout
+    // and `indexedDB.open` can block indefinitely behind another tab holding a
+    // version change, so an unbounded wait would leave the config unset and the
+    // bundle never injected: a blank iframe with no marimo UI at all. Before
+    // this change marimo booted immediately and surfaced the stall itself, and
+    // falling back to an empty `code` keeps that floor — the reader gets the
+    // package prompt, which is the old behaviour, rather than nothing.
+    const BOOT_DEADLINE_MS = 10000;
+    const timeout = new Promise((resolve) =>
+      setTimeout(() => {
+        post("error", { message: "timed out reading your copy; booting anyway" });
+        resolve("");
+      }, BOOT_DEADLINE_MS),
+    );
+    Promise.race([
+      store.readFile().catch((e) => {
         post("error", { message: String((e && e.message) || e) });
         return ""; // let marimo boot and show its own failure
-      })
+      }),
+      timeout,
+    ])
       .then((code) => {
         window.__MARIMO_MOUNT_CONFIG__ = mountConfig(code);
         const tag = document.createElement("script");

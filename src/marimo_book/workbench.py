@@ -93,6 +93,9 @@ _BUNDLE_RE = re.compile(r'<script type="module"[^>]*\ssrc="(?P<src>[^"]+)"[^>]*>
 
 _ASSETS_ROOT = Path(__file__).parent / "assets" / "workbench"
 
+#: Staged beside the mount page and stamped with it -- the three are a set.
+_RUNTIME_SCRIPTS = ("wb-store.js", "wb-mount.js")
+
 
 def workbench_enabled(book: Book) -> bool:
     """Whether any TOC page needs the workbench runtime staged."""
@@ -106,6 +109,14 @@ def marimo_static_dir() -> Path:
     import marimo
 
     return Path(marimo.__file__).resolve().parent / "_static"
+
+
+def _installed_marimo_version() -> str:
+    """marimo's version, for the asset stamp. Its frontend is half of what the
+    stamp versions, so the page must re-fetch when marimo moves."""
+    import marimo
+
+    return str(marimo.__version__)
 
 
 def frontend_config() -> dict:
@@ -130,15 +141,22 @@ def frontend_config() -> dict:
 
 
 def _asset_stamp(marimo_version: str) -> str:
-    """Cache key for the workbench's own scripts.
+    """Cache key for the mount page and the scripts spliced into it.
 
-    Both marimo-book's version (these scripts change with it) and marimo's (the
-    page they are spliced into changes with that), so either upgrade produces
-    new URLs.
+    Hashed from the scripts' own bytes, not from ``__version__``: that is fixed
+    at *install* time, so in an editable checkout — where these files change
+    most often — editing ``wb-mount.js`` would leave the stamp untouched and the
+    browser would keep serving the cached script against a freshly written
+    page, which is the exact mismatch the stamp exists to prevent. An untagged
+    build reports ``0.0.0+unknown`` and would be worse still.
+
+    marimo's version is folded in because the page they are spliced into comes
+    from marimo, so its upgrade must also produce new URLs.
     """
-    from . import __version__
-
-    return f"{__version__}-{marimo_version}"
+    digest = hashlib.sha256(marimo_version.encode("utf-8"))
+    for name in sorted(_RUNTIME_SCRIPTS):
+        digest.update((_ASSETS_ROOT / name).read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def mount_page_html(index_html: str, *, marimo_version: str, config: dict) -> str:
@@ -463,6 +481,12 @@ def render_workbench_block(
         "data-views": ",".join(views),
         "data-open-in": open_in,
         "data-wb-root": prefix + WORKBENCH_DIR + "/",
+        # Versions the *mount page* too. Stamping only the scripts closed one
+        # direction: a reader still holding the pre-upgrade index.html would
+        # load it, pick up the new wb-mount.js, and fall into the legacy
+        # branch -- so the fix would skip exactly the readers who hit the bug
+        # until their HTML cache revalidated.
+        "data-wb-v": _asset_stamp(_installed_marimo_version()),
         "data-checkpoint-minutes": str(book.workbench.checkpoint_minutes),
         "data-max-checkpoints": str(book.workbench.max_checkpoints),
     }

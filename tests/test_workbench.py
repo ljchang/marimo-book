@@ -581,3 +581,71 @@ def test_a_mount_page_without_a_held_back_bundle_still_configures_marimo() -> No
     legacy = tail.split("} else {")[0]
     assert "__MARIMO_MOUNT_CONFIG__ = mountConfig(" in legacy
     assert "readFile" not in legacy, "the legacy path must not await anything"
+
+
+def test_the_stamp_tracks_the_scripts_it_versions(tmp_path: Path) -> None:
+    """Hashed from the scripts' bytes, not `__version__`: that is fixed at
+    install time, so in an editable checkout — where these files change most
+    often — editing wb-mount.js would leave the stamp untouched."""
+    from marimo_book import workbench as wb
+
+    before = wb._asset_stamp("0.24.2")
+
+    original = (wb._ASSETS_ROOT / "wb-mount.js").read_bytes()
+    try:
+        (wb._ASSETS_ROOT / "wb-mount.js").write_bytes(original + b"\n// touched\n")
+        assert wb._asset_stamp("0.24.2") != before, "editing a script must move the stamp"
+    finally:
+        (wb._ASSETS_ROOT / "wb-mount.js").write_bytes(original)
+
+    assert wb._asset_stamp("0.24.2") == before, "and restoring it must move it back"
+
+
+def test_the_mount_page_url_is_versioned_too(tmp_path: Path) -> None:
+    """Stamping only the scripts closed one direction: a reader still holding
+    the pre-upgrade index.html would pair it with the new scripts and fall into
+    the legacy branch — so the fix would skip exactly the readers who hit the
+    bug."""
+    shell = (
+        Path(__file__).parent.parent
+        / "src"
+        / "marimo_book"
+        / "assets"
+        / "workbench"
+        / "workbench.js"
+    ).read_text()
+
+    assert "dataset.wbV" in shell, "the shell has to read the stamp"
+    assert 'u.searchParams.set("v", wbVersion)' in shell, "and put it on the frame URL"
+
+
+def test_the_boot_is_bounded(tmp_path: Path) -> None:
+    """marimo's boot now waits on the read, and neither `fetch` nor
+    `indexedDB.open` is bounded — an unbounded wait would leave a blank iframe
+    where marimo used to boot and surface the stall itself."""
+    source = (
+        Path(__file__).parent.parent
+        / "src"
+        / "marimo_book"
+        / "assets"
+        / "workbench"
+        / "wb-mount.js"
+    ).read_text()
+
+    assert "Promise.race(" in source
+    assert "BOOT_DEADLINE_MS" in source
+
+
+def test_the_shell_reports_a_failed_read(tmp_path: Path) -> None:
+    """`post("error", …)` had no consumer, so a failed read left the status
+    line frozen on its last text."""
+    shell = (
+        Path(__file__).parent.parent
+        / "src"
+        / "marimo_book"
+        / "assets"
+        / "workbench"
+        / "workbench.js"
+    ).read_text()
+
+    assert 'd.type === "error"' in shell

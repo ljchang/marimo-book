@@ -703,3 +703,28 @@ def test_a_book_wide_pin_is_reported_once_not_per_page(tmp_path: Path) -> None:
     warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
     assert len(warned) == 1
     assert "3 run/edit pages" in warned[0]
+
+
+def test_a_requirement_the_notebook_overrides_is_not_flagged(tmp_path: Path) -> None:
+    """`preserve_existing=True` is a merge the notebook's own block wins by
+    canonical name, so an extras pin whose name is already in the block never
+    reaches the browser. Warning about it would turn `check --strict` red for a
+    book that is fine."""
+    from marimo_book.checks import run_checks
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text(
+        '# /// script\n# dependencies = ["nltools"]\n# ///\nimport marimo\n\napp = marimo.App()\n',
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools==0.6.0.dev2"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+    )
+    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert not warned, "the staged block carries bare `nltools`, so there is nothing to warn about"

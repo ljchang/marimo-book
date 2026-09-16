@@ -37,6 +37,7 @@
 
     // ---- identity + config from the block ---------------------------------
     const wbRoot = new URL(bar.dataset.wbRoot, location.href); // …/_workbench/
+    const wbVersion = bar.dataset.wbV || "";
     const siteRoot = wbRoot.pathname.replace(/_workbench\/$/, "");
     const chapter = {
       // Scoped to the site's path so two books on one origin never share copies.
@@ -150,6 +151,10 @@
 
     function frameUrl(target, view) {
       const u = new URL("index.html", wbRoot);
+      // The mount page and the scripts it loads are a matched set; without
+      // this a reader holding the pre-upgrade page in cache would pair it with
+      // the new scripts.
+      if (wbVersion) u.searchParams.set("v", wbVersion);
       u.searchParams.set("nb", target.nb);
       u.searchParams.set("src", target.src);
       u.searchParams.set("hash", target.hash);
@@ -764,6 +769,13 @@
           if (d.type === "editor") els.boot.textContent = `Editor ready in ${secs} s — packages installing, cells will run shortly.`;
           if (d.type === "ran") els.boot.textContent = `Editor ready; first output at ${secs} s.`;
           if (d.type === "loaded") checkUpdate();
+          // The frame could not read the reader's copy. It boots anyway from
+          // the published notebook, but the status line would otherwise sit
+          // frozen on whatever it last said, with the failure going nowhere.
+          if (d.type === "error") {
+            els.boot.textContent =
+              "Could not load your saved copy — starting from the published notebook.";
+          }
         }
         if (d.type === "submitted" && isAssignment) {
           // The grader widget announced a submission: keep it as a version.

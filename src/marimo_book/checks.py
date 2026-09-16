@@ -256,7 +256,11 @@ def _check_workbench(
     book: Book, book_dir: Path, entries: list[FileEntry], report: CheckReport
 ) -> None:
     """``views`` / ``open_in`` must be consistent, and only make sense on notebooks."""
-    from .transforms.pep723 import derive_dependencies, read_existing_dependencies
+    from .transforms.pep723 import (
+        derive_dependencies,
+        read_existing_dependencies,
+        write_pep723_block,
+    )
 
     # Collected across pages: `extras` are book-wide, so the same requirement
     # would otherwise be reported once per run/edit page.
@@ -308,10 +312,13 @@ def _check_workbench(
                 overrides=book.dependencies.overrides,
                 pin=book.dependencies.pin,
             )
-            # `write_pep723_block(..., preserve_existing=True)` lets the
-            # notebook's own block win, so a pin written by hand into
-            # `# /// script` reaches the browser too.
-            existing = read_existing_dependencies(source) or []
+            # What the build actually stages. `preserve_existing=True` is a
+            # merge the notebook's own block *wins* by canonical name, so a
+            # derived or extras requirement whose name is already in the block
+            # never reaches the browser — flagging the union would warn about
+            # requirements the reader never sees, and `check --strict` exits
+            # nonzero on warnings.
+            staged = read_existing_dependencies(write_pep723_block(source, deps)) or []
         except Exception:  # noqa: BLE001 - a syntax error is reported at build time
             continue
         names = {_requirement_name(d) for d in deps}
@@ -329,7 +336,7 @@ def _check_workbench(
         # whatever the bare name resolves to, which is the newest *stable*
         # release. dartbrains pinned `nltools==0.6.0.dev2`; readers got 0.5.1,
         # which needs numpy<1.24 and has no Pyodide wheel, and the boot failed.
-        for requirement in list(deps) + list(existing):
+        for requirement in staged:
             if _is_pinned(requirement):
                 pinned.setdefault(requirement, []).append(str(entry.file))
 

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`dependencies` no longer stales committed `_rendered/` bodies.** The
+  rendered-body signature hashed the whole `dependencies` model, so adding a
+  `dependencies.overrides` entry — a knob that only retargets the generated
+  PEP 723 block, which micropip reads *in the browser* — marked every
+  `mode: cached` page stale and forced it to re-execute. In dartbrains that is
+  a 46 GB re-download in `Download_Data` for no change in output. Under
+  `mode: env` (the default) the notebook runs in the environment that invoked
+  the build, so only the mode itself is hashed now; under `mode: sandbox` the
+  generated block *is* the environment and every field still counts. The
+  irrelevant fields are pinned to their defaults rather than dropped, so a
+  book that never set them sees no hash change at all. Same over-broad hashing
+  0.1.40 fixed for `defaults.views` / `hide_author_line`.
+- **`pyarrow` joins polars in not warning.** It ships in the Pyodide release
+  marimo pins (22.0.0), checked against the lockfile the same way.
 - **`check` no longer claims polars can't run in the browser.** It ships a
   wheel micropip installs, and computes fine in Pyodide — verified in a
   browser, which is now the standard the list documents, since "has native

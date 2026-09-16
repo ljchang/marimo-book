@@ -203,3 +203,65 @@ def test_toggling_the_flag_does_invalidate_the_transient_cache(tmp_path: Path) -
     assert _book_signature(book(True), book_dir=tmp_path) != _book_signature(
         book(False), book_dir=tmp_path
     )
+
+
+# --- dependency knobs and the rendered-body cache ------------------------------
+
+
+def test_browser_only_dependency_knobs_do_not_invalidate_rendered_bodies() -> None:
+    """``overrides`` retargets the generated PEP 723 block, which micropip reads
+    in the browser. In ``env`` mode it cannot change what a static render
+    executes, so it must not stale a committed body — dartbrains' Download_Data
+    is a 46 GB re-download."""
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import _render_body_signature
+
+    def book(**deps) -> Book:
+        payload = {"title": "T", "toc": [{"file": "content/nb.py"}]}
+        if deps:
+            payload["dependencies"] = deps
+        return Book.model_validate(payload)
+
+    baseline = _render_body_signature(book())
+    assert _render_body_signature(book(overrides={"nltools": "nltools==0.6.0.dev2"})) == baseline
+    assert _render_body_signature(book(extras=["nltools>=0.5"])) == baseline
+    assert _render_body_signature(book(pin="env")) == baseline
+    assert _render_body_signature(book(auto_pep723=True)) == baseline
+
+
+def test_sandbox_mode_still_tracks_every_dependency_knob() -> None:
+    """Under ``sandbox`` the generated block *is* the execution environment, so
+    an override really can change the rendered output."""
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import _render_body_signature
+
+    def book(**deps) -> Book:
+        return Book.model_validate(
+            {
+                "title": "T",
+                "toc": [{"file": "content/nb.py"}],
+                "dependencies": {"mode": "sandbox", **deps},
+            }
+        )
+
+    assert _render_body_signature(book(overrides={"nltools": "nltools==0.6.0.dev2"})) != (
+        _render_body_signature(book())
+    )
+    assert _render_body_signature(book(extras=["nltools>=0.5"])) != _render_body_signature(book())
+
+
+def test_switching_dependency_mode_still_invalidates() -> None:
+    """``env`` and ``sandbox`` are different environments; that much must count."""
+    from marimo_book.config import Book
+    from marimo_book.preprocessor import _render_body_signature
+
+    def book(mode: str) -> Book:
+        return Book.model_validate(
+            {
+                "title": "T",
+                "toc": [{"file": "content/nb.py"}],
+                "dependencies": {"mode": mode},
+            }
+        )
+
+    assert _render_body_signature(book("env")) != _render_body_signature(book("sandbox"))

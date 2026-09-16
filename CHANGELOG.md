@@ -5,6 +5,25 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`check` warns when a workbench page's dependencies constrain their
+  version.** marimo installs a notebook's script-metadata dependencies by
+  *name* in the browser — `strip_requirement_name` drops the specifier before
+  micropip sees it (marimo-team/marimo#10870) — so the reader gets whatever the
+  bare name resolves to, which is the newest *stable* release. dartbrains asked
+  for `nltools==0.6.0.dev2`, readers got 0.5.1, which needs `numpy<1.24`, has
+  no Pyodide wheel, and failed to install; the chapter could not boot and the
+  build said nothing. The check evaluates the block the build actually stages
+  (same `dependencies.pin`, and the notebook's own block wins the merge), skips
+  requirements whose environment markers exclude the browser, and reports once
+  for the book rather than once per page. Flagged: `==`, `===`, `~=`, upper
+  bounds, and a lower bound naming a pre-release — which selects the newest
+  stable just as an exact pin does. Not flagged: ordinary lower bounds, and URL
+  requirements, which survive the strip intact.
+
 ## [0.1.41] — 2026-09-16
 
 ### Fixed

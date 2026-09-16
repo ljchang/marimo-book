@@ -526,7 +526,7 @@ def test_native_dependency_with_any_specifier_warns(tmp_path: Path) -> None:
         files=["content/nb.py"],
     )
     report = run_checks(book, tmp_path)
-    warned = [w for w in report.warnings if "Pyodide" in w]
+    warned = [w for w in report.warnings if "no Pyodide wheel" in w]
     assert len(warned) == 1 and "numba" in warned[0] and "torch" in warned[0]
 
 
@@ -559,3 +559,207 @@ def test_assignment_without_pep723_block_warns(tmp_path: Path) -> None:
     report = run_checks(book, tmp_path)
     assert not report.errors
     assert any("no PEP 723 block" in w for w in report.warnings)
+
+
+# --- a pin in the block does not survive the browser --------------------------
+
+
+def test_pinned_workbench_dependencies_warn(tmp_path: Path) -> None:
+    """marimo strips version specifiers before installing, so a pin is
+    advisory in the browser. dartbrains pinned nltools==0.6.0.dev2 and readers
+    got 0.5.1, which cannot run in Pyodide."""
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools==0.6.0.dev2"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+        files=["content/nb.py"],
+    )
+    report = run_checks(book, tmp_path)
+    warned = [w for w in report.warnings if "constrain their version" in w]
+    assert len(warned) == 1 and "nltools==0.6.0.dev2" in warned[0]
+
+
+def test_an_unpinned_workbench_dependency_does_not_warn(tmp_path: Path) -> None:
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+        files=["content/nb.py"],
+    )
+    assert not [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+
+
+def test_only_specifiers_that_can_change_the_version_are_flagged() -> None:
+    """A dropped lower bound is almost always satisfied by whatever the bare
+    name resolves to; warning about it would turn `check --strict` red for
+    books that are fine. An exact pin, a compatible release or an upper bound
+    can each exclude the version an unpinned install picks."""
+    from marimo_book.checks import _is_pinned
+
+    assert _is_pinned("nltools==0.6.0.dev2")
+    assert _is_pinned("nltools===0.6.0")
+    assert _is_pinned("nltools~=0.6")
+    assert _is_pinned("nltools<0.7")
+    assert _is_pinned("nltools>=0.5,<0.7")
+
+    assert not _is_pinned("nltools>=0.6")
+    assert not _is_pinned("nltools>0.6")
+    assert not _is_pinned("nltools!=0.5.1")
+    assert not _is_pinned("nltools")
+    assert not _is_pinned("nltools @ https://example.invalid/nltools-0.6.0-py3-none-any.whl")
+    assert not _is_pinned("not a requirement at all!!")
+
+
+def test_a_read_only_page_may_pin_freely(tmp_path: Path) -> None:
+    """The warning is about what the *browser* installs; a static page's
+    dependencies are the build's business."""
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools==0.6.0.dev2"]},
+            "toc": [{"file": "content/nb.py"}],
+        },
+        files=["content/nb.py"],
+    )
+    assert not [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+
+
+def test_a_pin_in_the_notebooks_own_block_is_flagged(tmp_path: Path) -> None:
+    """`write_pep723_block(..., preserve_existing=True)` lets the notebook's own
+    block win the merge, so a hand-written pin reaches the browser too — and
+    used to slip past this check entirely."""
+    from marimo_book.checks import run_checks
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text(
+        '# /// script\n# dependencies = ["nltools==0.6.0.dev2"]\n# ///\n'
+        "import marimo\n\napp = marimo.App()\n",
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
+    )
+    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert len(warned) == 1 and "nltools==0.6.0.dev2" in warned[0]
+
+
+def test_pin_env_is_flagged_because_the_build_writes_pins(tmp_path: Path) -> None:
+    """`pin: env` stamps `pkg==<installed>` into every staged workbench
+    notebook — every one of which the browser reduces to a bare name."""
+    from marimo_book.checks import run_checks
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text(
+        "import marimo\n\napp = marimo.App()\n\n\n"
+        "@app.cell\ndef _():\n    import yaml\n    return (yaml,)\n",
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"pin": "env"},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+    )
+    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert warned, "pin: env stamps pkg==<installed> into every staged notebook"
+
+
+def test_a_book_wide_pin_is_reported_once_not_per_page(tmp_path: Path) -> None:
+    """`extras` are book-wide; one warning per page would be N copies of the
+    same sentence, and `check --strict` exits nonzero on warnings."""
+    from marimo_book.checks import run_checks
+
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools==0.6.0.dev2"]},
+            "toc": [
+                {"file": "content/a.py", "views": ["read", "edit"]},
+                {"file": "content/b.py", "views": ["read", "edit"]},
+                {"file": "content/c.py", "views": ["read", "edit"]},
+            ],
+        },
+        files=["content/a.py", "content/b.py", "content/c.py"],
+    )
+    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert len(warned) == 1
+    assert "3 run/edit pages" in warned[0]
+
+
+def test_a_requirement_the_notebook_overrides_is_not_flagged(tmp_path: Path) -> None:
+    """`preserve_existing=True` is a merge the notebook's own block wins by
+    canonical name, so an extras pin whose name is already in the block never
+    reaches the browser. Warning about it would turn `check --strict` red for a
+    book that is fine."""
+    from marimo_book.checks import run_checks
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text(
+        '# /// script\n# dependencies = ["nltools"]\n# ///\nimport marimo\n\napp = marimo.App()\n',
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "dependencies": {"extras": ["nltools==0.6.0.dev2"]},
+            "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
+        },
+    )
+    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert not warned, "the staged block carries bare `nltools`, so there is nothing to warn about"
+
+
+def test_a_lower_bound_naming_a_prerelease_is_flagged() -> None:
+    """The case this check exists for. Installers skip pre-releases unless a
+    specifier asks for one, so `nltools>=0.6.0.dev2` resolves to the newest
+    stable exactly as an exact pin does — and 0.5.1 cannot run in Pyodide."""
+    from marimo_book.checks import _is_pinned
+
+    assert _is_pinned("nltools>=0.6.0.dev2")
+    assert _is_pinned("nltools>0.6.0rc1")
+    assert not _is_pinned("nltools>=0.5.1"), "a stable lower bound is usually satisfied"
+    assert not _is_pinned("nltools>=not-a-version")
+
+
+def test_a_requirement_excluded_from_the_browser_is_not_flagged(tmp_path: Path) -> None:
+    """marimo applies environment markers before installing, so a requirement
+    that never reaches Pyodide must not fail `check --strict`."""
+    from marimo_book.checks import _installed_in_browser, run_checks
+
+    assert _installed_in_browser(['pywin32==306; sys_platform == "win32"']) == []
+    assert _installed_in_browser(["nltools==0.6.0.dev2"]) == ["nltools==0.6.0.dev2"]
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text(
+        "# /// script\n"
+        '# dependencies = ["pywin32==306; sys_platform == \\"win32\\""]\n'
+        "# ///\nimport marimo\n\napp = marimo.App()\n",
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
+    )
+    assert not [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]

@@ -580,7 +580,7 @@ def test_pinned_workbench_dependencies_warn(tmp_path: Path) -> None:
         files=["content/nb.py"],
     )
     report = run_checks(book, tmp_path)
-    warned = [w for w in report.warnings if "constrain their version" in w]
+    warned = [w for w in report.warnings if "marimo drops version specifiers" in w]
     assert len(warned) == 1 and "nltools==0.6.0.dev2" in warned[0]
 
 
@@ -596,7 +596,9 @@ def test_an_unpinned_workbench_dependency_does_not_warn(tmp_path: Path) -> None:
         },
         files=["content/nb.py"],
     )
-    assert not [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert not [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
 
 
 def test_only_specifiers_that_can_change_the_version_are_flagged() -> None:
@@ -614,7 +616,10 @@ def test_only_specifiers_that_can_change_the_version_are_flagged() -> None:
 
     assert not _is_pinned("nltools>=0.6")
     assert not _is_pinned("nltools>0.6")
-    assert not _is_pinned("nltools!=0.5.1")
+    assert _is_pinned("nltools!=0.5.1"), (
+        "an exclusion is the opposite of a lower bound: dropping it installs "
+        "precisely the version the author ruled out"
+    )
     assert not _is_pinned("nltools")
     assert not _is_pinned("nltools @ https://example.invalid/nltools-0.6.0-py3-none-any.whl")
     assert not _is_pinned("not a requirement at all!!")
@@ -634,7 +639,9 @@ def test_a_read_only_page_may_pin_freely(tmp_path: Path) -> None:
         },
         files=["content/nb.py"],
     )
-    assert not [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert not [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
 
 
 def test_a_pin_in_the_notebooks_own_block_is_flagged(tmp_path: Path) -> None:
@@ -654,7 +661,9 @@ def test_a_pin_in_the_notebooks_own_block_is_flagged(tmp_path: Path) -> None:
         tmp_path,
         {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
     )
-    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    warned = [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
     assert len(warned) == 1 and "nltools==0.6.0.dev2" in warned[0]
 
 
@@ -678,8 +687,14 @@ def test_pin_env_is_flagged_because_the_build_writes_pins(tmp_path: Path) -> Non
             "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
         },
     )
-    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
-    assert warned, "pin: env stamps pkg==<installed> into every staged notebook"
+    warned = [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
+    assert len(warned) == 1
+    assert "pin: env has no effect on run/edit pages" in warned[0], (
+        "listing every stamped requirement would inline the book's whole "
+        "dependency set and give advice nobody can act on"
+    )
 
 
 def test_a_book_wide_pin_is_reported_once_not_per_page(tmp_path: Path) -> None:
@@ -700,9 +715,13 @@ def test_a_book_wide_pin_is_reported_once_not_per_page(tmp_path: Path) -> None:
         },
         files=["content/a.py", "content/b.py", "content/c.py"],
     )
-    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    warned = [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
     assert len(warned) == 1
-    assert "3 run/edit pages" in warned[0]
+    # Attributed per requirement: a book-wide extras pin lands on every page,
+    # and a bare page count would not say which notebook carries what.
+    assert "nltools==0.6.0.dev2 (content/a.py, content/b.py, content/c.py)" in warned[0]
 
 
 def test_a_requirement_the_notebook_overrides_is_not_flagged(tmp_path: Path) -> None:
@@ -726,7 +745,9 @@ def test_a_requirement_the_notebook_overrides_is_not_flagged(tmp_path: Path) -> 
             "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
         },
     )
-    warned = [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    warned = [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
     assert not warned, "the staged block carries bare `nltools`, so there is nothing to warn about"
 
 
@@ -762,4 +783,91 @@ def test_a_requirement_excluded_from_the_browser_is_not_flagged(tmp_path: Path) 
         tmp_path,
         {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
     )
-    assert not [w for w in run_checks(book, tmp_path).warnings if "constrain their version" in w]
+    assert not [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
+
+
+def test_an_assignments_pin_is_flagged_even_on_a_read_only_page(tmp_path: Path) -> None:
+    """An assignment is staged through the same `stage_workbench_notebook` call
+    and booted in the drawer, so its block reaches the browser exactly as a
+    chapter's does — and a chapter with `views: [read]` can still carry one."""
+    from marimo_book.checks import run_checks
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text("import marimo\n\napp = marimo.App()\n", encoding="utf-8")
+    (content / "hw.py").write_text(
+        '# /// script\n# dependencies = ["nltools==0.6.0.dev2"]\n# ///\n'
+        "import marimo\n\napp = marimo.App()\n",
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {
+            "title": "T",
+            "toc": [{"file": "content/nb.py", "assignment": "content/hw.py"}],
+        },
+    )
+    warned = [
+        w for w in run_checks(book, tmp_path).warnings if "marimo drops version specifiers" in w
+    ]
+    assert len(warned) == 1
+    assert "content/hw.py" in warned[0], "the assignment is what carries the pin"
+
+
+def test_a_malformed_block_does_not_swallow_the_no_wheel_warning(tmp_path: Path) -> None:
+    """The staged computation is its own try for this reason: an unrelated
+    fault must not take the torch warning down with it."""
+    from marimo_book.checks import run_checks
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text(
+        '# /// script\n# dependencies = ["torch"\n# ///\n'  # unclosed bracket
+        "import marimo\n\napp = marimo.App()\n\n\n"
+        "@app.cell\ndef _():\n    import torch\n    return (torch,)\n",
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
+    )
+    assert [w for w in run_checks(book, tmp_path).warnings if "no Pyodide wheel" in w]
+
+
+def test_a_package_only_in_the_block_is_checked_for_a_wheel(tmp_path: Path) -> None:
+    """A notebook can hand-list a package it never imports; the staged block
+    carries it, micropip tries to install it, and `deps` would never see it."""
+    from marimo_book.checks import run_checks
+
+    content = tmp_path / "content"
+    content.mkdir(exist_ok=True)
+    (content / "nb.py").write_text(
+        '# /// script\n# dependencies = ["torch"]\n# ///\nimport marimo\n\napp = marimo.App()\n',
+        encoding="utf-8",
+    )
+    book = _book(
+        tmp_path,
+        {"title": "T", "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}]},
+    )
+    assert [w for w in run_checks(book, tmp_path).warnings if "no Pyodide wheel" in w]
+
+
+def test_the_marker_filter_fallback_under_reports(monkeypatch) -> None:
+    """If marimo moves the helper, keeping marker-guarded entries would turn
+    `--strict` red with no hint the filter had vanished."""
+    import builtins
+
+    from marimo_book.checks import _installed_in_browser
+
+    real = builtins.__import__
+
+    def no_marimo(name, *args, **kwargs):
+        if name.startswith("marimo._runtime"):
+            raise ImportError("gone")
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_marimo)
+    assert _installed_in_browser(['pywin32==306; sys_platform == "win32"']) == []
+    assert _installed_in_browser(["nltools==0.6.0.dev2"]) == ["nltools==0.6.0.dev2"]

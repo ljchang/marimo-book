@@ -216,9 +216,45 @@ _NO_PYODIDE_WHEEL = frozenset(
 
 
 #: Specifier kinds whose loss can select a *different* release: an exact pin, a
-#: compatible release, or any upper bound each exclude what an unpinned install
-#: would pick.
-_RISKY_OPERATORS = ("==", "===", "~=", "<")
+#: compatible release, an upper bound, or an exclusion. ``!=`` belongs here for
+#: the opposite reason to a lower bound — ``numpy!=2.0.0`` says the author knows
+#: 2.0.0 is broken, and dropping it installs precisely 2.0.0 if that is the
+#: newest stable.
+_RISKY_OPERATORS = ("==", "===", "~=", "<", "!=")
+
+
+def _staged_requirements(path: Path, book: Book, deps: list[str] | None = None) -> list[str] | None:
+    """The PEP 723 dependencies the build stages for ``path``, as the browser
+    would see them — or ``None`` if they cannot be determined.
+
+    Reproduces ``stage_workbench_notebook``: the same ``derive_dependencies``
+    arguments, then ``write_pep723_block``, whose ``preserve_existing`` merge
+    lets the notebook's own block win by canonical name. A requirement the
+    block overrides never reaches the reader, so flagging the union would warn
+    about something nobody installs.
+
+    The result is then filtered the way marimo filters it before installing, so
+    an entry excluded from emscripten by an environment marker is not reported.
+    """
+    from .transforms.pep723 import (
+        derive_dependencies,
+        read_existing_dependencies,
+        write_pep723_block,
+    )
+
+    try:
+        source = path.read_text(encoding="utf-8")
+        if deps is None:
+            deps = derive_dependencies(
+                source,
+                extras=book.dependencies.extras,
+                overrides=book.dependencies.overrides,
+                pin=book.dependencies.pin,
+            )
+        staged = read_existing_dependencies(write_pep723_block(source, deps)) or []
+        return _installed_in_browser(staged)
+    except Exception:  # noqa: BLE001 - a malformed block is reported at build time
+        return None
 
 
 def _installed_in_browser(requirements: list[str]) -> list[str]:
@@ -232,7 +268,12 @@ def _installed_in_browser(requirements: list[str]) -> list[str]:
     try:
         from marimo._runtime.packages.utils import filter_requirements_for_emscripten
     except ImportError:  # pragma: no cover - marimo is a build dependency
-        return list(requirements)
+        # Drop anything carrying a marker rather than keeping it. If marimo
+        # moves this helper, an unfiltered list would start flagging
+        # marker-guarded entries and turn `check --strict` red with no hint
+        # that the filter had vanished; under-reporting is the safe direction
+        # for a warning.
+        return [r for r in requirements if ";" not in r]
     return list(filter_requirements_for_emscripten(requirements))
 
 
@@ -286,11 +327,7 @@ def _check_workbench(
     book: Book, book_dir: Path, entries: list[FileEntry], report: CheckReport
 ) -> None:
     """``views`` / ``open_in`` must be consistent, and only make sense on notebooks."""
-    from .transforms.pep723 import (
-        derive_dependencies,
-        read_existing_dependencies,
-        write_pep723_block,
-    )
+    from .transforms.pep723 import derive_dependencies
 
     # Collected across pages: `extras` are book-wide, so the same requirement
     # would otherwise be reported once per run/edit page.
@@ -325,6 +362,17 @@ def _check_workbench(
                     f"{entry.file}: assignment {entry.assignment} has no PEP 723 block — "
                     "a grader-published student notebook carries its identity there"
                 )
+        # An assignment boots in the drawer through the same
+        # `stage_workbench_notebook` call with the same `book.dependencies`, so
+        # its block reaches the browser exactly as a chapter's does — and a
+        # chapter with `views: [read]` can still carry one.
+        if entry.assignment is not None:
+            asg = book_dir / entry.assignment
+            if asg.exists() and asg.suffix == ".py":
+                for requirement in _staged_requirements(asg, book):
+                    if _is_pinned(requirement):
+                        pinned.setdefault(requirement, []).append(str(entry.assignment))
+
         if not entry.uses_workbench(book.defaults):
             continue
         src = book_dir / entry.file
@@ -333,29 +381,26 @@ def _check_workbench(
         try:
             source = src.read_text(encoding="utf-8")
             # The same arguments `stage_workbench_notebook` uses, or this
-            # checks something the build never stages. `pin: env` in
-            # particular writes `pkg==<installed>` into every staged
-            # notebook — exactly the case the pin warning below exists for.
+            # checks something the build never stages.
             deps = derive_dependencies(
                 source,
                 extras=book.dependencies.extras,
                 overrides=book.dependencies.overrides,
                 pin=book.dependencies.pin,
             )
-            # What the build actually stages. `preserve_existing=True` is a
-            # merge the notebook's own block *wins* by canonical name, so a
-            # derived or extras requirement whose name is already in the block
-            # never reaches the browser — flagging the union would warn about
-            # requirements the reader never sees, and `check --strict` exits
-            # nonzero on warnings.
-            staged = read_existing_dependencies(write_pep723_block(source, deps)) or []
-            # marimo applies the environment markers before installing, so a
-            # requirement excluded from emscripten never reaches the browser
-            # and must not be warned about.
-            staged = _installed_in_browser(staged)
         except Exception:  # noqa: BLE001 - a syntax error is reported at build time
             continue
-        names = {_requirement_name(d) for d in deps}
+
+        # Deliberately its own try, and after `deps`: a malformed block or an
+        # unparseable marker raises here, and folding that into the block above
+        # would swallow the no-wheel warning too — a page importing torch would
+        # go unreported because of an unrelated fault.
+        staged = _staged_requirements(src, book, deps=deps)
+
+        # `staged` when it could be computed: a notebook that hand-lists a
+        # package in its own block without importing it is staged with it, and
+        # `deps` (imports + extras) would never see it.
+        names = {_requirement_name(d) for d in (staged if staged is not None else deps)}
         bad = sorted(names & _NO_PYODIDE_WHEEL)
         if bad:
             report.warnings.append(
@@ -370,21 +415,37 @@ def _check_workbench(
         # whatever the bare name resolves to, which is the newest *stable*
         # release. dartbrains pinned `nltools==0.6.0.dev2`; readers got 0.5.1,
         # which needs numpy<1.24 and has no Pyodide wheel, and the boot failed.
-        for requirement in staged:
+        for requirement in staged or ():
             if _is_pinned(requirement):
                 pinned.setdefault(requirement, []).append(str(entry.file))
 
     if pinned:
-        listed = ", ".join(sorted(pinned))
-        pages = sorted({page for pages in pinned.values() for page in pages})
-        where = pages[0] if len(pages) == 1 else f"{len(pages)} run/edit pages"
-        report.warnings.append(
-            f"{where}: {listed} constrain their version, which marimo drops "
-            f"when installing in the browser — the reader gets whatever the "
-            f"bare name resolves to, which is the newest *stable* release "
-            f"(marimo-team/marimo#10870). Offer run/edit here only if that "
-            f"version works in Pyodide."
+        why = (
+            "marimo drops version specifiers when installing in the browser, so "
+            "the reader gets whatever the bare name resolves to — the newest "
+            "*stable* release (marimo-team/marimo#10870)."
         )
+        if book.dependencies.pin == "env":
+            # `pin: env` stamps `==<installed>` onto every derived requirement,
+            # so listing them would inline the book's whole dependency set and
+            # the per-package advice would be unactionable.
+            report.warnings.append(
+                f"dependencies.pin: env has no effect on run/edit pages — {why} "
+                f"The staged pins are advisory in the browser; readers install "
+                f"whatever is newest. Use pin: none for a book with run/edit "
+                f"views, or keep those pages read-only."
+            )
+        else:
+            # Attributed per requirement: a book-wide `extras` pin lands on
+            # every page while a notebook's own block lands on one, and a single
+            # page count would claim the wrong thing about both.
+            listed = "; ".join(
+                f"{req} ({', '.join(sorted(set(pages)))})" for req, pages in sorted(pinned.items())
+            )
+            report.warnings.append(
+                f"pinned dependencies on run/edit pages: {listed}. {why} Offer "
+                f"run/edit there only if the unpinned version works in Pyodide."
+            )
 
 
 def _check_inert_knobs(book: Book, report: CheckReport) -> None:

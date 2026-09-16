@@ -805,6 +805,71 @@
     });
   }
 
+  // --- marimo theme sync (WASM / islands pages) ----------------------------
+  //
+  // Nothing themes a marimo island unless the host page does it. `ThemeProvider`
+  // — the component that stamps `dark` on <body>, which is what the whole
+  // bundle's CSS keys off (`.marimo:is(.dark *)`) — lives in marimo's
+  // `mount.tsx` and is used by the full app only; the islands entry point never
+  // mounts it. So a `mode: wasm` page stays light no matter what Material's
+  // palette says, and stays light when the reader toggles it.
+  //
+  // Three hooks, three jobs.
+  //
+  // `class="dark"` on <body> is the one that does the real work: every color
+  // token in the islands bundle resolves through it. (marimo's own Radix colour
+  // scales are scoped `.marimo .dark`, which can never match a class on <body>
+  // — an upstream scoping bug. Those are mid-greys that read on either ground,
+  // so the page still lands; nothing we can fix from out here.)
+  //
+  // `data-theme` is the second check in marimo's islands theme inference, which
+  // decides what the *JS-side* consumers (Vega, mermaid, the JSON viewer, data
+  // tables) render as. Written on every boot so that theme is decided rather
+  // than sniffed off the computed background. (Material's palette applies the
+  // stored preference from a blocking <script> at the end of the body, before
+  // this deferred one runs, so the scheme has settled by the time we read it.)
+  //
+  // `data-vscode-theme-kind` is the only theme input marimo recomputes after
+  // boot: a MutationObserver on <body> feeds the atom that *overrides* the
+  // inferred theme, so writing it re-themes those JS consumers live, which no
+  // CSS class could do. marimo also reads the attribute's mere presence as
+  // "running inside the VS Code extension" and hides a couple of data-table
+  // controls, so it is written only once the scheme actually changes under a
+  // booted page: a reader who never toggles keeps the full table UI.
+  let _themeObserver = null;
+  let _appliedScheme = null;
+  function currentScheme() {
+    return isDarkScheme() ? "dark" : "light";
+  }
+  function applyMarimoTheme(scheme, reactive) {
+    const body = document.body;
+    body.classList.toggle("dark", scheme === "dark");
+    body.dataset.theme = scheme;
+    if (reactive) {
+      body.dataset.vscodeThemeKind =
+        scheme === "dark" ? "vscode-dark" : "vscode-light";
+    }
+  }
+  function syncMarimoTheme() {
+    if (!document.body) return;
+    const scheme = currentScheme();
+    if (_appliedScheme === null) _appliedScheme = scheme;
+    applyMarimoTheme(scheme, _appliedScheme !== scheme);
+    if (_themeObserver || typeof MutationObserver === "undefined") return;
+    _themeObserver = new MutationObserver(() => {
+      const next = currentScheme();
+      // Material rewrites every data-md-color-* attribute on each emission,
+      // so only a changed value means the reader (or the OS) switched.
+      if (next === _appliedScheme) return;
+      _appliedScheme = next;
+      applyMarimoTheme(next, true);
+    });
+    _themeObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["data-md-color-scheme"],
+    });
+  }
+
   // --- Release-download component ------------------------------------------
   //
   // Placeholders `<div data-mb-release-download data-repo data-app-name
@@ -1085,6 +1150,7 @@
     hydratePlotly(scope);
     hydrateVega(scope);
     watchSchemeForVega();
+    syncMarimoTheme();
     hydrateReleaseDownloads(scope);
   }
 

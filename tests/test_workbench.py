@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -99,7 +100,7 @@ def test_mount_page_swaps_marimos_frozen_config_for_our_script() -> None:
     index = (marimo_static_dir() / "index.html").read_text(encoding="utf-8")
     html = mount_page_html(index, marimo_version="9.9.9", config={"save": {"autosave": "off"}})
     assert "__MARIMO_MOUNT_CONFIG__" not in html.split("<body>")[1].split("wb-mount.js")[0]
-    assert 'src="./wb-mount.js"' in html and 'src="./wb-store.js"' in html
+    assert 'src="./wb-mount.js?v=' in html and 'src="./wb-store.js?v=' in html
     assert '"marimoVersion": "9.9.9"' in html
     assert "<marimo-wasm hidden" in html
     assert "{{ " not in html, "every template placeholder must be filled"
@@ -522,5 +523,61 @@ def test_the_mount_script_reads_the_notebook_before_configuring() -> None:
     ).read_text()
 
     assert 'code: ""' not in source, "an empty code hides the notebook's PEP 723 block"
-    assert "store\n    .readFile()" in source or "store.readFile()" in source
+    assert ".readFile()" in source
     assert "__WB__" in source
+
+
+def test_the_workbench_scripts_are_version_stamped() -> None:
+    """The mount page and these scripts are a matched pair now. Unstamped, a
+    browser could serve one from cache and the other from the network across an
+    upgrade — a page whose bundle is stripped but whose script never injects it
+    never boots at all."""
+    import marimo
+
+    from marimo_book.workbench import mount_page_html
+
+    index = (Path(marimo.__file__).parent / "_static" / "index.html").read_text()
+    a = mount_page_html(index, marimo_version="1.0.0", config={})
+    b = mount_page_html(index, marimo_version="2.0.0", config={})
+
+    stamp = re.compile(r'wb-mount\.js\?v=([^"]+)')
+    assert stamp.search(a) and stamp.search(b)
+    assert stamp.search(a).group(1) != stamp.search(b).group(1), (
+        "a marimo upgrade must produce new script URLs"
+    )
+
+
+def test_the_entry_bundle_is_preloaded_after_being_held_back() -> None:
+    """Removing the script also removed the only thing fetching the entry
+    chunk — marimo preloads every *other* chunk but not that one — so Pyodide's
+    boot would no longer overlap the notebook read."""
+    import marimo
+
+    from marimo_book.workbench import mount_page_html
+
+    index = (Path(marimo.__file__).parent / "_static" / "index.html").read_text()
+    html = mount_page_html(index, marimo_version="0.24.2", config={})
+
+    src = re.search(r'"bundle": "([^"]+)"', html).group(1)
+    assert f'<link rel="modulepreload" crossorigin href="{src}">' in html
+
+
+def test_a_mount_page_without_a_held_back_bundle_still_configures_marimo() -> None:
+    """A page cached from an older marimo-book still has marimo's module script
+    inline, and it runs at the end of parsing — before any awaited read could
+    resolve. The script must publish a config synchronously there rather than
+    leave marimo reading `undefined`."""
+    source = (
+        Path(__file__).parent.parent
+        / "src"
+        / "marimo_book"
+        / "assets"
+        / "workbench"
+        / "wb-mount.js"
+    ).read_text()
+
+    assert "if (!boot.bundle) {" in source
+    head, _, tail = source.partition("if (!boot.bundle) {")
+    legacy = tail.split("} else {")[0]
+    assert "__MARIMO_MOUNT_CONFIG__ = mountConfig(" in legacy
+    assert "readFile" not in legacy, "the legacy path must not await anything"

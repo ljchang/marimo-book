@@ -129,6 +129,18 @@ def frontend_config() -> dict:
     return cfg
 
 
+def _asset_stamp(marimo_version: str) -> str:
+    """Cache key for the workbench's own scripts.
+
+    Both marimo-book's version (these scripts change with it) and marimo's (the
+    page they are spliced into changes with that), so either upgrade produces
+    new URLs.
+    """
+    from . import __version__
+
+    return f"{__version__}-{marimo_version}"
+
+
 def mount_page_html(index_html: str, *, marimo_version: str, config: dict) -> str:
     """Turn marimo's ``_static/index.html`` into the workbench mount page."""
     if not _MOUNT_CONFIG_RE.search(index_html):
@@ -156,20 +168,32 @@ def mount_page_html(index_html: str, *, marimo_version: str, config: dict) -> st
             "marimo's index.html has no module bundle script; "
             "the installed marimo is newer than the workbench supports"
         )
-    html = html[: bundle_match.start()] + html[bundle_match.end() :]
+    bundle_src = bundle_match.group("src")
+    # The entry chunk is the only one marimo's index.html does not preload, so
+    # removing its <script> also removed the only thing that started fetching
+    # it. Preload it instead: the download (and the Pyodide boot behind it) now
+    # overlaps the notebook read again rather than waiting on it.
+    preload = f'<link rel="modulepreload" crossorigin href="{bundle_src}">'
+    html = html[: bundle_match.start()] + preload + html[bundle_match.end() :]
 
+    # Version-stamped, because the mount page and these scripts are now a
+    # matched pair: a browser holding one from cache and taking the other from
+    # the network across an upgrade would otherwise get a page that never
+    # boots. The query is enough — a static host serves the same file either
+    # way, and the stamp only has to make the URL new.
+    stamp = _asset_stamp(marimo_version)
     boot = (
         "<script>window.__WB__ = "
         + json.dumps(
             {
                 "marimoVersion": marimo_version,
                 "config": config,
-                "bundle": bundle_match.group("src"),
+                "bundle": bundle_src,
             }
         )
         + ";</script>\n"
-        '<script src="./wb-store.js"></script>\n'
-        '<script src="./wb-mount.js"></script>'
+        f'<script src="./wb-store.js?v={stamp}"></script>\n'
+        f'<script src="./wb-mount.js?v={stamp}"></script>'
     )
     html = _MOUNT_CONFIG_RE.sub(lambda _m: boot, html, count=1)
     # <marimo-wasm> is how the frontend detects a WASM (Pyodide) page; the

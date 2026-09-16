@@ -215,8 +215,17 @@ _NO_PYODIDE_WHEEL = frozenset(
 )
 
 
+#: Specifier kinds whose loss can select a *different* release. A dropped lower
+#: bound (``>=2``) is almost always satisfied by whatever the bare name resolves
+#: to, so warning about it would turn ``check --strict`` red for books that are
+#: fine. An exact pin, a compatible release or any upper bound can each exclude
+#: the version an unpinned install would pick — including every pre-release,
+#: which only a specifier can select at all.
+_RISKY_OPERATORS = ("==", "===", "~=", "<")
+
+
 def _is_pinned(requirement: str) -> bool:
-    """Whether a PEP 508 requirement constrains its version at all.
+    """Whether dropping this requirement's specifier could change the version.
 
     A URL requirement (``name @ https://…``) is not "pinned" for this purpose:
     marimo's strip leaves those intact, so they do reach the browser as written.
@@ -227,7 +236,9 @@ def _is_pinned(requirement: str) -> bool:
         parsed = Requirement(requirement)
     except InvalidRequirement:
         return False
-    return parsed.url is None and bool(parsed.specifier)
+    if parsed.url is not None:
+        return False
+    return any(spec.operator.startswith(_RISKY_OPERATORS) for spec in parsed.specifier)
 
 
 def _requirement_name(requirement: str) -> str:
@@ -245,7 +256,11 @@ def _check_workbench(
     book: Book, book_dir: Path, entries: list[FileEntry], report: CheckReport
 ) -> None:
     """``views`` / ``open_in`` must be consistent, and only make sense on notebooks."""
-    from .transforms.pep723 import derive_dependencies
+    from .transforms.pep723 import derive_dependencies, read_existing_dependencies
+
+    # Collected across pages: `extras` are book-wide, so the same requirement
+    # would otherwise be reported once per run/edit page.
+    pinned: dict[str, list[str]] = {}
 
     for entry in entries:
         views = entry.effective_views(book.defaults)
@@ -282,11 +297,21 @@ def _check_workbench(
         if not src.exists():
             continue  # reported by _check_toc_files
         try:
+            source = src.read_text(encoding="utf-8")
+            # The same arguments `stage_workbench_notebook` uses, or this
+            # checks something the build never stages. `pin: env` in
+            # particular writes `pkg==<installed>` into every staged
+            # notebook — exactly the case the pin warning below exists for.
             deps = derive_dependencies(
-                src.read_text(encoding="utf-8"),
+                source,
                 extras=book.dependencies.extras,
                 overrides=book.dependencies.overrides,
+                pin=book.dependencies.pin,
             )
+            # `write_pep723_block(..., preserve_existing=True)` lets the
+            # notebook's own block win, so a pin written by hand into
+            # `# /// script` reaches the browser too.
+            existing = read_existing_dependencies(source) or []
         except Exception:  # noqa: BLE001 - a syntax error is reported at build time
             continue
         names = {_requirement_name(d) for d in deps}
@@ -304,15 +329,21 @@ def _check_workbench(
         # whatever the bare name resolves to, which is the newest *stable*
         # release. dartbrains pinned `nltools==0.6.0.dev2`; readers got 0.5.1,
         # which needs numpy<1.24 and has no Pyodide wheel, and the boot failed.
-        pinned = sorted(d for d in deps if _is_pinned(d))
-        if pinned:
-            report.warnings.append(
-                f"{entry.file}: views include run/edit but "
-                f"{', '.join(pinned)} carry version specifiers, which marimo "
-                f"drops when installing in the browser — readers get whatever "
-                f"the bare name resolves to. Only offer run/edit here if the "
-                f"unpinned package works in Pyodide."
-            )
+        for requirement in list(deps) + list(existing):
+            if _is_pinned(requirement):
+                pinned.setdefault(requirement, []).append(str(entry.file))
+
+    if pinned:
+        listed = ", ".join(sorted(pinned))
+        pages = sorted({page for pages in pinned.values() for page in pages})
+        where = pages[0] if len(pages) == 1 else f"{len(pages)} run/edit pages"
+        report.warnings.append(
+            f"{where}: {listed} constrain their version, which marimo drops "
+            f"when installing in the browser — the reader gets whatever the "
+            f"bare name resolves to, which is the newest *stable* release "
+            f"(marimo-team/marimo#10870). Offer run/edit here only if that "
+            f"version works in Pyodide."
+        )
 
 
 def _check_inert_knobs(book: Book, report: CheckReport) -> None:

@@ -81,10 +81,18 @@
   // its "Missing packages" prompt — which installs bare names, so a reader on
   // a chapter with any non-bundled import had to click Install and hope.
   let resolved = null;
+  let reading = null;
 
   const store = {
-    async readFile() {
-      if (resolved !== null) return resolved;
+    // Memoizes the *promise*, not just the value: marimo's own bundle can call
+    // this while our pre-read is still awaiting, and two create paths would
+    // both fetch, both write the workspace and both record an "initial"
+    // version.
+    readFile() {
+      if (resolved !== null) return Promise.resolve(resolved);
+      return (reading ||= this._read().finally(() => (reading = null)));
+    },
+    async _read() {
       let ws = await WB.getWorkspace(nb);
       if (!ws) {
         const res = await fetch(src, { cache: "no-store" });
@@ -120,7 +128,6 @@
       contents = restoreHeader(contents, ws.baseSource);
       if (contents === ws.workingSource) return;
       const now = Date.now();
-      resolved = contents;
       ws.workingSource = contents;
       ws.updatedAt = now;
       if (now - (ws.lastCheckpointAt || 0) > checkpointMs) {
@@ -129,6 +136,10 @@
         await WB.pruneCheckpoints(nb, keepCheckpoints);
       }
       await WB.putWorkspace(ws);
+      // Only after the write landed: a rejected put (quota, with 20 rolling
+      // checkpoints of full sources) would otherwise leave the cache claiming
+      // a save the store never took, and the History diff would disagree.
+      resolved = contents;
       post("saved", { updatedAt: now });
     },
   };
@@ -162,22 +173,32 @@
   // runs after parsing, so it would otherwise start before an awaited read
   // could fill in `code`. `mount_page_html` holds the bundle back for us and
   // leaves its URL on `__WB__.bundle`.
-  store
-    .readFile()
-    .catch((e) => {
-      post("error", { message: String((e && e.message) || e) });
-      return ""; // let marimo boot and show its own failure
-    })
-    .then((code) => {
-      window.__MARIMO_MOUNT_CONFIG__ = mountConfig(code);
-      const bundle = boot.bundle;
-      if (!bundle) return; // nothing held back (older staged page)
-      const tag = document.createElement("script");
-      tag.type = "module";
-      tag.crossOrigin = "anonymous";
-      tag.src = bundle;
-      document.head.appendChild(tag);
-    });
+  //
+  // Without a held-back bundle we are running against a mount page from an
+  // older marimo-book — a browser can serve one of these two files from cache
+  // and the other from the network across an upgrade. That page still has
+  // marimo's module script inline, and it will run at the end of parsing,
+  // before any awaited read could resolve. So publish the config synchronously
+  // and accept the old behaviour (marimo prompts for packages) rather than
+  // hand marimo an undefined config and break the page outright.
+  if (!boot.bundle) {
+    window.__MARIMO_MOUNT_CONFIG__ = mountConfig("");
+  } else {
+    store
+      .readFile()
+      .catch((e) => {
+        post("error", { message: String((e && e.message) || e) });
+        return ""; // let marimo boot and show its own failure
+      })
+      .then((code) => {
+        window.__MARIMO_MOUNT_CONFIG__ = mountConfig(code);
+        const tag = document.createElement("script");
+        tag.type = "module";
+        tag.crossOrigin = "anonymous";
+        tag.src = boot.bundle;
+        document.head.appendChild(tag);
+      });
+  }
 
   // A grader widget inside the notebook announces a successful submission as
   // a `marimo-grader:submitted` DOM event (marimo-grader-client >= 0.1.1);

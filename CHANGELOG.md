@@ -20,13 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a module script, so it would otherwise run first). Verified in Chrome: a
   notebook whose block declares a non-bundled package now boots and runs it
   with no prompt.
-- **`check` warns when a workbench page pins a dependency.** marimo installs
-  script-metadata dependencies by *name* — `strip_requirement_name` drops the
-  specifier — so a pin is advisory in the browser and the reader gets whatever
-  the bare name resolves to, which is the newest *stable* release. dartbrains
-  pinned `nltools==0.6.0.dev2`; readers got 0.5.1, which needs `numpy<1.24`,
-  has no Pyodide wheel, and failed to install. A URL requirement
-  (`name @ https://…`) survives the strip and is not warned about.
+- **`check` warns when a workbench page constrains a dependency's version.**
+  marimo installs script-metadata dependencies by *name* —
+  `strip_requirement_name` drops the specifier — so the constraint is advisory
+  in the browser and the reader gets whatever the bare name resolves to, which
+  is the newest *stable* release (marimo-team/marimo#10870). dartbrains pinned
+  `nltools==0.6.0.dev2`; readers got 0.5.1, which needs `numpy<1.24`, has no
+  Pyodide wheel, and failed to install. The check mirrors what the build
+  stages — the same `dependencies.pin`, plus a block the notebook wrote
+  itself — and reports once for the whole book rather than once per page. Only
+  specifiers that can select a *different* release are flagged (`==`, `===`,
+  `~=`, upper bounds); a dropped lower bound is almost always satisfied by
+  whatever the bare name resolves to, and a URL requirement survives the strip
+  intact.
 
 ## [0.1.41] — 2026-09-16
 

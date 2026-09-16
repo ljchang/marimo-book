@@ -5,6 +5,29 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.41] — 2026-09-16
+
+### Fixed
+
+- **`dependencies` no longer stales committed `_rendered/` bodies.** The
+  rendered-body signature hashed the whole `dependencies` model, so adding a
+  `dependencies.overrides` entry — a knob that only retargets the generated
+  PEP 723 block, which micropip reads *in the browser* — marked every
+  `mode: cached` page stale and forced it to re-execute. In dartbrains that is
+  a 46 GB re-download in `Download_Data` for no change in output. Under
+  `mode: env` (the default) the notebook runs in the environment that invoked
+  the build, so only the mode itself is hashed now; under `mode: sandbox` the
+  generated block *is* the environment and every field still counts. The
+  irrelevant fields are pinned to their defaults rather than dropped, so a
+  book that never set them sees no hash change at all. Same over-broad hashing
+  0.1.40 fixed for `defaults.views` / `hide_author_line`.
+- **`polars` and `pyarrow` no longer warn that they cannot run in the
+  browser.** Both are bundled with the Pyodide release marimo pins (polars
+  1.33.1, pyarrow 22.0.0), so a chapter importing them runs fine with a
+  `run`/`edit` view. Checked against the lockfile; the remaining entries
+  (`torch`, `tensorflow`, `jax`, `numba`, `cupy`, `psutil`, …) were checked
+  the same way.
+
 ## [0.1.40] — 2026-09-15
 
 ### Added

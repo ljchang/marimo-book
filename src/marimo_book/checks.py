@@ -193,10 +193,12 @@ def _check_duplicate_outputs(entries: list[FileEntry], report: CheckReport) -> N
 # imports one can't boot in the browser, so a run/edit view on it would only
 # ever show an install error. Warned, not errored: the list is a heuristic.
 #
-# Checked against the Pyodide lockfile marimo pins (2026-09-15) — do not add a
+# Checked against the Pyodide lockfile marimo pins (v314.0.0) — do not add a
 # package here without doing the same. Pure-Python packages never belong here
 # whatever they wrap (nibabel, nilearn install fine via micropip), and neither
-# do ones Pyodide bundles (lxml, opencv-python, scikit-learn).
+# do ones Pyodide bundles: lxml, opencv-python, scikit-learn, and — removed
+# here after checking the lockfile rather than assuming — polars (1.33.1) and
+# pyarrow (22.0.0), which a data-wrangling chapter is very likely to import.
 _NO_PYODIDE_WHEEL = frozenset(
     {
         "torch",
@@ -208,8 +210,6 @@ _NO_PYODIDE_WHEEL = frozenset(
         "numba",
         "cupy",
         "psutil",
-        "pyarrow",
-        "polars",
     }
 )
 

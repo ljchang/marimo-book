@@ -519,14 +519,14 @@ def test_native_dependency_with_any_specifier_warns(tmp_path: Path) -> None:
         tmp_path,
         {
             "title": "T",
-            "dependencies": {"extras": ["torch!=1.9", "polars~=1.0"]},
+            "dependencies": {"extras": ["torch!=1.9", "numba~=0.60"]},
             "toc": [{"file": "content/nb.py", "views": ["read", "edit"]}],
         },
         files=["content/nb.py"],
     )
     report = run_checks(book, tmp_path)
     warned = [w for w in report.warnings if "Pyodide" in w]
-    assert len(warned) == 1 and "polars" in warned[0] and "torch" in warned[0]
+    assert len(warned) == 1 and "numba" in warned[0] and "torch" in warned[0]
 
 
 def test_missing_assignment_file_is_error(tmp_path: Path) -> None:

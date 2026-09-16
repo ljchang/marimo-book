@@ -215,6 +215,103 @@ _NO_PYODIDE_WHEEL = frozenset(
 )
 
 
+#: Specifier kinds whose loss can select a *different* release: an exact pin, a
+#: compatible release, an upper bound, or an exclusion. ``!=`` belongs here for
+#: the opposite reason to a lower bound — ``numpy!=2.0.0`` says the author knows
+#: 2.0.0 is broken, and dropping it installs precisely 2.0.0 if that is the
+#: newest stable.
+_RISKY_OPERATORS = ("==", "===", "~=", "<", "!=")
+
+
+def _staged_requirements(path: Path, book: Book, deps: list[str] | None = None) -> list[str] | None:
+    """The PEP 723 dependencies the build stages for ``path``, as the browser
+    would see them — or ``None`` if they cannot be determined.
+
+    Reproduces ``stage_workbench_notebook``: the same ``derive_dependencies``
+    arguments, then ``write_pep723_block``, whose ``preserve_existing`` merge
+    lets the notebook's own block win by canonical name. A requirement the
+    block overrides never reaches the reader, so flagging the union would warn
+    about something nobody installs.
+
+    The result is then filtered the way marimo filters it before installing, so
+    an entry excluded from emscripten by an environment marker is not reported.
+    """
+    from .transforms.pep723 import (
+        derive_dependencies,
+        read_existing_dependencies,
+        write_pep723_block,
+    )
+
+    try:
+        source = path.read_text(encoding="utf-8")
+        if deps is None:
+            deps = derive_dependencies(
+                source,
+                extras=book.dependencies.extras,
+                overrides=book.dependencies.overrides,
+                pin=book.dependencies.pin,
+            )
+        staged = read_existing_dependencies(write_pep723_block(source, deps)) or []
+        return _installed_in_browser(staged)
+    except Exception:  # noqa: BLE001 - a malformed block is reported at build time
+        return None
+
+
+def _installed_in_browser(requirements: list[str]) -> list[str]:
+    """The subset marimo would actually install in Pyodide.
+
+    Mirrors ``filter_requirements_for_emscripten``, which marimo runs before it
+    installs, so an entry like ``pywin32; sys_platform == "win32"`` is dropped
+    rather than reported. Falls back to the unfiltered list when marimo is not
+    importable, since a missing filter should not fail the check.
+    """
+    try:
+        from marimo._runtime.packages.utils import filter_requirements_for_emscripten
+    except ImportError:  # pragma: no cover - marimo is a build dependency
+        # Drop anything carrying a marker rather than keeping it. If marimo
+        # moves this helper, an unfiltered list would start flagging
+        # marker-guarded entries and turn `check --strict` red with no hint
+        # that the filter had vanished; under-reporting is the safe direction
+        # for a warning.
+        return [r for r in requirements if ";" not in r]
+    return list(filter_requirements_for_emscripten(requirements))
+
+
+def _is_pinned(requirement: str) -> bool:
+    """Whether dropping this requirement's specifier could change the version.
+
+    A plain lower bound (``>=2``) is usually satisfied by whatever the bare name
+    resolves to, so flagging it would turn ``check --strict`` red for books that
+    are fine. With one exception, which is the case this check exists for: a
+    lower bound naming a *pre-release*. Installers skip pre-releases unless a
+    specifier asks for one, so ``nltools>=0.6.0.dev2`` resolves to the newest
+    stable — 0.5.1, which cannot run in Pyodide — exactly as an exact pin does.
+
+    A URL requirement (``name @ https://…``) is not "pinned" for this purpose:
+    marimo's strip leaves those intact, so they do reach the browser as written.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        parsed = Requirement(requirement)
+    except InvalidRequirement:
+        return False
+    if parsed.url is not None:
+        return False
+
+    for spec in parsed.specifier:
+        if spec.operator.startswith(_RISKY_OPERATORS):
+            return True
+        if spec.operator in (">=", ">"):
+            try:
+                if Version(spec.version).is_prerelease:
+                    return True
+            except InvalidVersion:
+                continue
+    return False
+
+
 def _requirement_name(requirement: str) -> str:
     """Canonical project name of a PEP 508 requirement string (``torch!=1.9`` → ``torch``)."""
     from packaging.requirements import InvalidRequirement, Requirement
@@ -231,6 +328,10 @@ def _check_workbench(
 ) -> None:
     """``views`` / ``open_in`` must be consistent, and only make sense on notebooks."""
     from .transforms.pep723 import derive_dependencies
+
+    # Collected across pages: `extras` are book-wide, so the same requirement
+    # would otherwise be reported once per run/edit page.
+    pinned: dict[str, list[str]] = {}
 
     for entry in entries:
         views = entry.effective_views(book.defaults)
@@ -261,25 +362,89 @@ def _check_workbench(
                     f"{entry.file}: assignment {entry.assignment} has no PEP 723 block — "
                     "a grader-published student notebook carries its identity there"
                 )
+        # An assignment boots in the drawer through the same
+        # `stage_workbench_notebook` call with the same `book.dependencies`, so
+        # its block reaches the browser exactly as a chapter's does — and a
+        # chapter with `views: [read]` can still carry one.
+        if entry.assignment is not None:
+            asg = book_dir / entry.assignment
+            if asg.exists() and asg.suffix == ".py":
+                for requirement in _staged_requirements(asg, book):
+                    if _is_pinned(requirement):
+                        pinned.setdefault(requirement, []).append(str(entry.assignment))
+
         if not entry.uses_workbench(book.defaults):
             continue
         src = book_dir / entry.file
         if not src.exists():
             continue  # reported by _check_toc_files
         try:
+            source = src.read_text(encoding="utf-8")
+            # The same arguments `stage_workbench_notebook` uses, or this
+            # checks something the build never stages.
             deps = derive_dependencies(
-                src.read_text(encoding="utf-8"),
+                source,
                 extras=book.dependencies.extras,
                 overrides=book.dependencies.overrides,
+                pin=book.dependencies.pin,
             )
         except Exception:  # noqa: BLE001 - a syntax error is reported at build time
             continue
-        names = {_requirement_name(d) for d in deps}
+
+        # Deliberately its own try, and after `deps`: a malformed block or an
+        # unparseable marker raises here, and folding that into the block above
+        # would swallow the no-wheel warning too — a page importing torch would
+        # go unreported because of an unrelated fault.
+        staged = _staged_requirements(src, book, deps=deps)
+
+        # `staged` when it could be computed: a notebook that hand-lists a
+        # package in its own block without importing it is staged with it, and
+        # `deps` (imports + extras) would never see it.
+        names = {_requirement_name(d) for d in (staged if staged is not None else deps)}
         bad = sorted(names & _NO_PYODIDE_WHEEL)
         if bad:
             report.warnings.append(
                 f"{entry.file}: views include run/edit but the notebook imports "
                 f"{', '.join(bad)}, which cannot run in the browser (no Pyodide wheel)"
+            )
+
+        # marimo installs script-metadata dependencies by *name*: its
+        # `strip_requirement_name` drops version specifiers before handing them
+        # to micropip (marimo/_pyodide/pyodide_session.py::find_packages). So a
+        # pin in the block is advisory in the browser — the reader gets
+        # whatever the bare name resolves to, which is the newest *stable*
+        # release. dartbrains pinned `nltools==0.6.0.dev2`; readers got 0.5.1,
+        # which needs numpy<1.24 and has no Pyodide wheel, and the boot failed.
+        for requirement in staged or ():
+            if _is_pinned(requirement):
+                pinned.setdefault(requirement, []).append(str(entry.file))
+
+    if pinned:
+        why = (
+            "marimo drops version specifiers when installing in the browser, so "
+            "the reader gets whatever the bare name resolves to — the newest "
+            "*stable* release (marimo-team/marimo#10870)."
+        )
+        if book.dependencies.pin == "env":
+            # `pin: env` stamps `==<installed>` onto every derived requirement,
+            # so listing them would inline the book's whole dependency set and
+            # the per-package advice would be unactionable.
+            report.warnings.append(
+                f"dependencies.pin: env has no effect on run/edit pages — {why} "
+                f"The staged pins are advisory in the browser; readers install "
+                f"whatever is newest. Use pin: none for a book with run/edit "
+                f"views, or keep those pages read-only."
+            )
+        else:
+            # Attributed per requirement: a book-wide `extras` pin lands on
+            # every page while a notebook's own block lands on one, and a single
+            # page count would claim the wrong thing about both.
+            listed = "; ".join(
+                f"{req} ({', '.join(sorted(set(pages)))})" for req, pages in sorted(pinned.items())
+            )
+            report.warnings.append(
+                f"pinned dependencies on run/edit pages: {listed}. {why} Offer "
+                f"run/edit there only if the unpinned version works in Pyodide."
             )
 
 

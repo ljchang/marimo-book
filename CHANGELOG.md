@@ -5,6 +5,23 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A link to the book's repository in the header.** `repo:` already reached
+  mkdocs as `repo_url`, but Material renders that as a source card carrying
+  star and fork counts fetched from the GitHub API, and `extra.css` hides the
+  card because those counts lag reality and mislead. The side effect was that
+  nothing in the header linked to the repository: the only GitHub icon came
+  from `launch_buttons.github`, which points at the *current page's* source and
+  is absent on a book that turns the launch buttons off. marimograder.org set
+  `repo:` and had no way to reach its own source. A plain icon-only link now
+  sits where Material's card would have, reading its URL out of the hidden
+  element so nothing new is plumbed through `mkdocs.yml`. It appears if and
+  only if `repo:` is set, and yields to a GitHub launch button when the page
+  already has one, so no existing book gains a second octocat.
+
 ## [0.1.42] — 2026-09-16
 
 ### Added

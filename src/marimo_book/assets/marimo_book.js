@@ -661,6 +661,73 @@
     }
   }
 
+  /** GitHub's octocat, for the header repository link.
+   *
+   * A second copy of ``_ICON_GITHUB`` in launch_buttons.py: the launch-button
+   * row is rendered server-side in Python, this link is mounted client-side,
+   * and there is no build step that could share one constant between them.
+   * ``test_header_repo_link.py`` asserts the two paths stay byte-identical,
+   * so the duplication cannot drift unnoticed.
+   */
+  const REPO_ICON =
+    '<svg class="marimo-book-button-icon" viewBox="0 0 24 24" ' +
+    'aria-hidden="true" focusable="false">' +
+    '<path d="M12 .3a12 12 0 0 0-3.79 23.4c.6.11.82-.26.82-.58v-2.05c-3.34.7' +
+    "2-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.08-.73.08-" +
+    ".73 1.2.09 1.83 1.24 1.83 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1." +
+    "31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.46-2.38 1.24-3.22-.13-.3" +
+    "1-.54-1.53.11-3.18 0 0 1.01-.32 3.31 1.23a11.5 11.5 0 0 1 6 0c2.31-1.5" +
+    "5 3.31-1.23 3.31-1.23.66 1.65.25 2.87.13 3.18.77.84 1.24 1.91 1.24 3.2" +
+    "2 0 4.61-2.81 5.62-5.49 5.92.42.36.81 1.1.81 2.22v3.29c0 .32.21.69.83." +
+    '58A12 12 0 0 0 12 .3"/></svg>';
+
+  /** Put a link to the book's repository in Material's header.
+   *
+   * `repo:` in book.yml becomes mkdocs `repo_url`, which Material renders as
+   * `.md-header__source`: a card carrying the repo name plus star and fork
+   * counts it fetches from the GitHub API. extra.css hides that card, because
+   * the counts lag reality and mislead. The side effect was that a book with
+   * `repo:` set had no repository link in its header at all unless the page
+   * happened to be a notebook with a GitHub launch button -- so on a book of
+   * Markdown pages, or one with `launch_buttons.github: false`, there was no
+   * way to reach the source from the site.
+   *
+   * We mount our own icon-only link instead, reading the URL straight out of
+   * the hidden element. Nothing new has to be plumbed through mkdocs.yml, and
+   * the link appears if and only if `repo:` is set.
+   *
+   * Suppressed when this page's header already carries a GitHub launch button,
+   * which points at the page's own source in the same repository. Two octocats
+   * side by side is the duplication hiding Material's card was meant to avoid.
+   */
+  function mountHeaderRepoLink(scope) {
+    const headerInner = scope.querySelector(".md-header__inner");
+    if (!headerInner) return;
+    // Material re-renders the header on instant-nav and bootAll runs again,
+    // so drop the previous page's link before deciding whether to add one.
+    headerInner
+      .querySelectorAll(".marimo-book-repo-link")
+      .forEach((el) => el.remove());
+    if (headerInner.querySelector(".marimo-book-button-github")) return;
+    const source = headerInner.querySelector(".md-header__source a[href]");
+    if (!source) return;
+    const wrap = document.createElement("div");
+    wrap.className = "marimo-book-repo-link";
+    const link = document.createElement("a");
+    link.className = "marimo-book-button";
+    link.href = source.href;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = "View this project on GitHub";
+    link.setAttribute("aria-label", "View this project on GitHub");
+    link.innerHTML =
+      REPO_ICON + '<span class="marimo-book-button-label">GitHub</span>';
+    wrap.appendChild(link);
+    // Right of the search slot, where Material's own repo card would have
+    // sat, rather than left of it where the launch buttons go.
+    headerInner.appendChild(wrap);
+  }
+
   // Plotly hydration. Marimo emits `<marimo-plotly data-figure='{json}'>`
   // for each figure; we rewrap it as `<div class="marimo-book-plotly">`
   // server-side. This shim loads Plotly.js once on first encounter, then
@@ -1147,6 +1214,7 @@
     hydrateAll(scope);
     initPrecomputeOnce(scope);
     mountHeaderButtons(scope);
+    mountHeaderRepoLink(scope);
     hydratePlotly(scope);
     hydrateVega(scope);
     watchSchemeForVega();

@@ -1,4 +1,4 @@
-# `book.yml` reference
+# book.yml reference
 
 The single source of truth for your book's configuration. The
 preprocessor translates this into a generated `mkdocs.yml`; users rarely
@@ -192,7 +192,7 @@ analytics:
   property: G-XXXXXXXXXX
 ```
 
-### Static reactivity (`precompute`)
+### Static reactivity (precompute)
 
 Re-renders the notebook once per discrete-widget value at build time
 and ships a JSON lookup table the JS shim swaps on slider input. Off
@@ -210,7 +210,7 @@ by default; opt in per book.
 See [Building → Static reactivity](building.md#static-reactivity)
 for the full pipeline + tuning guide.
 
-### Images (`images`)
+### Images (images)
 
 Every image a notebook produces reaches the rendered page as an inline
 `data:` URI — matplotlib PNGs, `mo.image()` files, nilearn mosaics, and on

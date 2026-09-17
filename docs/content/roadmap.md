@@ -125,7 +125,7 @@ toc:
     dependencies: sandbox    # this one gets its own env
 ```
 
-### First-class BibTeX + `{cite}` / `[@key]`
+### First-class BibTeX citations
 
 Full citation support: inline `[@smith2020]`, auto-generated
 references page, APA + numbered styles. Uses

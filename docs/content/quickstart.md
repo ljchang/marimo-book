@@ -33,7 +33,7 @@ marimo-book check
 marimo-book clean
 ```
 
-## What `marimo-book new` gives you
+## What marimo-book new gives you
 
 ```
 mybook/

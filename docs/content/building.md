@@ -83,7 +83,7 @@ fresh + repopulates the cache in one step).
 
 ## CLI commands
 
-### `marimo-book new <directory>`
+### marimo-book new &lt;directory&gt;
 
 Scaffold a fresh book.
 
@@ -102,7 +102,7 @@ The scaffold ships `book.yml`, `content/intro.md`, `content/example.py`,
 a GitHub Pages workflow at `.github/workflows/deploy.yml`, a
 `.gitignore`, and a starter README.
 
-### `marimo-book build`
+### marimo-book build
 
 One-shot static build. Emits `_site/` ready to deploy.
 
@@ -132,7 +132,7 @@ silent on a successful build.
 removed TOC entries linger in `_site_src/` (intentional, for fast
 incremental dev builds; not what you want in production).
 
-### `marimo-book serve`
+### marimo-book serve
 
 Live-reload dev server.
 
@@ -162,7 +162,7 @@ edited. mkdocs's livereload pushes the browser refresh.
     fire. The build pipeline itself is reliable; if the browser
     doesn't refresh, hard-refresh (⌘-R).
 
-### `marimo-book check`
+### marimo-book check
 
 Validate `book.yml` and linked content without building. Fast — no
 mkdocs invocation, no `marimo export`.
@@ -175,7 +175,7 @@ marimo-book check --strict                 # warnings → exit 1 too
 Catches: malformed `book.yml`, TOC entries pointing at missing files,
 unsupported file types. Use as a pre-commit hook for fast feedback.
 
-### `marimo-book clean`
+### marimo-book clean
 
 Remove build artifacts.
 
@@ -184,7 +184,7 @@ marimo-book clean                          # removes _site/, _site_src/, cache
 marimo-book clean -o public                # custom output dir
 ```
 
-## Optional features (opt-in via `book.yml`)
+## Optional features (opt-in via book.yml)
 
 Each flag is opt-in (default off) and may require an extra:
 
@@ -200,13 +200,13 @@ pip install 'marimo-book[social,autorefs,linkcheck,pdf]'
 | `include_changelog: true` | Preprocessor copies `CHANGELOG.md` from the book root (or its parent) into the staged tree and appends a "Changelog" entry to the nav | None |
 | `pdf_export: true` | `mkdocs-with-pdf` renders the entire book through WeasyPrint into `_site/pdf/book.pdf` and adds a "Download PDF" link to the page footer | `marimo-book[pdf]` (also needs the cairo + pango system libs above) |
 
-### `social_cards` — OpenGraph previews
+### social_cards — OpenGraph previews
 
 Enable when you care about how the book looks when shared on social
 media. Cards inherit your `theme.palette.primary` for the background
 colour. ~5 s overhead per build for ~20 pages.
 
-### `cross_references` — autorefs
+### cross_references — autorefs
 
 With `cross_references: true`, you can write:
 
@@ -218,20 +218,20 @@ The [Anywidgets][] page covers the JS shim in detail.
 as a heading. Lets you reorganise nav structure without breaking
 inbound links.
 
-### `check_external_links` — htmlproofer
+### check_external_links — htmlproofer
 
 Slow (~1–3 s per outbound link). Keep off in CI for normal builds and
 turn on only when cutting a release. Combined with
 `marimo-book build --strict`, broken external links fail the build.
 
-### `include_changelog` — auto-publish CHANGELOG.md
+### include_changelog — auto-publish CHANGELOG.md
 
 Single source of truth: the `CHANGELOG.md` PyPI links to also becomes
 a docs page. Looks first at `book_dir/CHANGELOG.md`, falls back to
 `book_dir.parent/CHANGELOG.md` so the common docs/-subdir layout works
 without extra config. Silent no-op when no `CHANGELOG.md` exists.
 
-### `pdf_export` — single-PDF download
+### pdf_export — single-PDF download
 
 Renders the entire book to one PDF. Adds a "Download PDF" link to the
 footer of every page. Slow on large books (~30 s for ~50 pages); turn
@@ -263,7 +263,7 @@ copying the whole `_site/` directory as usual.
     …and tweak `book.yml` to read the env var. Or maintain a
     `book.ci.yml` variant just for the deploy job.
 
-### `shell` — build with zensical
+### shell — build with zensical
 
 [Zensical](https://zensical.org) is the Rust/Python successor to
 Material for MkDocs, by the same team. Because the preprocessor emits
@@ -353,7 +353,7 @@ and this whole pipeline is a no-op for them — the static fallback
 works the same way either side of that line. See
 [WASM render mode](#wasm-render-mode) below.
 
-### Opt in via `book.yml`
+### Opt in via book.yml
 
 ```yaml
 precompute:

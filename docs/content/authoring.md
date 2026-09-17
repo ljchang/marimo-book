@@ -4,7 +4,7 @@ A `marimo-book` is just a directory of files referenced by `book.yml`.
 You can author pages as plain Markdown (`.md`), marimo notebooks
 (`.py`), or any mix of the two.
 
-## Markdown pages (`.md`)
+## Markdown pages (.md)
 
 Standard Markdown with the Material for MkDocs dialect on top. Drop a
 file into `content/`, reference it from `book.yml`'s `toc:`, and it
@@ -212,7 +212,7 @@ The *[HTML]* output is bundled inline.
 Useful for things you need to repeat across pages (license footers,
 install snippets, etc.).
 
-## Marimo notebooks (`.py`)
+## Marimo notebooks (.py)
 
 Write notebooks in marimo as you normally would. `marimo-book` invokes
 `marimo export ipynb --include-outputs` under the hood, walks the cells,
@@ -268,7 +268,7 @@ Every `.py` page gets an "Open in molab" launch button (configurable in
 `book.yml`) so readers can pop into a fully reactive marimo session for
 any chapter they want to modify.
 
-### Caching slow cells (`mo.persistent_cache`)
+### Caching slow cells (mo.persistent_cache)
 
 For cells that take more than a few seconds to run (large simulations,
 ICA decompositions, big bootstraps), wrap the expensive computation in

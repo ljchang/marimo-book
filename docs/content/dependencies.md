@@ -11,7 +11,7 @@ dependencies:
   # mode: sandbox
 ```
 
-## `env` mode (default)
+## env mode (default)
 
 The Python environment that invoked `marimo-book` provides every
 notebook's deps. The typical setup:
@@ -40,7 +40,7 @@ marimo-book build
 - Portability: the notebooks aren't self-contained; someone cloning the
   book needs to know what to install.
 
-## `sandbox` mode
+## sandbox mode
 
 Each notebook declares its own deps with a [PEP 723 inline metadata
 header](https://peps.python.org/pep-0723/):
@@ -182,7 +182,7 @@ dependencies:
   whose distribution name matches a detected import wins (so its version
   specifier is preserved).
 
-### `marimo-book sync-deps`
+### marimo-book sync-deps
 
 The build never modifies your `.py` files. To commit the auto-generated
 blocks back into your source (so they're under version control and

@@ -1,4 +1,4 @@
-# Cached notebook outputs (`mode: cached`)
+# Cached notebook outputs (mode: cached)
 
 Some notebooks are too expensive to run on every docs deploy — they load GPU
 models, hit the network, or take minutes to execute. `mode: cached` lets you

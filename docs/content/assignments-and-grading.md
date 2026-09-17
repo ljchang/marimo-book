@@ -40,7 +40,7 @@ The grader must allow the book's origin (CORS) for sign-in and submit to work fr
 
 Set `GRADER_RENDER=1` in the environment of `marimo-book build` if you also list assignment notebooks as pages of their own, so the grader's widgets render as static placeholders there.
 
-## Planned: `sync-assignments`
+## Planned: sync-assignments
 
 A `marimo-book sync-assignments` command is planned. It will read the grader's public assignment listing for an offering and write the current student notebooks and a small metadata sidecar (title, due date, points, version) into the book, so `assignment: pandas` can name the grader's slug and a republish on the grader becomes a rebuild rather than a copy step. Builds stay hermetic: the command writes committed files and `build` never fetches.
 

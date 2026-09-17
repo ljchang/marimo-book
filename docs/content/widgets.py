@@ -91,7 +91,7 @@ def _(mo):
     Two precedence layers — both optional; whichever values exist at each
     layer are merged (later wins):
 
-    ### 1. `widget_defaults` in `book.yml`
+    ### 1. widget_defaults in book.yml
 
     ```yaml
     widget_defaults:

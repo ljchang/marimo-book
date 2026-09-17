@@ -5,6 +5,19 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The header repository link sits with the other header buttons.** 0.1.43
+  appended it, which put it to the *right* of the search box, while the launch
+  buttons have always been inserted to the left. Which of the two supplies a
+  book's header octocat depends on `launch_buttons.github`, so the same glyph
+  landed on a different side of the search box from one book to the next —
+  marimobook.org (launch button, left) against marimograder.org (repo link,
+  right). Both mounts now anchor on the search slot, and a test asserts they
+  keep agreeing.
+
 ## [0.1.43] — 2026-09-17
 
 ### Added

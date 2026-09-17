@@ -96,6 +96,31 @@ def test_the_link_yields_to_a_github_launch_button():
     assert ".marimo-book-button-github" in fn
 
 
+def _mount_fn(name: str) -> str:
+    return JS.split(f"function {name}", 1)[1].split("\n  }", 1)[0]
+
+
+def test_both_header_mounts_insert_before_the_same_anchor():
+    """The repo link and the launch-button row have to land in one group.
+
+    They are separate functions, and which of the two supplies the header's
+    octocat depends on `launch_buttons.github` -- so if they disagree about
+    where to insert, the same glyph sits on a different side of the search
+    box from one book to the next. It did: this mount used appendChild, which
+    put it right of search while the launch buttons went left (0.1.43).
+    """
+    anchor = "'[data-md-component=\"search\"]'"
+    for name in ("mountHeaderButtons", "mountHeaderRepoLink"):
+        fn = _mount_fn(name)
+        assert anchor in fn, f"{name} does not anchor on the search slot"
+        assert "insertBefore" in fn, f"{name} does not insertBefore"
+    # The bug in full: appending lands after every sibling, search included.
+    assert (
+        "headerInner.appendChild(wrap)"
+        not in _mount_fn("mountHeaderRepoLink").split("if (anchor)")[0]
+    )
+
+
 def test_the_link_is_removed_before_being_remounted():
     """Material instant-nav re-runs bootAll; without this it accumulates."""
     fn = JS.split("function mountHeaderRepoLink", 1)[1].split("\n  }", 1)[0]

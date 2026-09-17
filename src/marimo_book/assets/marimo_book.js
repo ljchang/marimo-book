@@ -723,9 +723,17 @@
     link.innerHTML =
       REPO_ICON + '<span class="marimo-book-button-label">GitHub</span>';
     wrap.appendChild(link);
-    // Right of the search slot, where Material's own repo card would have
-    // sat, rather than left of it where the launch buttons go.
-    headerInner.appendChild(wrap);
+    // Left of the search slot, the same anchor mountHeaderButtons uses, so
+    // this link and a launch-button row land in one group of chrome. Not
+    // where Material's own repo card sat (right of search): a reader never
+    // sees that card, but they do see two marimo-book sites side by side,
+    // and the octocat has to be in the same place on both -- one of them
+    // gets it from a launch button and the other from here.
+    const anchor =
+      headerInner.querySelector('[data-md-component="search"]') ||
+      headerInner.querySelector(".md-header__source");
+    if (anchor) headerInner.insertBefore(wrap, anchor);
+    else headerInner.appendChild(wrap);
   }
 
   // Plotly hydration. Marimo emits `<marimo-plotly data-figure='{json}'>`

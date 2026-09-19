@@ -43,7 +43,7 @@ class AssignmentError(ValueError):
     pass
 
 
-class AssignmentNotCached(AssignmentError):
+class AssignmentNotCachedError(AssignmentError):
     """A grader slug that has not been fetched yet. ``check`` runs without a
     network and before ``build``, so it treats this as "the build will fetch
     it", not as an error."""
@@ -131,7 +131,7 @@ def resolve_assignment(
             else:
                 version_file.unlink(missing_ok=True)
     elif not cache.exists():
-        raise AssignmentNotCached(
+        raise AssignmentNotCachedError(
             f"assignment {slug!r} has not been fetched from {student_url} yet (no cached copy)"
         )
 

@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .assignments import AssignmentError, resolve_assignment
+from .assignments import AssignmentError, AssignmentNotCached, resolve_assignment
 from .config import Book, FileEntry, SectionEntry
 from .preprocessor import _doc_relpath_for, _iter_file_entries, _render_body_signature
 from .rendered_store import RenderedStore
@@ -351,7 +351,11 @@ def _check_workbench(
         asg_src: Path | None = None
         if entry.assignment is not None:
             try:
-                resolved = resolve_assignment(entry, book, book_dir)
+                # No network in check: a slug the build has not fetched yet is
+                # the build's job, not an error; a slug with no grader: is.
+                resolved = resolve_assignment(entry, book, book_dir, fetch=False)
+            except AssignmentNotCached:
+                pass
             except AssignmentError as e:
                 report.errors.append(f"{entry.file}: {e}")
             else:

@@ -12,7 +12,9 @@ Two forms of ``assignment:`` on a TOC entry:
 
         {server}/a/{course}/{term}/{slug}/student.py
 
-    Fetched at build time into ``.marimo_book_cache/assignments/`` so the
+    Fetched at build time (``check`` never touches the network: a slug it has
+    no cached copy of is simply left for the build) into
+    ``.marimo_book_cache/assignments/`` so the
     grader stays the single source of truth: a republish reaches the site on
     the next build with nothing to commit. If the grader cannot be reached
     and a cached copy exists, the build uses the copy and says so; with no
@@ -39,6 +41,12 @@ CACHE_SUBDIR = Path(".marimo_book_cache") / "assignments"
 
 class AssignmentError(ValueError):
     pass
+
+
+class AssignmentNotCached(AssignmentError):
+    """A grader slug that has not been fetched yet. ``check`` runs without a
+    network and before ``build``, so it treats this as "the build will fetch
+    it", not as an error."""
 
 
 @dataclass(frozen=True)
@@ -123,7 +131,7 @@ def resolve_assignment(
             else:
                 version_file.unlink(missing_ok=True)
     elif not cache.exists():
-        raise AssignmentError(
+        raise AssignmentNotCached(
             f"assignment {slug!r} has not been fetched from {student_url} yet (no cached copy)"
         )
 

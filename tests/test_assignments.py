@@ -151,13 +151,19 @@ def test_offline_without_a_cached_copy_is_an_error(tmp_path: Path, monkeypatch) 
 # --------------------------------------------------------------------------
 
 
-def test_check_resolves_slugs_and_reports_a_missing_grader(tmp_path: Path, monkeypatch) -> None:
+def test_check_never_fetches_and_reports_a_missing_grader(tmp_path: Path, monkeypatch) -> None:
     from marimo_book.checks import run_checks
 
-    monkeypatch.setattr(assignments, "_download", _fake_download([]))
-    book, _ = _book(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(assignments, "_download", _fake_download(calls))
+    book, entry = _book(tmp_path)
+    # Fresh runner, nothing cached: check leaves the slug to the build.
     report = run_checks(book, tmp_path)
-    assert not [e for e in report.errors if "assignment" in e], report.errors
+    assert calls == [] and not [e for e in report.errors if "assignment" in e], report.errors
+    # Once the build has fetched it, check reads the cached copy (still no network).
+    resolve_assignment(entry, book, tmp_path)
+    report = run_checks(book, tmp_path)
+    assert len(calls) == 1 and not [e for e in report.errors if "assignment" in e]
 
     book, _ = _book(tmp_path, grader=False)
     report = run_checks(book, tmp_path)

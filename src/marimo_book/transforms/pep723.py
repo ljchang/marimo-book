@@ -192,8 +192,12 @@ def write_pep723_block(
     *,
     requires_python: str | None = None,
     preserve_existing: bool = True,
+    tool: Mapping[str, Mapping[str, object]] | None = None,
 ) -> str:
     """Insert or update the PEP 723 block; return the new source.
+
+    ``tool`` adds or replaces tables under ``[tool]`` -- ``{"grader": {...}}``
+    becomes ``[tool.grader]`` -- leaving other ``[tool.*]`` tables alone.
 
     ``preserve_existing=True`` (default) merges ``deps`` with any
     existing ``dependencies`` array (union by canonical distribution
@@ -227,6 +231,12 @@ def write_pep723_block(
         if requires_python is not None:
             new_project["requires-python"] = requires_python
         new_project["dependencies"] = list(deps)
+
+    if tool:
+        tables = dict(new_project.get("tool") or {})
+        for name, table in tool.items():
+            tables[name] = dict(table)
+        new_project["tool"] = tables
 
     new_block = wrap_script_metadata(_dump_block_toml(new_project).rstrip("\n"))
 

@@ -45,3 +45,26 @@ Set `GRADER_RENDER=1` in the environment of `marimo-book build` if you also list
 A `marimo-book sync-assignments` command is planned. It will read the grader's public assignment listing for an offering and write the current student notebooks and a small metadata sidecar (title, due date, points, version) into the book, so `assignment: pandas` can name the grader's slug and a republish on the grader becomes a rebuild rather than a copy step. Builds stay hermetic: the command writes committed files and `build` never fetches.
 
 See the [DartBrains](https://dartbrains.org) chapters for a live example.
+
+## Sourcing assignments from the grader
+
+Instead of committing the published student notebook into the book, give
+`book.yml` a `grader:` section and name the assignment by its slug:
+
+```yaml
+grader:
+  server: https://grader.example.edu
+  course: neuroimaging
+  term: 2026-fall
+
+toc:
+  - file: content/GLM.py
+    assignment: glm
+```
+
+The build fetches `{server}/a/{course}/{term}/glm/student.py` — the version
+the grader currently publishes — so `grader publish` alone updates the site
+on its next build, and the card offers *Open in molab* through the grader's
+own alias. Run `marimo-book sync-deps` once after adding the section: it
+writes `[tool.grader]` into every chapter's block, so a chapter opened in
+molab or locally can find its assignments and its course storage too.

@@ -278,7 +278,10 @@ Three shapes, inferred from which key is present:
   that notebook (`views: [read, edit]`, `open_in: edit`, …). Optional
   `assignment: path/to/student_notebook.py` attaches a graded assignment
   that opens in the workbench's bottom drawer — see
-  [Assignments and grading](assignments-and-grading.md).
+  [Assignments and grading](assignments-and-grading.md). With a book-level
+  `grader:` section (below) the value can be the assignment's slug instead,
+  `assignment: glm`, and the build fetches the notebook the grader currently
+  publishes.
 - `url: URL` (+ `title:`) — external link in the sidebar.
 - `section: name` + `children: [...]` — a nested group. Recursive. An
   empty section (`children:` blank or omitted) is silently dropped from
@@ -330,3 +333,31 @@ behind `social_cards`, `blog`, `check_external_links` and
 `pdf_export` — it ignores them *without warning*, so `marimo-book
 check` refuses those combinations. See [Building](building.md#shell-build-with-zensical)
 and the [tracking issue](https://github.com/ljchang/marimo-book/issues/105).
+
+## `grader`
+
+Where this book's assignments are published. With it, a TOC entry can name
+its assignment by slug and the build fetches the notebook the grader
+currently publishes — the grader stays the single source of truth, a
+republish reaches the site on the next build with nothing to commit, and a
+new term is one line here.
+
+```yaml
+grader:
+  server: https://grader.example.edu
+  course: neuroimaging
+  term: 2026-fall
+
+toc:
+  - file: content/GLM.py
+    assignment: glm      # {server}/a/{course}/{term}/glm/student.py
+```
+
+The notebook is cached under `.marimo_book_cache/assignments/`. If the
+grader cannot be reached the build uses the cached copy and `check` warns;
+with no copy it fails. The assignment card links to the grader's molab
+alias as well, so the same notebook opens in molab, in the drawer, or on a
+laptop. `sync-deps` writes the three values into every chapter's PEP 723
+block as `[tool.grader]`, which is how a notebook opened outside the site
+knows which course it belongs to.
+

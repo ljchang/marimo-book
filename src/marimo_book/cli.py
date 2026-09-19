@@ -724,7 +724,8 @@ def sync_deps(
             overrides=deps_cfg.overrides,
             pin=deps_cfg.pin,
         )
-        after = write_pep723_block(before, deps, requires_python=requires_python)
+        tool = {"grader": book.grader.tool_table()} if book.grader else None
+        after = write_pep723_block(before, deps, requires_python=requires_python, tool=tool)
         if after == before:
             continue
         changed.append(src_abs)

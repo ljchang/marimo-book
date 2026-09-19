@@ -540,6 +540,43 @@ SectionEntry.model_rebuild()
 # --- top-level Book model ----------------------------------------------------
 
 
+class Grader(BaseModel):
+    """The grader this book's assignments are published on.
+
+    With this section, a TOC entry may name an assignment by its slug
+    (``assignment: glm``) and the build fetches the notebook the grader
+    currently publishes at ``{server}/a/{course}/{term}/{slug}/student.py``
+    instead of a copy committed into the book. ``sync-deps`` also writes these
+    three values into every chapter's PEP 723 block as ``[tool.grader]``, so a
+    notebook opened in molab or locally knows its course without hardcoding.
+    A new term is a one-line change here.
+    """
+
+    server: str
+    course: str
+    term: str
+
+    @field_validator("server")
+    @classmethod
+    def _server_is_http(cls, v: str) -> str:
+        v = v.strip().rstrip("/")
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("grader.server must be an http(s) URL")
+        return v
+
+    @field_validator("course", "term")
+    @classmethod
+    def _plain_segment(cls, v: str) -> str:
+        v = v.strip()
+        if not v or "/" in v or " " in v:
+            raise ValueError("grader.course and grader.term must be single URL path segments")
+        return v
+
+    def tool_table(self) -> dict[str, str]:
+        """What ``sync-deps`` writes under ``[tool.grader]``."""
+        return {"server": self.server, "course": self.course, "term": self.term}
+
+
 class Book(BaseModel):
     """Validated ``book.yml``.
 
@@ -663,6 +700,9 @@ class Book(BaseModel):
     # In-browser workbench (marimo's editor + local copies); see ``Workbench``
     # and the ``views`` field on ``defaults`` / TOC entries.
     workbench: Workbench = Field(default_factory=Workbench)
+    # The grader assignments are published on; enables ``assignment: <slug>``
+    # on TOC entries and ``[tool.grader]`` in chapter blocks. See ``Grader``.
+    grader: Grader | None = None
 
     # TOC
     toc: list[TocEntry]

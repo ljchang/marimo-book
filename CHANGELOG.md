@@ -5,6 +5,28 @@ All notable changes to `marimo-book` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Assignments straight from the grader.** A book-level `grader:` section
+  (`server`, `course`, `term`) lets a TOC entry name its assignment by slug —
+  `assignment: glm` — and the build fetches the notebook the grader currently
+  publishes (`{server}/a/{course}/{term}/{slug}/student.py`) into
+  `.marimo_book_cache/assignments/` instead of a copy committed into the book.
+  The grader is the single source of truth: a republish reaches the site on
+  the next build with nothing to commit, and a new term is one line in
+  `book.yml`. When the grader cannot be reached the build uses the cached copy
+  and `check` says so; with no copy it fails rather than publish a page whose
+  assignment is missing. A committed path still works as before. The
+  assignment card gains an *Open in molab* link to the grader's molab alias,
+  so the same published notebook opens in molab, in the drawer, or locally.
+- **`sync-deps` writes `[tool.grader]` into every chapter's block** from the
+  same `grader:` section, so a notebook opened in molab or on a laptop knows
+  which grader, course and term it belongs to without any of that hardcoded
+  in the notebook (`write_pep723_block(tool=...)`; idempotent; other
+  `[tool.*]` tables are left alone).
+
 ## [0.1.44] — 2026-09-17
 
 ### Fixed

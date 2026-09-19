@@ -37,6 +37,7 @@ from pathlib import Path
 import yaml
 
 from .api_docs import count_pages, resolve_search_paths, stage_api_docs
+from .assignments import resolve_assignment
 from .blog import (
     author_id,
     build_author_roster,
@@ -1696,19 +1697,20 @@ def _finalize_page(
         )
         tail = ""
         if entry.assignment is not None:
-            asg_abs = (book_dir / entry.assignment).resolve()
+            asg = resolve_assignment(entry, book, book_dir)
             asg_url, asg_hash = stage_workbench_notebook(
-                asg_abs,
-                Path(entry.assignment),
+                asg.src,
+                asg.rel,
                 docs_dir,
                 book.dependencies,
                 requires_python=requires_python,
             )
             info = read_assignment_info(
-                asg_abs.read_text(encoding="utf-8"),
-                file=Path(entry.assignment),
+                asg.src.read_text(encoding="utf-8"),
+                file=asg.rel,
                 nb_url=asg_url,
                 published_hash=asg_hash,
+                molab_url=asg.molab_url or "",
             )
             tail = (
                 "\n\n"

@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .assignments import AssignmentError, AssignmentNotCachedError, resolve_assignment
 from .config import Book, FileEntry, SectionEntry
 from .preprocessor import _doc_relpath_for, _iter_file_entries, _render_body_signature
 from .rendered_store import RenderedStore
@@ -347,31 +348,37 @@ def _check_workbench(
             report.errors.append(
                 f"{entry.file}: views other than [read] only apply to marimo notebooks"
             )
+        asg_src: Path | None = None
         if entry.assignment is not None:
-            asg = book_dir / entry.assignment
-            if not asg.exists():
-                report.errors.append(
-                    f"{entry.file}: assignment references a missing file ({entry.assignment})"
-                )
-            elif asg.suffix != ".py":
-                report.errors.append(
-                    f"{entry.file}: assignment must be a marimo notebook ({entry.assignment})"
-                )
-            elif "# /// script" not in asg.read_text(encoding="utf-8"):
-                report.warnings.append(
-                    f"{entry.file}: assignment {entry.assignment} has no PEP 723 block — "
-                    "a grader-published student notebook carries its identity there"
-                )
+            try:
+                # No network in check: a slug the build has not fetched yet is
+                # the build's job, not an error; a slug with no grader: is.
+                resolved = resolve_assignment(entry, book, book_dir, fetch=False)
+            except AssignmentNotCachedError:
+                pass
+            except AssignmentError as e:
+                report.errors.append(f"{entry.file}: {e}")
+            else:
+                asg_src = resolved.src
+                report.warnings.extend(f"{entry.file}: {note}" for note in resolved.notes)
+                if asg_src.suffix != ".py":
+                    report.errors.append(
+                        f"{entry.file}: assignment must be a marimo notebook ({entry.assignment})"
+                    )
+                    asg_src = None
+                elif "# /// script" not in asg_src.read_text(encoding="utf-8"):
+                    report.warnings.append(
+                        f"{entry.file}: assignment {entry.assignment} has no PEP 723 block — "
+                        "a grader-published student notebook carries its identity there"
+                    )
         # An assignment boots in the drawer through the same
         # `stage_workbench_notebook` call with the same `book.dependencies`, so
         # its block reaches the browser exactly as a chapter's does — and a
         # chapter with `views: [read]` can still carry one.
-        if entry.assignment is not None:
-            asg = book_dir / entry.assignment
-            if asg.exists() and asg.suffix == ".py":
-                for requirement in _staged_requirements(asg, book):
-                    if _is_pinned(requirement):
-                        pinned.setdefault(requirement, []).append(str(entry.assignment))
+        if asg_src is not None:
+            for requirement in _staged_requirements(asg_src, book) or []:
+                if _is_pinned(requirement):
+                    pinned.setdefault(requirement, []).append(str(entry.assignment))
 
         if not entry.uses_workbench(book.defaults):
             continue

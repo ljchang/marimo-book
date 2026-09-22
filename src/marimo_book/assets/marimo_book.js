@@ -330,6 +330,88 @@
   // that only replaced a working widget with an empty div — so the runtime
   // is left alone. Our build-time mounts are simply replaced when the
   // kernel repaints the island.
+  //
+  // That replacement is visible: the baked widget vanishes and the island
+  // collapses until the live element has fetched its module from the kernel
+  // and drawn (250-900 ms per widget on MR_Physics, measured 2026-09-22), so
+  // readers see every widget load, disappear, and come back. holdBakedFrames
+  // covers the gap without touching the live element: when the baked mount
+  // is replaced, the last one is put back as an inert overlay on top and the
+  // island keeps its height; both go as soon as the live widget has drawn.
+  const HOLD_TIMEOUT_MS = 8000;
+
+  function liveWidgetDrawn(aw) {
+    const sr = aw.shadowRoot;
+    if (!sr || aw.getBoundingClientRect().height <= 20) return false;
+    for (const el of sr.querySelectorAll("*")) {
+      if (el.tagName !== "STYLE" && el.tagName !== "LINK" && el.tagName !== "SCRIPT") return true;
+    }
+    return false;
+  }
+
+  function afterPaint(cb) {
+    // Two frames so the live widget's first draw is on screen before the
+    // overlay lifts; the timer covers background tabs, where frames pause.
+    let done = false;
+    const go = () => { if (!done) { done = true; cb(); } };
+    requestAnimationFrame(() => requestAnimationFrame(go));
+    setTimeout(go, 250);
+  }
+
+  function holdBakedFrames(root) {
+    const scope = root || document;
+    const islands = scope.querySelectorAll("marimo-island:not([data-mb-hold])");
+    for (const island of islands) {
+      if (!island.querySelector(".marimo-book-anywidget")) continue;
+      island.setAttribute("data-mb-hold", "");
+      let baked = null;
+      let height = 0;
+      let holding = false;
+      const remember = () => {
+        // The latest *hydrated* mount: payload materialization can swap in
+        // fresh build-time markup that is hydrated again before the kernel runs.
+        const m = island.querySelector(".marimo-book-anywidget[data-mb-hydrated]");
+        if (m) {
+          baked = m;
+          height = island.getBoundingClientRect().height;
+        }
+      };
+      remember();
+      const observer = new MutationObserver(() => {
+        if (holding) return;
+        const live = island.querySelector("marimo-anywidget");
+        if (!live || !baked || baked.isConnected) {
+          remember();
+          return;
+        }
+        holding = true;
+        observer.disconnect();
+        const prevPosition = island.style.position;
+        const prevMinHeight = island.style.minHeight;
+        if (getComputedStyle(island).position === "static") island.style.position = "relative";
+        if (height > 0) island.style.minHeight = height + "px";
+        const overlay = document.createElement("div");
+        overlay.className = "marimo-book-held-frame";
+        overlay.setAttribute("aria-hidden", "true");
+        overlay.appendChild(baked);
+        island.appendChild(overlay);
+        const started = performance.now();
+        const release = () => {
+          overlay.remove();
+          island.style.position = prevPosition;
+          island.style.minHeight = prevMinHeight;
+        };
+        const check = () => {
+          if (!live.isConnected) return release();
+          if (liveWidgetDrawn(live)) return afterPaint(release);
+          if (performance.now() - started > HOLD_TIMEOUT_MS) return release();
+          setTimeout(check, 30);
+        };
+        check();
+      });
+      observer.observe(island, { childList: true, subtree: true });
+    }
+  }
 
   // ---- Static reactivity (precompute) ------------------------------------
   //
@@ -1220,6 +1302,7 @@
   function bootAll(root) {
     const scope = root || document;
     hydrateAll(scope);
+    holdBakedFrames(scope);
     initPrecomputeOnce(scope);
     mountHeaderButtons(scope);
     mountHeaderRepoLink(scope);

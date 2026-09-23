@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.47] — 2026-09-23
+
+### Fixed
+
+- **WASM widgets no longer sit empty while the kernel starts.** marimo's
+  islands runtime captures an island's DOM after the shim has hydrated it and,
+  when the kernel starts, re-inserts that serialized copy. The copy kept
+  `data-mb-hydrated="1"`, so the shim skipped it, but canvases don't survive
+  serialization: every widget on DartBrains' MR_Physics showed as an empty box
+  from kernel start (~7 s) until the live widget drew, often 10 s or more.
+  Hydration is now tracked in a `WeakSet`, copies marimo inserts are rendered
+  again, and a widget's cleanup runs once its mount leaves the page so old
+  render loops stop drawing into detached canvases. (#135)
+
 ## [0.1.46] — 2026-09-22
 
 ### Fixed

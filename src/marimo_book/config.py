@@ -192,8 +192,44 @@ class Images(BaseModel):
 class Analytics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["plausible", "google", "none"] = "none"
+    provider: Literal["plausible", "google", "umami", "none"] = "none"
     property: str | None = None
+
+    # Umami tracker configuration. ``script_url`` is the complete URL of the
+    # tracker script (for example ``https://analytics.example.com/script.js``).
+    # ``domain`` is a convenience for self-hosted instances: when
+    # ``script_url`` is omitted, ``/script.js`` is appended to it.
+    website_id: str | None = None
+    script_url: str | None = None
+    domain: str | None = None
+    host_url: str | None = None
+    domains: list[str] = Field(default_factory=list)
+    tag: str | None = None
+    auto_track: bool = True
+    auto_pageview: bool = True
+    performance: bool = False
+    exclude_search: bool = False
+    exclude_hash: bool = False
+    do_not_track: bool = False
+
+    @field_validator("domains", mode="before")
+    @classmethod
+    def _coerce_domains(cls, value: Any) -> Any:
+        """Accept Umami's comma-delimited form as well as a YAML list."""
+        if isinstance(value, str):
+            return [domain.strip() for domain in value.split(",") if domain.strip()]
+        return value
+
+    @model_validator(mode="after")
+    def _require_umami_configuration(self) -> Analytics:
+        if self.provider == "umami":
+            if not (self.website_id or self.property):
+                raise ValueError("analytics.provider is umami but no website_id was configured")
+            if not (self.script_url or self.domain):
+                raise ValueError(
+                    "analytics.provider is umami but no script_url or domain was configured"
+                )
+        return self
 
 
 class ApiDocs(BaseModel):

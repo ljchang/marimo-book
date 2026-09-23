@@ -60,7 +60,7 @@ images:
 
 # Analytics
 analytics:
-  provider: plausible   # plausible | google | none
+  provider: plausible   # plausible | google | umami | none
   property: yoursite.org
 
 # External-link check (opt-in, requires marimo-book[linkcheck])
@@ -177,20 +177,46 @@ override these defaults. See [Authoring → Anywidgets](widgets.md).
 
 ### Analytics
 
-Opt-in Plausible or Google Analytics. Injected via Material for MkDocs'
-`extra.analytics` block; Material auto-injects the gtag.js / Plausible
-script on every page.
+Opt-in Plausible, Google Analytics, or Umami. Plausible and Google are
+injected through Material for MkDocs' `extra.analytics` integration. Umami
+uses the same integration point with a generated provider partial and emits
+Umami's official tracking script on every page.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `analytics.provider` | `plausible` \| `google` \| `none` | `none` | Off by default. Both providers live in the Material analytics integration |
-| `analytics.property` | string | `None` | GA4 Measurement ID (`G-XXXXXXXXXX`) for Google, or domain (`yoursite.org`) for Plausible. Universal Analytics IDs (`UA-...`) are not supported — Google retired UA on 2023-07-01 |
+| `analytics.provider` | `plausible` \| `google` \| `umami` \| `none` | `none` | Off by default |
+| `analytics.property` | string | `None` | GA4 Measurement ID (`G-XXXXXXXXXX`) for Google, or domain (`yoursite.org`) for Plausible. For Umami it is accepted as an alternative to `website_id` |
+| `analytics.website_id` | string | `None` | Umami website ID from the tracking snippet; required for Umami unless `property` is used |
+| `analytics.script_url` | string | `None` | Complete Umami tracker URL, usually `https://your-umami.example.com/script.js`; required for Umami unless `domain` is used |
+| `analytics.domain` | string | `None` | Umami server origin convenience field; `script.js` is appended when `script_url` is omitted |
+| `analytics.host_url` | string | `None` | Optional Umami `data-host-url` override |
+| `analytics.domains` | list of strings | `[]` | Optional allowed hostnames, emitted as Umami's comma-delimited `data-domains` |
+| `analytics.tag` | string | `None` | Optional Umami tag |
+| `analytics.auto_track` / `auto_pageview` | bool | `true` / `true` | Disable automatic tracker initialization or pageview tracking |
+| `analytics.performance` | bool | `false` | Enable Umami Core Web Vitals collection |
+| `analytics.exclude_search` / `exclude_hash` / `do_not_track` | bool | `false` | Forward the corresponding Umami privacy and URL-filtering options |
 
 ```yaml
 analytics:
   provider: google
   property: G-XXXXXXXXXX
 ```
+
+For a self-hosted Umami instance:
+
+```yaml
+analytics:
+  provider: umami
+  domain: https://analytics.example.com
+  website_id: 94db1cb1-74f4-4a40-ad6c-962362670409
+  domains:
+    - docs.example.com
+  do_not_track: true
+```
+
+`script_url` can be used instead of `domain` when the tracker is served from
+a custom path. Umami automatically detects the book's client-side navigation,
+so no extra page-view hook is needed for Material's instant navigation.
 
 ### Static reactivity (precompute)
 
@@ -360,4 +386,3 @@ alias as well, so the same notebook opens in molab, in the drawer, or on a
 laptop. `sync-deps` writes the three values into every chapter's PEP 723
 block as `[tool.grader]`, which is how a notebook opened outside the site
 knows which course it belongs to.
-

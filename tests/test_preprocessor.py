@@ -71,6 +71,61 @@ def test_include_changelog_off_by_default(tmp_path: Path) -> None:
     assert "Changelog" not in nav_titles
 
 
+def test_umami_partial_is_staged(tmp_path: Path) -> None:
+    _minimal_book(tmp_path)
+    book = Book.model_validate(
+        {
+            "title": "Umami book",
+            "analytics": {
+                "provider": "umami",
+                "domain": "https://analytics.example.com",
+                "website_id": "website-id",
+            },
+            "toc": [{"file": "content/intro.md"}],
+        }
+    )
+    out_dir = tmp_path / "_site_src"
+
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir)
+
+    partial = out_dir / "docs/overrides/partials/integrations/analytics/umami.html"
+    assert partial.is_file()
+    assert 'data-website-id="{{ analytics.website_id }}"' in partial.read_text()
+    mkdocs = yaml.safe_load((out_dir / "mkdocs.yml").read_text())
+    assert mkdocs["theme"]["custom_dir"] == "docs/overrides"
+
+
+def test_umami_partial_renders_tracker_script(tmp_path: Path) -> None:
+    _minimal_book(tmp_path)
+    book = Book.model_validate(
+        {
+            "title": "Umami book",
+            "analytics": {
+                "provider": "umami",
+                "script_url": "https://analytics.example.com/custom.js",
+                "website_id": "website-id",
+                "domains": ["docs.example.com", "www.docs.example.com"],
+                "do_not_track": True,
+            },
+            "toc": [{"file": "content/intro.md"}],
+        }
+    )
+    out_dir = tmp_path / "_site_src"
+    site_dir = tmp_path / "_site"
+
+    Preprocessor(book, book_dir=tmp_path).build(out_dir=out_dir, site_dir=site_dir)
+
+    from mkdocs.commands.build import build as mkdocs_build
+    from mkdocs.config import load_config
+
+    mkdocs_build(load_config(config_file=str(out_dir / "mkdocs.yml")))
+    html = (site_dir / "index.html").read_text()
+    assert 'src="https://analytics.example.com/custom.js"' in html
+    assert 'data-website-id="website-id"' in html
+    assert 'data-domains="docs.example.com,www.docs.example.com"' in html
+    assert 'data-do-not-track="true"' in html
+
+
 def test_include_changelog_finds_changelog_in_parent_dir(tmp_path: Path) -> None:
     """Common layout: book.yml in repo/docs/, CHANGELOG.md at repo root."""
     book_dir = tmp_path / "docs"

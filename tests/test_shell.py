@@ -61,3 +61,41 @@ def test_zensical_shell_emits_relative_site_dir_and_classic_variant(tmp_path) ->
     assert cfg["docs_dir"] == "docs"
     assert cfg["theme"]["name"] == "material"
     assert cfg["theme"]["variant"] == "classic"
+
+
+def test_umami_analytics_emits_custom_partial_config(tmp_path) -> None:
+    from marimo_book.shell import _build_config
+
+    cfg = _build_config(
+        _book(
+            analytics={
+                "provider": "umami",
+                "domain": "https://analytics.example.com/",
+                "website_id": "website-id",
+                "domains": ["docs.example.com"],
+                "performance": True,
+            }
+        ),
+        docs_dir=Path("docs"),
+        site_dir=tmp_path / "_site",
+        nav=[],
+        extra_css=[],
+        extra_javascript=[],
+    )
+
+    assert cfg["theme"]["custom_dir"] == "docs/overrides"
+    assert cfg["extra"]["analytics"] == {
+        "provider": "umami",
+        "property": None,
+        "website_id": "website-id",
+        "script_url": "https://analytics.example.com/script.js",
+        "host_url": None,
+        "domains": ["docs.example.com"],
+        "tag": None,
+        "auto_track": True,
+        "auto_pageview": True,
+        "performance": True,
+        "exclude_search": False,
+        "exclude_hash": False,
+        "do_not_track": False,
+    }

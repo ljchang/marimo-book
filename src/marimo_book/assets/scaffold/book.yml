@@ -42,6 +42,13 @@ dependencies:
 #   MyWidget:
 #     some_param: 42
 
+# Optional analytics. Umami accepts a self-hosted server domain or a complete
+# tracker URL plus the website ID copied from Umami's tracking snippet.
+# analytics:
+#   provider: umami
+#   domain: https://analytics.example.com
+#   website_id: your-website-id
+
 toc:
   - file: content/intro.md
   - file: content/example.py

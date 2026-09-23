@@ -239,3 +239,43 @@ def test_shell_defaults_to_mkdocs_and_accepts_zensical() -> None:
     assert Book.model_validate({**base, "shell": "zensical"}).shell == "zensical"
     with pytest.raises(ValidationError):
         Book.model_validate({**base, "shell": "hugo"})
+
+
+def test_umami_analytics_round_trip() -> None:
+    book = Book.model_validate(
+        {
+            "title": "T",
+            "toc": [],
+            "analytics": {
+                "provider": "umami",
+                "domain": "https://analytics.example.com/",
+                "website_id": "website-id",
+                "host_url": "https://stats.example.com",
+                "domains": "docs.example.com, www.docs.example.com",
+                "tag": "docs",
+                "auto_pageview": False,
+                "performance": True,
+                "exclude_search": True,
+                "exclude_hash": True,
+                "do_not_track": True,
+            },
+        }
+    )
+    assert book.analytics.provider == "umami"
+    assert book.analytics.website_id == "website-id"
+    assert book.analytics.domain == "https://analytics.example.com/"
+    assert book.analytics.domains == ["docs.example.com", "www.docs.example.com"]
+    assert book.analytics.auto_pageview is False
+    assert book.analytics.performance is True
+
+
+@pytest.mark.parametrize(
+    "analytics, message",
+    [
+        ({"provider": "umami", "website_id": "id"}, "script_url or domain"),
+        ({"provider": "umami", "domain": "https://analytics.example.com"}, "website_id"),
+    ],
+)
+def test_umami_requires_tracker_url_and_website_id(analytics: dict, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        Book.model_validate({"title": "T", "toc": [], "analytics": analytics})

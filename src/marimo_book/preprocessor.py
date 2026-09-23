@@ -1478,6 +1478,17 @@ class Preprocessor:
             docs_dir / "javascripts" / "marimo_book.js",
         )
 
+        # Material and Zensical resolve custom analytics providers from
+        # ``theme.custom_dir/partials/integrations/analytics/<provider>.html``.
+        # Keep the Umami partial generated so books do not need to maintain a
+        # theme override just to configure their analytics provider.
+        if self.book.analytics.provider == "umami":
+            shutil.copytree(
+                assets_root / "overrides",
+                docs_dir / "overrides",
+                dirs_exist_ok=True,
+            )
+
         # Optional: Jupyter-Book-style sidebar logo. Stage the stylesheet
         # only when opted in; shell.py picks it up via extra_css.
         if self.book.logo_placement == "sidebar":

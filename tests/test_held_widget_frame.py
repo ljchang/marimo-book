@@ -53,7 +53,11 @@ def test_serialized_copies_of_hydrated_mounts_are_rendered_again():
 def test_removed_widgets_are_cleaned_up():
     # Otherwise each replaced mount's render loop keeps drawing into a
     # detached canvas for the life of the page.
-    assert "__marimoBookCleanup" in _function("watchMountCopies")
+    watch = _function("watchMountCopies")
+    assert "__marimoBookCleanup" in watch
+    # ...but not before holdBakedFrames' observer (created later, notified
+    # later) has had the chance to move the mount into its overlay.
+    assert "setTimeout(" in watch and watch.index("setTimeout(") < watch.index("cleanup()")
     # A mount replaced before render() resolved is cleaned up right away.
     assert "else cleanup();" in _function("hydrateMount")
 

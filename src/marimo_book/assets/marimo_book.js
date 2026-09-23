@@ -326,8 +326,10 @@
   // marimo-island-source-changed, so watch for them directly. Mounts that
   // leave the page for good get their widget's cleanup run, which stops
   // render loops that would otherwise keep drawing into detached canvases.
-  // (holdBakedFrames moves a mount into its overlay within one task, so the
-  // mount is connected again by the time this callback sees the removal.)
+  // Observers are notified in creation order and this one is created first,
+  // so a removed mount may not have been moved into holdBakedFrames' overlay
+  // yet when this callback runs; decide on cleanup in a later task, after
+  // every observer has seen the batch.
   function watchMountCopies() {
     const SEL = ".marimo-book-anywidget";
     const collect = (nodes, out) => {
@@ -344,13 +346,17 @@
         collect(r.addedNodes, added);
         collect(r.removedNodes, removed);
       }
-      for (const el of removed) {
-        if (el.isConnected || !hydratedMounts.has(el)) continue;
-        const cleanup = el.__marimoBookCleanup;
-        el.__marimoBookCleanup = null;
-        if (typeof cleanup === "function") {
-          try { cleanup(); } catch (_) {}
-        }
+      if (removed.length) {
+        setTimeout(() => {
+          for (const el of removed) {
+            if (el.isConnected || !hydratedMounts.has(el)) continue;
+            const cleanup = el.__marimoBookCleanup;
+            el.__marimoBookCleanup = null;
+            if (typeof cleanup === "function") {
+              try { cleanup(); } catch (_) {}
+            }
+          }
+        }, 0);
       }
       for (const el of added) {
         if (el.isConnected && !hydratedMounts.has(el)) {

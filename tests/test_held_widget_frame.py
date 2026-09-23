@@ -34,7 +34,32 @@ def test_boot_holds_frames_after_hydrating():
 def test_it_holds_the_latest_hydrated_mount_not_the_first():
     # Payload materialization swaps in fresh build-time markup that is
     # hydrated again; holding the first mount would put back a stale node.
-    assert ".marimo-book-anywidget[data-mb-hydrated]" in _function("holdBakedFrames")
+    assert "hydratedMounts.has(el)" in _function("holdBakedFrames")
+
+
+def test_serialized_copies_of_hydrated_mounts_are_rendered_again():
+    # At kernel start marimo re-inserts a serialized copy of each hydrated
+    # island. The copy keeps data-mb-hydrated but has blank canvases and no
+    # render loop, so the attribute can't gate hydration: every MR_Physics
+    # widget sat empty from ~7 s until the live widget drew.
+    hydrate = _function("hydrateAll")
+    assert "hydratedMounts.has(el)" in hydrate
+    assert ":not([data-mb-hydrated])" not in hydrate
+    watch = _function("watchMountCopies")
+    assert "new MutationObserver" in watch and "hydrateAll(" in watch
+    assert "watchMountCopies();" in JS
+
+
+def test_removed_widgets_are_cleaned_up():
+    # Otherwise each replaced mount's render loop keeps drawing into a
+    # detached canvas for the life of the page.
+    watch = _function("watchMountCopies")
+    assert "__marimoBookCleanup" in watch
+    # ...but not before holdBakedFrames' observer (created later, notified
+    # later) has had the chance to move the mount into its overlay.
+    assert "setTimeout(" in watch and watch.index("setTimeout(") < watch.index("cleanup()")
+    # A mount replaced before render() resolved is cleaned up right away.
+    assert "else cleanup();" in _function("hydrateMount")
 
 
 def test_the_live_widget_is_never_touched():

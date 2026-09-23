@@ -294,21 +294,72 @@
     try {
       const cleanup = widget.render({ model, el });
       if (typeof cleanup === "function") {
-        el.__marimoBookCleanup = cleanup;
+        // The mount can be replaced while its module and buffers load; its
+        // removal was seen before there was anything to clean up.
+        if (el.isConnected) el.__marimoBookCleanup = cleanup;
+        else cleanup();
       }
     } catch (err) {
       console.error("[marimo-book] widget render threw", err, el);
     }
   }
 
+  // Mounts this page has rendered into. The data-mb-hydrated attribute alone
+  // can't say that: on WASM pages marimo's islands runtime captures an
+  // island's DOM after we hydrate it and, when the kernel starts, re-inserts
+  // that serialized copy -- attribute included, but with blank canvases and
+  // no render loop behind them. Readers saw every widget go empty for the
+  // seconds between kernel start and the live widget's first paint.
+  const hydratedMounts = new WeakSet();
+
   function hydrateAll(root) {
     const scope = root || document;
-    const mounts = scope.querySelectorAll(".marimo-book-anywidget:not([data-mb-hydrated])");
-    mounts.forEach((el) => {
+    scope.querySelectorAll(".marimo-book-anywidget").forEach((el) => {
+      if (hydratedMounts.has(el)) return;
+      hydratedMounts.add(el);
       el.setAttribute("data-mb-hydrated", "1");
       hydrateMount(el);
     });
   }
+
+  // marimo re-inserts those copies without dispatching
+  // marimo-island-source-changed, so watch for them directly. Mounts that
+  // leave the page for good get their widget's cleanup run, which stops
+  // render loops that would otherwise keep drawing into detached canvases.
+  // (holdBakedFrames moves a mount into its overlay within one task, so the
+  // mount is connected again by the time this callback sees the removal.)
+  function watchMountCopies() {
+    const SEL = ".marimo-book-anywidget";
+    const collect = (nodes, out) => {
+      for (const n of nodes) {
+        if (!(n instanceof Element)) continue;
+        if (n.matches(SEL)) out.push(n);
+        else if (n.firstElementChild) out.push(...n.querySelectorAll(SEL));
+      }
+    };
+    new MutationObserver((records) => {
+      const added = [];
+      const removed = [];
+      for (const r of records) {
+        collect(r.addedNodes, added);
+        collect(r.removedNodes, removed);
+      }
+      for (const el of removed) {
+        if (el.isConnected || !hydratedMounts.has(el)) continue;
+        const cleanup = el.__marimoBookCleanup;
+        el.__marimoBookCleanup = null;
+        if (typeof cleanup === "function") {
+          try { cleanup(); } catch (_) {}
+        }
+      }
+      for (const el of added) {
+        if (el.isConnected && !hydratedMounts.has(el)) {
+          hydrateAll(el.parentElement || document);
+        }
+      }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  watchMountCopies();
 
   // ---- WASM mode and runtime-emitted anywidgets -----------------------------
   //
@@ -370,7 +421,9 @@
       const remember = () => {
         // The latest *hydrated* mount: payload materialization can swap in
         // fresh build-time markup that is hydrated again before the kernel runs.
-        const m = island.querySelector(".marimo-book-anywidget[data-mb-hydrated]");
+        const m = [...island.querySelectorAll(".marimo-book-anywidget")].find(
+          (el) => hydratedMounts.has(el)
+        );
         if (m) {
           baked = m;
           height = island.getBoundingClientRect().height;

@@ -782,3 +782,13 @@ marimo-island[data-cell-id]:first-of-type marimo-cell-output svg.animate-spin {
   font-size: 0.82rem;
   color: var(--md-default-fg-color--lighter);
 }
+
+/* The baked widget held over a WASM island while the live one mounts
+   (holdBakedFrames in marimo_book.js). Inert: it only covers the gap. */
+.marimo-book-held-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: var(--md-default-bg-color, transparent);
+}

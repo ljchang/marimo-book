@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.46] — 2026-09-22
+
+### Fixed
+
+- **Widgets no longer vanish when a WASM page's kernel comes up.** The shim
+  paints each anywidget from its baked state at load; when Pyodide is ready,
+  marimo's islands runtime repaints the island and the baked mount is replaced
+  by a live `<marimo-anywidget>` that stays empty until its module arrives from
+  the kernel (250–900 ms per widget on DartBrains' MR_Physics), so readers saw
+  every widget load, disappear, and come back while the text below jumped.
+  `holdBakedFrames` puts the replaced mount back as an inert overlay and keeps
+  the island's height until the live widget has drawn (two frames later; an
+  8 s cap), without touching the live element. (#133)
+
 ## [0.1.45] — 2026-09-19
 
 ### Added

@@ -119,6 +119,10 @@ def _build_config(
     cfg.setdefault("extra", {})["generator"] = False
 
     cfg["theme"] = _theme_block(book)
+    if book.analytics.provider == "umami":
+        # Material and Zensical choose the analytics partial from the
+        # provider name. The preprocessor stages this override under docs/.
+        cfg["theme"]["custom_dir"] = str(Path(docs_dir) / "overrides")
     base_css = ["stylesheets/extra.css"]
     if book.logo_placement == "sidebar":
         base_css.append("stylesheets/logo_sidebar.css")
@@ -228,12 +232,34 @@ def _build_config(
     cfg["plugins"] = plugins
 
     # Analytics
-    if book.analytics.provider != "none" and book.analytics.property:
+    if book.analytics.provider != "none" and (
+        book.analytics.property or book.analytics.provider == "umami"
+    ):
         cfg.setdefault("extra", {})
-        cfg["extra"]["analytics"] = {
+        analytics: dict[str, Any] = {
             "provider": book.analytics.provider,
             "property": book.analytics.property,
         }
+        if book.analytics.provider == "umami":
+            script_url = book.analytics.script_url
+            if not script_url and book.analytics.domain:
+                script_url = book.analytics.domain.rstrip("/") + "/script.js"
+            analytics.update(
+                {
+                    "website_id": book.analytics.website_id or book.analytics.property,
+                    "script_url": script_url,
+                    "host_url": book.analytics.host_url,
+                    "domains": book.analytics.domains,
+                    "tag": book.analytics.tag,
+                    "auto_track": book.analytics.auto_track,
+                    "auto_pageview": book.analytics.auto_pageview,
+                    "performance": book.analytics.performance,
+                    "exclude_search": book.analytics.exclude_search,
+                    "exclude_hash": book.analytics.exclude_hash,
+                    "do_not_track": book.analytics.do_not_track,
+                }
+            )
+        cfg["extra"]["analytics"] = analytics
 
     cfg["nav"] = nav
     return cfg

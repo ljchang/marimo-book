@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Umami analytics provider.** Books can configure a self-hosted Umami
+  tracker with its website ID, tracker URL or server domain, allowed domains,
+  tags, performance collection, and URL/privacy options.
+
 ## [0.1.46] — 2026-09-22
 
 ### Fixed

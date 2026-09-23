@@ -1,0 +1,15 @@
+{% set analytics = config.extra.analytics %}
+<script
+  defer
+  src="{{ analytics.script_url }}"
+  data-website-id="{{ analytics.website_id }}"
+{% if analytics.host_url %}  data-host-url="{{ analytics.host_url }}"
+{% endif %}{% if analytics.domains %}  data-domains="{{ analytics.domains | join(',') }}"
+{% endif %}{% if analytics.tag %}  data-tag="{{ analytics.tag }}"
+{% endif %}{% if not analytics.auto_track %}  data-auto-track="false"
+{% endif %}{% if not analytics.auto_pageview %}  data-auto-pageview="false"
+{% endif %}{% if analytics.performance %}  data-performance="true"
+{% endif %}{% if analytics.exclude_search %}  data-exclude-search="true"
+{% endif %}{% if analytics.exclude_hash %}  data-exclude-hash="true"
+{% endif %}{% if analytics.do_not_track %}  data-do-not-track="true"
+{% endif %}></script>

@@ -328,29 +328,53 @@ every other cell would raise ``NameError`` (verified in the browser).
 BOOTSTRAP_CELL_ID = "marimo-book-micropip-bootstrap"
 """``cellId`` of the payload-only bootstrap cell (no ``<marimo-island>`` anchor)."""
 
+BOOTSTRAP_INSTALL_ATTEMPTS = 3
+"""How many times the bootstrap tries ``micropip.install`` before giving up.
+
+The install fetches wheels from PyPI on every page load, so one dropped
+request used to leave the page with ``ModuleNotFoundError`` in every cell
+that imports the package until the reader refreshed. Retries back off 1 s,
+then 2 s.
+"""
+
 
 def micropip_bootstrap_code(packages: Sequence[str]) -> str:
     """Cell body that installs ``packages`` via micropip and defines the sentinel.
 
     Runs only in the browser (payload cells are never executed at build
-    time). The sentinel is bound **whatever happens** in the install: every
-    user cell reads it, so an unbound sentinel would make marimo cancel the
-    whole page — and this cell has no island of its own to show a
-    traceback in. Failures are printed instead (they land in the browser
-    console via marimo's stderr forwarding) and cells then fail
-    individually at their own ``import``, which *is* visible. Pyodide's
-    micropip skips anything already importable; the list is pre-filtered
-    against Pyodide's bundled set by :func:`wasm_install_packages`. The
-    ``await`` makes marimo's islands runtime wrap the cell as ``async def``.
+    time). The install is retried (:data:`BOOTSTRAP_INSTALL_ATTEMPTS`) so a
+    transient network failure doesn't break the page. The sentinel is bound
+    **whatever happens** in the install: every user cell reads it, so an
+    unbound sentinel would make marimo cancel the whole page — and this cell
+    has no island of its own to show a traceback in. A final failure is
+    written to stderr instead, and cells then fail individually at their own
+    ``import``, which *is* visible. Pyodide's micropip skips anything
+    already importable, so a retry only fetches what is still missing; the
+    list is pre-filtered against Pyodide's bundled set by
+    :func:`wasm_install_packages`. The ``await`` makes marimo's islands
+    runtime wrap the cell as ``async def``.
     """
     return (
         "try:\n"
         "    import micropip\n"
-        f"    await micropip.install({list(packages)!r})\n"
         "except ImportError:\n"
-        "    pass\n"
-        "except Exception as _exc:\n"
-        "    print(f'marimo-book: micropip install failed: {_exc!r}')\n"
+        "    micropip = None\n"
+        "if micropip is not None:\n"
+        "    import asyncio as _asyncio\n"
+        "    import sys as _sys\n"
+        f"    for _attempt in range({BOOTSTRAP_INSTALL_ATTEMPTS}):\n"
+        "        try:\n"
+        f"            await micropip.install({list(packages)!r})\n"
+        "            break\n"
+        "        except Exception as _exc:\n"
+        f"            if _attempt == {BOOTSTRAP_INSTALL_ATTEMPTS - 1}:\n"
+        "                print(\n"
+        "                    f'marimo-book: micropip install failed after '\n"
+        "                    f'{_attempt + 1} attempts: {_exc!r}',\n"
+        "                    file=_sys.stderr,\n"
+        "                )\n"
+        "            else:\n"
+        "                await _asyncio.sleep(2**_attempt)\n"
         f"{BOOTSTRAP_SENTINEL} = True\n"
     )
 

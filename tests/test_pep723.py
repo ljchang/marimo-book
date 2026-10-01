@@ -8,7 +8,13 @@ Covers extraction (AST walk + stdlib filter), distribution mapping
 
 from __future__ import annotations
 
+import asyncio
+import sys
+import textwrap
+import types
+
 from marimo_book.transforms.pep723 import (
+    BOOTSTRAP_INSTALL_ATTEMPTS,
     derive_dependencies,
     extract_imports,
     has_pep723_block,
@@ -279,6 +285,79 @@ def test_bootstrap_code_installs_packages_and_always_binds_sentinel() -> None:
     # The sentinel assignment is at top level, after the try block.
     assert code.index("except Exception") < code.index("marimo_book_micropip_done = True")
     compile(code.replace("await ", ""), "<bootstrap>", "exec")
+
+
+def _run_bootstrap(monkeypatch, install) -> dict:
+    """Execute the bootstrap body as the islands runtime would (an async cell).
+
+    ``install`` stands in for ``micropip.install``; sleeps are skipped so the
+    backoff doesn't slow the suite. Returns the cell's namespace.
+    """
+    fake = types.ModuleType("micropip")
+    fake.install = install
+    monkeypatch.setitem(sys.modules, "micropip", fake)
+    sleeps: list[float] = []
+
+    async def no_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    body = textwrap.indent(micropip_bootstrap_code(["seaborn"]), "    ")
+    ns: dict = {}
+    exec(f"async def _cell():\n{body}    return locals()\n", ns)
+    out = asyncio.run(ns["_cell"]())
+    out["_sleeps"] = sleeps
+    return out
+
+
+def _flaky_install(failures: int):
+    calls: list[list[str]] = []
+
+    async def install(packages: list[str]) -> None:
+        calls.append(packages)
+        if len(calls) <= failures:
+            raise OSError("connection reset")
+
+    return install, calls
+
+
+def test_bootstrap_retries_a_transient_install_failure(monkeypatch, capsys) -> None:
+    """One dropped PyPI request used to break every importing cell until a refresh."""
+    install, calls = _flaky_install(failures=1)
+    ns = _run_bootstrap(monkeypatch, install)
+    assert calls == [["seaborn"], ["seaborn"]]
+    assert ns["_sleeps"] == [1]
+    assert ns["marimo_book_micropip_done"] is True
+    assert capsys.readouterr().err == ""
+
+
+def test_bootstrap_gives_up_after_the_last_attempt_and_still_binds_sentinel(
+    monkeypatch, capsys
+) -> None:
+    install, calls = _flaky_install(failures=BOOTSTRAP_INSTALL_ATTEMPTS)
+    ns = _run_bootstrap(monkeypatch, install)
+    assert len(calls) == BOOTSTRAP_INSTALL_ATTEMPTS
+    assert ns["_sleeps"] == [2**i for i in range(BOOTSTRAP_INSTALL_ATTEMPTS - 1)]
+    assert ns["marimo_book_micropip_done"] is True
+    err = capsys.readouterr().err
+    assert f"failed after {BOOTSTRAP_INSTALL_ATTEMPTS} attempts" in err
+    assert "connection reset" in err
+
+
+def test_bootstrap_installs_once_when_nothing_fails(monkeypatch) -> None:
+    install, calls = _flaky_install(failures=0)
+    ns = _run_bootstrap(monkeypatch, install)
+    assert calls == [["seaborn"]]
+    assert ns["_sleeps"] == []
+
+
+def test_bootstrap_without_micropip_still_binds_sentinel(monkeypatch) -> None:
+    # Outside Pyodide there is no micropip; the page must still run.
+    monkeypatch.setitem(sys.modules, "micropip", None)
+    body = textwrap.indent(micropip_bootstrap_code(["seaborn"]), "    ")
+    ns: dict = {}
+    exec(f"async def _cell():\n{body}    return locals()\n", ns)
+    assert asyncio.run(ns["_cell"]())["marimo_book_micropip_done"] is True
 
 
 def test_thread_sentinel_prefixes_assignment() -> None:

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **WASM tables and math are readable in dark mode.** marimo stripes island
+  tables with its Radix colour scales, which are scoped `.marimo .dark` and so
+  never pick up the `dark` class on `<body>`: odd rows stayed a near-white
+  `--lime-2` under the dark scheme's white text. Island markdown tables and
+  DataFrames now stripe with Material's tokens, matching static pages. Math
+  was near-black on every dark WASM page: marimo typesets it inside each
+  `<marimo-tex>` shadow root, whose own `.marimo` wrapper pins the light
+  foreground, out of reach of page CSS. The shim now adopts a one-rule
+  stylesheet into each root so math takes the colour of the text around it.
+
 ## [0.1.47] — 2026-09-23
 
 ### Fixed

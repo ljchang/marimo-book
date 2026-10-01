@@ -1086,6 +1086,49 @@
     });
   }
 
+  // --- Math color in islands -------------------------------------------------
+  //
+  // marimo typesets math into each <marimo-tex>'s shadow root, under a
+  // `.marimo` wrapper of its own. That wrapper pins `color-scheme: light` and
+  // resolves `--foreground` to the light value, and `.marimo:is(.dark *)` can't
+  // see the `dark` class on <body> across the shadow boundary, so math stays
+  // near-black on the dark scheme. No page stylesheet reaches in there, so
+  // adopt one rule into each root: the math takes the color of the text
+  // around it, in either scheme. Checking the root's sheet list (rather than
+  // marking the element) re-applies it if marimo ever reassigns that list.
+  let _texSheet = null;
+  function inheritTexColor(root) {
+    if (typeof CSSStyleSheet === "undefined" || !("replaceSync" in CSSStyleSheet.prototype)) return;
+    if (!_texSheet) {
+      _texSheet = new CSSStyleSheet();
+      _texSheet.replaceSync(":host .marimo { color: inherit; }");
+    }
+    const scope = root || document;
+    const hosts = scope.matches && scope.matches("marimo-tex")
+      ? [scope]
+      : scope.querySelectorAll("marimo-tex");
+    for (const el of hosts) {
+      const sr = el.shadowRoot;
+      if (!sr || sr.adoptedStyleSheets.includes(_texSheet)) continue;
+      sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, _texSheet];
+    }
+  }
+  // The shadow roots appear only once marimo's runtime defines <marimo-tex>,
+  // and islands re-render their output (new <marimo-tex> elements) as the
+  // kernel runs, so cover both.
+  function watchTex() {
+    if (typeof customElements === "undefined" || typeof MutationObserver === "undefined") return;
+    customElements.whenDefined("marimo-tex").then(() => inheritTexColor(document));
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (n instanceof Element) inheritTexColor(n);
+        }
+      }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  watchTex();
+
   // --- Release-download component ------------------------------------------
   //
   // Placeholders `<div data-mb-release-download data-repo data-app-name

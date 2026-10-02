@@ -414,6 +414,12 @@ def build_bootstrap_payload(
     skipped.
     """
     payload = dict(gen.render_payload())
+    # marimo >= 0.25 fills ``dependencies`` from the staged PEP 723 block
+    # (marimo-team/marimo#10832), but its installer strips version
+    # specifiers first (marimo-team/marimo#10870), so a pinned pre-release
+    # like ``nltools==0.6.0.dev2`` resolves to the newest stable release and
+    # fails before our bootstrap runs. The bootstrap cell is the one installer.
+    payload.pop("dependencies", None)
     outputs: dict[str, str] = {}
     if rewritten:
         soup = BeautifulSoup(body_html, "html.parser")

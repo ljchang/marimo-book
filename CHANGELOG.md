@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.48] — 2026-10-02
+
 ### Changed
 
 - **marimo 0.25 is now supported.** The dependency bound is widened from

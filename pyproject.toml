@@ -61,9 +61,10 @@ dependencies = [
     # `marimo._utils.scripts`, `marimo._pyodide.pyodide_constraints` in
     # transforms/pep723.py; `marimo._schemas.islands`, `marimo._templates`
     # in transforms/wasm.py — and shell out to `marimo export ipynb`;
-    # verified against 0.24.1 (tests + strict docs build + islands
-    # hydration in a browser). Bump after re-verifying.
-    "marimo>=0.24,<0.25",
+    # verified against 0.25.1 (tests + strict docs build + islands
+    # hydration, anywidgets and the workbench in a browser). Bump after
+    # re-verifying.
+    "marimo>=0.24,<0.26",
     # marimo declares nbformat as an optional extra; we always use
     # `marimo export ipynb` under the hood, so pin it as a hard dep.
     "nbformat>=5.0",

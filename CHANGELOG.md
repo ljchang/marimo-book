@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **marimo 0.25 is now supported.** The dependency bound is widened from
+  `marimo>=0.24,<0.25` to `marimo>=0.24,<0.26`, so `uv`/`pip` can upgrade
+  marimo past 0.24 alongside marimo-book. Verified against marimo 0.25.1:
+  test suite, a strict full rebuild of the docs book, and in-browser checks
+  of WASM islands, anywidgets and the in-browser workbench.
+
+### Fixed
+
+- **Pinned WASM dependencies stay pinned on marimo 0.25.** marimo 0.25 now
+  carries a notebook's PEP 723 dependencies in the islands payload
+  (marimo-team/marimo#10832, the upstream fix we asked for), but its
+  installer still drops version specifiers (marimo-team/marimo#10870). A pin
+  like `nltools==0.6.0.dev2` therefore failed to install as plain `nltools`
+  before marimo-book's own bootstrap installed the pinned version. The page
+  still worked, but the console showed an error and the browser downloaded
+  packages it didn't need. marimo-book now leaves that field out of the payload
+  it ships, so its pinned bootstrap is the only installer until the upstream
+  fix lands.
+
 ## [0.1.47] — 2026-09-23
 
 ### Fixed

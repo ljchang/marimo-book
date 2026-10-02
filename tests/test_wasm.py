@@ -269,6 +269,8 @@ def test_wasm_page_with_pypi_dep_ships_payload_bootstrap(tmp_path: Path) -> None
     assert script is not None, "payload script missing"
     payload = json.loads(script.string)
     assert payload["schemaVersion"] == 1
+    # marimo's native install (>= 0.25) would drop version pins; ours runs alone.
+    assert "dependencies" not in payload
 
     cells = payload["cells"]
     assert cells[0]["cellId"] == BOOTSTRAP_CELL_ID

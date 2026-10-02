@@ -3,12 +3,12 @@
 Two marimo scoping gaps left island output light on a dark page. Table
 stripes come from marimo's Radix scales, scoped ``.marimo .dark``, which never
 matches the ``dark`` class syncMarimoTheme puts on <body>: odd rows stayed
-``--lime-2`` under white text. Math is typeset inside each ``<marimo-tex>``
-shadow root, whose own ``.marimo`` wrapper pins the light ``--foreground``, so
-every equation stayed near-black. There is no JS test runner here; these pin
-the parts the fix depends on. It was checked against the live runtime in a
-browser (30 of 30 ``<marimo-tex>`` roots patched after the kernel re-render,
-math matching the surrounding text in both schemes).
+``--lime-2`` under white text. Math, callouts, UI elements and data tables render inside
+shadow roots, each with its own ``.marimo`` wrapper that resolves marimo's
+colour tokens light, so their text stayed near-black. There is no JS test
+runner here; these pin the parts the fix depends on. It was checked against
+the live runtime in a browser (100 of 100 marimo shadow roots patched, text
+in each matching the scheme, and a live scheme toggle re-theming them).
 """
 
 from __future__ import annotations
@@ -49,18 +49,36 @@ def test_island_dataframes_get_the_same_stripes():
     assert ".md-typeset .marimo table.dataframe tbody tr:hover" in CSS
 
 
-def test_math_inherits_the_surrounding_text_color():
-    # Page CSS can't cross the shadow boundary; the rule has to be adopted
-    # into each <marimo-tex> root.
-    fn = _function("inheritTexColor")
-    assert ":host .marimo { color: inherit; }" in fn
-    assert "adoptedStyleSheets" in fn
+def test_shadow_roots_flip_marimos_own_wrapper_to_dark():
+    # marimo declares its colour tokens on the `.marimo` wrapper inside each
+    # root; flipping the light/dark toggle there is what resolves them dark.
+    # Page CSS can't cross the shadow boundary, so it has to be adopted.
+    assert ":host .marimo { --csstools-color-scheme--light: ; color-scheme: dark; }" in JS
+    themed = _function("themeShadowRoots")
+    assert "adoptedStyleSheets" in themed
     # Idempotent by sheet membership, so a reassigned list gets it back.
-    assert "adoptedStyleSheets.includes(_texSheet)" in fn
+    assert "adoptedStyleSheets.includes(_shadowSheet)" in themed
+    # Every marimo element, not just math: callouts, dropdowns, tables...
+    assert 'startsWith("MARIMO-")' in themed
 
 
-def test_math_roots_are_patched_when_defined_and_on_re_render():
-    watch = _function("watchTex")
-    assert 'customElements.whenDefined("marimo-tex")' in watch
-    assert "new MutationObserver" in watch and "inheritTexColor(" in watch
-    assert "watchTex();" in JS
+def test_nested_roots_are_reached():
+    # Math inside a callout lives in a root inside a root.
+    themed = _function("themeShadowRoots")
+    assert "themeShadowRoots(sr)" in themed
+    assert "_shadowObserver.observe(sr" in themed
+
+
+def test_one_shared_sheet_follows_the_scheme_toggle():
+    # applyMarimoTheme runs at boot and on every scheme change; rewriting the
+    # shared sheet re-themes every adopted root at once.
+    assert "syncShadowSheet();" in _function("applyMarimoTheme")
+    assert "replaceSync(isDarkScheme() ? SHADOW_DARK_CSS" in _function("syncShadowSheet")
+
+
+def test_roots_are_patched_when_defined_and_on_re_render():
+    watch = _function("watchShadowRoots")
+    assert "customElements.whenDefined(tag)" in watch
+    assert ":not(:defined)" in watch
+    assert "new MutationObserver" in watch and "themeShadowRoots(n)" in watch
+    assert "watchShadowRoots();" in _function("bootAll")

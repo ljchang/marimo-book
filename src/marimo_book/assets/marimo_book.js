@@ -1061,6 +1061,7 @@
     const body = document.body;
     body.classList.toggle("dark", scheme === "dark");
     body.dataset.theme = scheme;
+    syncShadowSheet();
     if (reactive) {
       body.dataset.vscodeThemeKind =
         scheme === "dark" ? "vscode-dark" : "vscode-light";
@@ -1084,6 +1085,76 @@
       attributes: true,
       attributeFilter: ["data-md-color-scheme"],
     });
+  }
+
+  // --- Dark scheme inside marimo's shadow roots ------------------------------
+  //
+  // marimo renders much of an island's output into shadow roots: math
+  // (<marimo-tex>), callouts, UI elements (<marimo-dropdown>, sliders, ...),
+  // data tables. Each root has a `.marimo` wrapper of its own, which is where
+  // marimo declares its colour tokens, and it picks their light or dark values
+  // with `.marimo:is(.dark *)`, which can't see the `dark` class on <body>
+  // across the shadow boundary. So the tokens resolve light, and text in all
+  // of those outputs stayed near-black on the dark page. (marimo also stamps
+  // `dark` on an inner `.contents`, but by then the tokens are resolved.) No
+  // page stylesheet reaches in there, so adopt one shared sheet into every
+  // root that flips the wrapper itself; rewriting that one sheet re-themes
+  // every root at once when the reader toggles the scheme. Roots nest (math
+  // inside a callout), so each patched root is scanned and watched too.
+  const SHADOW_DARK_CSS =
+    ":host .marimo { --csstools-color-scheme--light: ; color-scheme: dark; }";
+  const _shadowSheet =
+    typeof CSSStyleSheet !== "undefined" && "replaceSync" in CSSStyleSheet.prototype
+      ? new CSSStyleSheet()
+      : null;
+  const _watchedRoots = new WeakSet();
+  let _shadowObserver = null;
+  function syncShadowSheet() {
+    if (_shadowSheet) _shadowSheet.replaceSync(isDarkScheme() ? SHADOW_DARK_CSS : "");
+  }
+  function themeShadowRoots(scope) {
+    if (!_shadowSheet || !scope) return;
+    const els = scope instanceof Element ? [scope, ...scope.querySelectorAll("*")] : scope.querySelectorAll("*");
+    for (const el of els) {
+      const sr = el.shadowRoot;
+      if (!sr || !el.tagName.startsWith("MARIMO-")) continue;
+      // Checking the root's sheet list (rather than marking the element)
+      // re-applies the sheet if marimo ever reassigns that list.
+      if (!sr.adoptedStyleSheets.includes(_shadowSheet)) {
+        sr.adoptedStyleSheets = [...sr.adoptedStyleSheets, _shadowSheet];
+      }
+      if (!_watchedRoots.has(sr)) {
+        _watchedRoots.add(sr);
+        if (_shadowObserver) _shadowObserver.observe(sr, { childList: true, subtree: true });
+        themeShadowRoots(sr);
+      }
+    }
+  }
+  // A root exists only once marimo's runtime has defined its element, and
+  // islands re-render (new elements) as the kernel runs, so cover both:
+  // rescan when each marimo element still pending at boot is defined, and
+  // scan whatever gets added afterwards.
+  function watchShadowRoots() {
+    if (_shadowObserver || !_shadowSheet || typeof MutationObserver === "undefined") return;
+    syncShadowSheet();
+    _shadowObserver = new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (n instanceof Element) themeShadowRoots(n);
+        }
+      }
+    });
+    _shadowObserver.observe(document.documentElement, { childList: true, subtree: true });
+    if (typeof customElements !== "undefined") {
+      const pending = new Set();
+      for (const el of document.querySelectorAll(":not(:defined)")) {
+        if (el.localName.startsWith("marimo-")) pending.add(el.localName);
+      }
+      for (const tag of pending) {
+        customElements.whenDefined(tag).then(() => themeShadowRoots(document));
+      }
+    }
+    themeShadowRoots(document);
   }
 
   // --- Release-download component ------------------------------------------
@@ -1369,6 +1440,7 @@
     hydrateVega(scope);
     watchSchemeForVega();
     syncMarimoTheme();
+    watchShadowRoots();
     hydrateReleaseDownloads(scope);
   }
 

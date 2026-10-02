@@ -633,6 +633,25 @@ marimo-island {
 marimo-island[data-cell-id]:first-of-type marimo-cell-output svg.animate-spin {
   display: none;
 }
+/* Markdown and DataFrame tables inside islands. marimo stripes their rows
+   with its Radix scales (odd rows `--lime-2`, hover `--yellow-4`), and those
+   scales are scoped `.marimo .dark`, which never matches the `dark` class
+   that syncMarimoTheme puts on <body>, so they stay light. The row text
+   follows the dark scheme, though, which left white text on a near-white
+   stripe in dark mode. Stripe with Material's tokens instead, matching the
+   static `.marimo-book-output` tables above. */
+.md-typeset .marimo .markdown table tbody tr:nth-child(odd),
+.md-typeset .marimo table.dataframe tbody tr:nth-child(odd) {
+  background: transparent;
+}
+.md-typeset .marimo .markdown table tbody tr:nth-child(2n),
+.md-typeset .marimo table.dataframe tbody tr:nth-child(2n) {
+  background: var(--md-default-bg-color--light);
+}
+.md-typeset .marimo .markdown table tbody tr:hover,
+.md-typeset .marimo table.dataframe tbody tr:hover {
+  background: var(--md-accent-fg-color--transparent);
+}
 
 /* --- Static reactivity (precompute) -------------------------------------- */
 /* Renders for the input control + the cell-swap target. Kept minimal; sits

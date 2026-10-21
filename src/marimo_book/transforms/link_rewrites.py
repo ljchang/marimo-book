@@ -1,11 +1,15 @@
 """Content-level link rewrites applied to both Markdown and marimo output.
 
-Two small fixes that pay off across the whole book:
+Three small fixes that pay off across the whole book:
 
 - ``rewrite_ipynb_links`` rewrites ``[text](Foo.ipynb)`` → ``[text](Foo.md)``
   when ``Foo.md`` exists among the staged pages. After the marimo-book
   preprocessor converts ``.py`` → ``.md``, any in-notebook prose that linked
   to a sibling as ``Connectivity.ipynb`` would otherwise 404.
+- ``rewrite_file_query_links`` rewrites ``[text](?file=Foo.py)`` →
+  ``[text](Foo.md)`` when ``Foo.md`` exists among the staged pages.
+  ``?file=`` opens a notebook in the marimo app and is inert on a
+  static page.
 - ``rewrite_parent_image_paths`` rewrites ``(../images/...)`` → ``(images/...)``
   when a content file originally at ``content/foo.md`` referenced
   ``../images/bar.pdf`` to reach a sibling at repo-root ``images/bar.pdf``.
@@ -13,7 +17,7 @@ Two small fixes that pay off across the whole book:
   beside it), the ``../`` is wrong — mkdocs even suggests the fix in its
   warning text.
 
-Both transforms are regex-based, safe on HTML, and idempotent.
+All transforms are regex-based, safe on HTML, and idempotent.
 """
 
 from __future__ import annotations
@@ -56,6 +60,57 @@ def rewrite_ipynb_links(markdown: str, md_basenames: set[str]) -> str:
     return _IPYNB_LINK_RE.sub(sub, markdown)
 
 
+# ``[text](?file=Foo.py)`` — marimo's notebook-file query. Path and
+# trailing fragment/query are kept so the replacement can stitch them back.
+_FILE_QUERY_MD_RE = re.compile(
+    r"""
+    (?P<prefix>\]\()               # opening ]( of a Markdown link
+    (?!https?://)                  # skip absolute URLs
+    \?file=                        # marimo's notebook-file query param
+    (?P<path>[^)#?\s]+?)(?:\.py)?  # notebook path, .py optional
+    (?P<suffix>[)#?])              # trailing )  #fragment  or ?query
+    """,
+    re.VERBOSE,
+)
+
+_FILE_QUERY_HTML_RE = re.compile(
+    r"""
+    (?P<prefix>\bhref\s*=\s*["'])  # href="  or  href='
+    (?!https?://)                  # skip absolute URLs
+    \?file=
+    (?P<path>[^"'#\s]+?)(?:\.py)?
+    (?=["'])                       # closing quote
+    """,
+    re.VERBOSE,
+)
+
+
+def rewrite_file_query_links(markdown: str, md_basenames: set[str]) -> str:
+    """Rewrite ``?file=stem.py`` cross-refs to ``stem.md`` when the page exists.
+
+    ``md_basenames`` is the set of page names (without extension, without
+    directory) that the preprocessor staged. Links whose stem isn't in that
+    set are left alone.
+    """
+
+    def sub(match: re.Match) -> str:
+        path = match.group("path")
+        stem = path.rsplit("/", 1)[-1]
+        if stem not in md_basenames:
+            return match.group(0)
+        return match.group("prefix") + path + ".md" + match.group("suffix")
+
+    def sub_html(match: re.Match) -> str:
+        path = match.group("path")
+        stem = path.rsplit("/", 1)[-1]
+        if stem not in md_basenames:
+            return match.group(0)
+        return match.group("prefix") + path + ".md"
+
+    markdown = _FILE_QUERY_MD_RE.sub(sub, markdown)
+    return _FILE_QUERY_HTML_RE.sub(sub_html, markdown)
+
+
 # Matches ``](../images/...)``, ``]("../images/...")``, and the same patterns
 # inside HTML attributes. The leading ``../`` becomes unnecessary once the
 # content tree is flattened from ``content/X.md`` to ``docs/X.md`` sitting
@@ -92,5 +147,6 @@ def apply_link_rewrites(markdown: str, *, md_basenames: set[str] | None = None) 
     """Run every link-rewrite transform in sequence."""
     if md_basenames:
         markdown = rewrite_ipynb_links(markdown, md_basenames)
+        markdown = rewrite_file_query_links(markdown, md_basenames)
     markdown = rewrite_parent_image_paths(markdown)
     return markdown

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from marimo_book.transforms.link_rewrites import (
     apply_link_rewrites,
+    rewrite_file_query_links,
     rewrite_ipynb_links,
     rewrite_parent_image_paths,
 )
@@ -41,6 +42,45 @@ def test_absolute_url_ipynb_left_alone() -> None:
     assert out == md  # absolute URL skipped
 
 
+# --- rewrite_file_query_links ------------------------------------------------
+
+
+def test_file_query_link_rewritten_when_target_exists() -> None:
+    md = "See [`next`](?file=next.py) for details."
+    out = rewrite_file_query_links(md, {"next"})
+    assert out == "See [`next`](next.md) for details."
+
+
+def test_file_query_link_preserved_when_target_unknown() -> None:
+    md = "See [example](?file=external.py)."
+    out = rewrite_file_query_links(md, {"next"})
+    assert out == md  # unchanged
+
+
+def test_file_query_link_with_fragment_rewritten() -> None:
+    md = "See [this](?file=GLM.py#hrf) section."
+    out = rewrite_file_query_links(md, {"GLM"})
+    assert out == "See [this](GLM.md#hrf) section."
+
+
+def test_file_query_link_without_py_suffix_rewritten() -> None:
+    md = "See [`next`](?file=next) for details."
+    out = rewrite_file_query_links(md, {"next"})
+    assert out == "See [`next`](next.md) for details."
+
+
+def test_absolute_url_file_query_left_alone() -> None:
+    md = "See [original](https://example.com/?file=Foo.py)."
+    out = rewrite_file_query_links(md, {"Foo"})
+    assert out == md  # absolute URL skipped
+
+
+def test_file_query_html_href_rewritten() -> None:
+    md = '<a href="?file=next.py"><code>next</code></a>'
+    out = rewrite_file_query_links(md, {"next"})
+    assert out == '<a href="next.md"><code>next</code></a>'
+
+
 # --- rewrite_parent_image_paths ----------------------------------------------
 
 
@@ -71,15 +111,19 @@ def test_non_parent_images_left_alone() -> None:
 # --- apply_link_rewrites (integration) --------------------------------------
 
 
-def test_apply_link_rewrites_runs_both() -> None:
-    md = "[next](GLM.ipynb) and ![fig](../images/bar.png)"
-    out = apply_link_rewrites(md, md_basenames={"GLM"})
-    assert "[next](GLM.md)" in out
+def test_apply_link_rewrites_runs_all() -> None:
+    md = (
+        "[a](GLM.ipynb) [b](?file=next.py) and ![fig](../images/bar.png)"
+    )
+    out = apply_link_rewrites(md, md_basenames={"GLM", "next"})
+    assert "[a](GLM.md)" in out
+    assert "[b](next.md)" in out
     assert "![fig](images/bar.png)" in out
 
 
-def test_apply_link_rewrites_without_basenames_skips_ipynb() -> None:
-    md = "[x](GLM.ipynb) and ![f](../images/bar.png)"
+def test_apply_link_rewrites_without_basenames_skips_page_links() -> None:
+    md = "[x](GLM.ipynb) [y](?file=next.py) and ![f](../images/bar.png)"
     out = apply_link_rewrites(md, md_basenames=None)
     assert "GLM.ipynb" in out  # ipynb untouched
+    assert "?file=next.py" in out  # file query untouched
     assert "images/bar.png" in out  # image path still rewritten
